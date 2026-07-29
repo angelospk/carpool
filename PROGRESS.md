@@ -67,21 +67,17 @@ scripts/build-osrm.sh osrm-data/evros-buffered.osm.pbf
       block-aware) with an EXPLAIN index assertion and the full geometry table;
       stage-2 OSRM insertion detour with the 2-party cap; ranking with a total
       tie-break; suggested-contribution formula.
-- [ ] **M4 Ask/booking lifecycle** — mostly done.
-  - [x] outbox: transactional enqueue, leased dispatcher, exponential backoff,
-        dead-lettering, permanent-failure classification, concurrent dispatchers
-  - [x] accept transaction: canonical lock order, optimistic itinerary-version
-        re-check with OSRM kept outside the transaction, seat reservation,
-        version bump, passenger notification enqueued in the same transaction
-  - [x] decline and the ask-expiry sweeper, both requeuing the next candidate
-  - [ ] candidate selection (gross+fine → create the next ask) wired end to end
-  - [ ] Expo push client behind an interface, with a fake for tests
-  - [ ] HTTP endpoints: `POST /asks/{id}/accept` | `/decline`, `POST /requests`
-  - [ ] e2e: request → ask → accept → booking, and ask-expiry → next candidate
-- [ ] **M5 Trips & social** — not started.
+- [x] **M4 Ask/booking lifecycle** — outbox with leased dispatcher, per-claim
+      fencing, backoff, dead-lettering; sequential asks with TTL + sweeper;
+      transactional accept with optimistic itinerary re-verification; Expo push
+      behind an interface; `POST /routes`, `POST /requests`,
+      `POST /asks/{id}/accept|decline`, `PUT /me/push-token`; background workers
+      in `cmd/api`; `scripts/e2e.sh` drives the whole journey over real HTTP.
+- [ ] **M5 Trips & social** — not started. Trip endpoints, confirm/complete,
+      ratings, chat (REST + ws hub), report/block.
 - [ ] **M6 Expo app** — not started.
-- [ ] **M7 Deploy readiness** — RAM measured; prod compose, backups and the
-      restore drill not started.
+- [ ] **M7 Deploy readiness** — RAM measured; production compose, backup +
+      restore drill and the final numbers outstanding.
 
 ## Deviations from spec
 
@@ -100,15 +96,53 @@ required, not optional** — whole-Greece serving RSS is 1.15 GB against the
 200–500 MB DEPLOYMENT.md assumed, which would leave no headroom on a 2 GB VPS.
 The Evros clip is 39 MB for identical in-region routes.
 
+## Adversarial review (Codex, high effort)
+
+Two rounds, both against the real code rather than the plan. Round 1 covered the
+accept and outbox paths, round 2 the materializer and insertion search. Fifteen
+findings were real and are fixed; each fix landed with a regression test. The
+ones worth remembering:
+
+- **Outbox results were unfenced.** A worker whose lease expired mid-delivery
+  could clear a newer owner's lease, or mark dead a message the new owner had
+  already delivered. Results now carry a per-claim token.
+- **MaxAttempts was unenforceable.** Attempts are spent at claim time, but
+  dead-lettering only happened on a reported failure, so a message that kept
+  killing its worker retried forever. Exhausted messages are now retired at claim.
+- **Clock domains were mixed, twice.** `run_after` and the materializer's
+  "has it departed" test used SQL `now()` while every comparison used the
+  injected clock. They agreed only by coincidence of the fixture dates.
+- **The materializer never applied edits.** It only inserted missing rows, so a
+  changed departure time never reached an existing occurrence, and a date
+  cancelled by a since-lifted exception was blocked forever by its tombstone.
+- **Cancellation had no upper bound**, so every occurrence beyond the horizon
+  looked unwanted.
+- **The insertion search gave up on the first unroutable ordering**, silently
+  dropping drivers a different ordering would have served.
+
+Two findings were false positives caused by the excerpt sent for review: the
+`bookings_one_live_per_request` partial unique index and the `asks_one_pending`
+index already enforce invariants Codex flagged as missing. Verified rather than
+assumed before dismissing.
+
 ## Notes on method
 
 - Every unit was written test-first; each test was watched failing before the
   implementation existed.
-- The two highest-risk assertions were mutation-tested rather than trusted:
-  dropping the geography index makes the EXPLAIN test fail, and removing both the
-  ordering check and the distance floor makes reverse and crossing routes match.
-  Removing *either alone* does not — the floor subsumes the direction check,
-  because a backwards overlap computes as a negative distance.
+- Key assertions were mutation-tested rather than trusted:
+  - dropping the geography index makes the EXPLAIN test fail;
+  - removing both the ordering check and the distance floor makes reverse and
+    crossing routes match, while removing *either alone* does not — the floor
+    subsumes the direction check, since a backwards overlap computes as negative;
+  - removing the occurrence row lock does *not* cause overbooking, because the
+    `seats_free >= 0` CHECK rejects the second decrement. The lock buys the clean
+    error, the constraint buys the invariant;
+  - disabling the requeue guard does re-ask a driver for an already-matched
+    request.
+- The e2e script runs against the real API, real PostGIS and real OSRM. Its
+  computed detour (14.3 min) matched an independent OSRM calculation exactly, and
+  the default 10-minute budget correctly refused that ride until the driver
+  widened it.
 - Codex reviewed the plan at high effort before any code was written; the adopted
   and rejected corrections are listed below.
 
@@ -129,11 +163,8 @@ for a pilot).
 
 ## Next steps
 
-1. Finish M4: candidate selection (run gross → fine → create ask for the top
-   candidate), the Expo push client behind an interface, the accept/decline and
-   request HTTP endpoints, and the end-to-end scenario test.
-2. M5: trip endpoints, confirm/complete, ratings, chat (REST + ws hub),
-   report/block.
-3. M6: the Expo app per MOBILE.md, pointed at this machine.
-4. M7: production compose (without the dev fsync settings), `.env.example`
-   review, backup + restore drill, and the final measured RSS table.
+1. M5: trip endpoints, confirm/complete, ratings, chat (REST + ws hub via
+   `github.com/coder/websocket`), report/block.
+2. M6: the Expo app per MOBILE.md, pointed at this machine.
+3. M7: production compose (without the dev fsync settings), backup + restore
+   drill, and the final measured RSS table.
