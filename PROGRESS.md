@@ -13,9 +13,9 @@ Definition of Done, as measured on this machine:
 | --- | --- |
 | `make check` (vet + staticcheck + tests) | green |
 | Concurrency packages under `-race` | green |
-| App `tsc --noEmit` + `jest` | clean, 25 tests |
+| App `tsc --noEmit` + `jest` | clean, 28 tests |
 | Android bundle exports | 2.9 MB Hermes |
-| e2e scenario from a fresh database | passes |
+| e2e scenario from a fresh database | passes (12 steps) |
 | Backup + restore drill | passes |
 | RAM measured | ≈ 330 MiB whole stack |
 
