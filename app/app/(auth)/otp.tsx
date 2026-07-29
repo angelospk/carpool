@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, TextInput } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 
 import { api, type Region } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
-import { Button, Hint, Screen, Title, colors } from '../../src/components/ui';
+import { Button, Card, Hint, Screen, Title } from '../../src/components/ui';
+import { colors, radius, space, type } from '../../src/design/tokens';
 
 export default function OtpScreen() {
   const { t } = useTranslation();
@@ -34,19 +35,30 @@ export default function OtpScreen() {
 
   return (
     <Screen>
-      <Title>{t('auth.otpTitle')}</Title>
-      <Hint>{t('auth.otpHint')}</Hint>
-      <TextInput
-        testID="otp-input"
-        style={styles.input}
-        value={code}
-        onChangeText={(v) => setCode(v.replace(/\D/g, '').slice(0, 6))}
-        keyboardType="number-pad"
-        autoComplete="sms-otp"
-        textContentType="oneTimeCode"
-        maxLength={6}
-      />
+      <View style={styles.top}>
+        <Title>{t('auth.otpTitle')}</Title>
+        <Hint>{t('auth.otpHint')}</Hint>
+      </View>
+
+      <Card>
+        <TextInput
+          testID="otp-input"
+          style={styles.input}
+          value={code}
+          onChangeText={(v) => setCode(v.replace(/\D/g, '').slice(0, 6))}
+          keyboardType="number-pad"
+          autoComplete="sms-otp"
+          textContentType="oneTimeCode"
+          maxLength={6}
+          placeholder="······"
+          placeholderTextColor={colors.line}
+        />
+      </Card>
+
       {error ? <Hint>{error}</Hint> : null}
+
+      <View style={styles.spacer} />
+
       <Button
         testID="otp-submit"
         label={t('common.next')}
@@ -58,13 +70,16 @@ export default function OtpScreen() {
 }
 
 const styles = StyleSheet.create({
+  top: { gap: space.sm },
+  spacer: { flex: 1 },
   input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 28,
-    letterSpacing: 8,
+    ...type.display,
+    fontSize: 32,
+    letterSpacing: 12,
     textAlign: 'center',
+    color: colors.ink,
+    backgroundColor: colors.sunken,
+    borderRadius: radius.inner,
+    paddingVertical: space.lg,
   },
 });

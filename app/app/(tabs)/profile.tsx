@@ -1,8 +1,9 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
 import { useSession } from '../../src/state/session';
-import { Button, Screen, Title, colors } from '../../src/components/ui';
+import { Avatar, Button, Card, Row, Screen, SectionHeader } from '../../src/components/ui';
+import { colors, space, type } from '../../src/design/tokens';
 
 export default function ProfileScreen() {
   const { t } = useTranslation();
@@ -11,25 +12,45 @@ export default function ProfileScreen() {
 
   return (
     <Screen>
-      <Title>{me?.name ?? t('profile.title')}</Title>
-      <View style={styles.field}>
-        <Text style={styles.label}>{t('auth.phoneTitle')}</Text>
-        <Text testID="profile-phone" style={styles.value}>
-          {me?.phone}
-        </Text>
-      </View>
-      <Button
-        testID="sign-out"
-        label={t('profile.signOut')}
-        variant="danger"
-        onPress={() => void signOut()}
-      />
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <Card>
+          <View style={styles.identity}>
+            <Avatar name={me?.name ?? '·'} photoUrl={me?.photo_url} size={64} />
+            <View style={styles.who}>
+              <Text style={styles.name}>{me?.name ?? t('profile.title')}</Text>
+              <Text testID="profile-phone" style={styles.phone}>
+                {me?.phone}
+              </Text>
+            </View>
+          </View>
+        </Card>
+
+        <SectionHeader title={t('profile.settings')} />
+        <Card>
+          <Row
+            label={t('profile.womenOnly')}
+            value={me?.women_only ? t('common.on') : t('common.off')}
+          />
+          <View style={styles.divider} />
+          <Row label={t('profile.language')} value="Ελληνικά" />
+        </Card>
+
+        <Button
+          testID="sign-out"
+          label={t('profile.signOut')}
+          variant="danger"
+          onPress={() => void signOut()}
+        />
+      </ScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  field: { gap: 4, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
-  label: { fontSize: 13, color: colors.muted },
-  value: { fontSize: 17, color: colors.text },
+  body: { gap: space.md, paddingBottom: 140 },
+  identity: { flexDirection: 'row', alignItems: 'center', gap: space.lg },
+  who: { gap: 2 },
+  name: { ...type.title, color: colors.ink },
+  phone: { ...type.caption, color: colors.muted },
+  divider: { height: 1, backgroundColor: colors.line },
 });

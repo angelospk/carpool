@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { StyleSheet, TextInput } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 
 import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
-import { Button, Hint, Screen, Title, colors } from '../../src/components/ui';
+import { Button, Card, Field, Hint, Screen, Title } from '../../src/components/ui';
+import { space } from '../../src/design/tokens';
 
 export default function PhoneScreen() {
   const { t } = useTranslation();
@@ -38,18 +39,27 @@ export default function PhoneScreen() {
 
   return (
     <Screen>
-      <Title>{t('auth.phoneTitle')}</Title>
-      <Hint>{t('auth.phoneHint')}</Hint>
-      <TextInput
-        testID="phone-input"
-        style={styles.input}
-        value={phone}
-        onChangeText={setPhone}
-        keyboardType="phone-pad"
-        autoComplete="tel"
-        placeholder={t('auth.phonePlaceholder')}
-      />
+      <View style={styles.top}>
+        <Title>{t('auth.phoneTitle')}</Title>
+        <Hint>{t('auth.phoneHint')}</Hint>
+      </View>
+
+      <Card>
+        <Field
+          testID="phone-input"
+          label={t('auth.phoneTitle')}
+          value={phone}
+          onChangeText={setPhone}
+          keyboardType="phone-pad"
+          placeholder={t('auth.phonePlaceholder')}
+          valid={valid}
+        />
+      </Card>
+
       {error ? <Hint>{error}</Hint> : null}
+
+      <View style={styles.spacer} />
+
       <Button
         testID="phone-submit"
         label={t('common.next')}
@@ -61,11 +71,6 @@ export default function PhoneScreen() {
 }
 
 const styles = StyleSheet.create({
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 18,
-  },
+  top: { gap: space.sm },
+  spacer: { flex: 1 },
 });

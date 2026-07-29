@@ -1,76 +1,94 @@
 {
-  "common": {
-    "next": "Continue",
-    "cancel": "Cancel",
-    "retry": "Try again",
-    "loading": "Loading…",
-    "error": "Something went wrong",
-    "offline": "No connection"
-  },
-  "auth": {
-    "phoneTitle": "Your number",
-    "phoneHint": "We'll send you a verification code.",
-    "phonePlaceholder": "+30 690 000 0000",
-    "otpTitle": "The code",
-    "otpHint": "Six digits, valid for 5 minutes.",
-    "invalidCode": "Wrong or expired code",
-    "tooManyRequests": "Too many attempts. Try again shortly.",
-    "profileTitle": "Tell us a little about you",
-    "namePlaceholder": "Your name",
-    "region": "Region"
-  },
-  "home": {
-    "title": "Your trips",
-    "empty": "You have no upcoming trips.",
-    "asDriver": "Driving",
-    "asPassenger": "Riding"
-  },
-  "search": {
-    "title": "Find a ride",
-    "from": "From",
-    "to": "To",
-    "when": "When",
-    "seats": "Seats",
-    "post": "Send request",
-    "asking": "Asking a driver…",
-    "noDrivers": "No driver right now. We'll let you know."
-  },
-  "publish": {
-    "title": "Publish a route",
-    "seats": "Seats",
-    "recurring": "Recurring",
-    "oneoff": "One-off",
-    "departWindow": "Departure time",
-    "publish": "Publish",
-    "published": "Route published"
-  },
   "ask": {
-    "title": "New request",
-    "detour": "+{{minutes}} min, +{{km}} km",
-    "suggested": "suggested contribution",
     "accept": "Accept",
+    "closed": "This request was already answered",
     "decline": "Not now",
+    "detour": "+{{minutes}} min, +{{km}} km",
     "expired": "This request expired",
     "noSeats": "No free seats left",
-    "closed": "This request was already answered"
+    "suggested": "suggested contribution",
+    "title": "New request",
+    "waiting": "Waiting for an answer"
   },
-  "trip": {
-    "driver": "Driver",
-    "passengers": "Passengers",
-    "plate": "Plate",
-    "confirm": "The ride happened",
-    "notDeparted": "You can confirm once the trip sets off",
-    "rate": "Rate",
-    "rated": "Thank you!",
-    "chat": "Chat",
-    "messagePlaceholder": "Write a message…",
-    "send": "Send"
+  "auth": {
+    "invalidCode": "Wrong or expired code",
+    "namePlaceholder": "Your name",
+    "otpHint": "Six digits, valid for 5 minutes.",
+    "otpTitle": "The code",
+    "phoneHint": "We'll send you a verification code.",
+    "phonePlaceholder": "+30 690 000 0000",
+    "phoneTitle": "Your number",
+    "profileTitle": "Tell us a little about you",
+    "region": "Region",
+    "tooManyRequests": "Too many attempts. Try again shortly."
+  },
+  "common": {
+    "cancel": "Cancel",
+    "error": "Something went wrong",
+    "loading": "Loading…",
+    "next": "Continue",
+    "off": "Off",
+    "offline": "No connection",
+    "on": "On",
+    "retry": "Try again"
+  },
+  "home": {
+    "asDriver": "Driving",
+    "asPassenger": "Riding",
+    "empty": "You have no upcoming trips.",
+    "greeting": "Good morning",
+    "title": "Your trips",
+    "upcoming": "Upcoming trips"
   },
   "profile": {
-    "title": "Your profile",
-    "signOut": "Sign out",
     "car": "Your car",
     "detourBudget": "Maximum detour",
-    "notifyRadius": "Notification radius"
+    "language": "Language",
+    "notifyRadius": "Notification radius",
+    "settings": "Settings",
+    "signOut": "Sign out",
+    "title": "Your profile",
+    "womenOnly": "Women only"
+  },
+  "publish": {
+    "departWindow": "Departure time",
+    "from": "From",
+    "oneoff": "One-off",
+    "publish": "Publish",
+    "published": "Route published",
+    "recurring": "Recurring",
+    "route": "Route",
+    "schedule": "Schedule",
+    "seats": "Seats",
+    "title": "Publish a route",
+    "until": "Until"
+  },
+  "search": {
+    "asking": "Asking a driver…",
+    "from": "From",
+    "noDrivers": "No driver right now. We'll let you know.",
+    "post": "Send request",
+    "seats": "Seats",
+    "title": "Find a ride",
+    "to": "To",
+    "when": "When"
+  },
+  "trip": {
+    "chat": "Chat",
+    "confirm": "The ride happened",
+    "driver": "Driver",
+    "messagePlaceholder": "Write a message…",
+    "notDeparted": "You can confirm once the trip sets off",
+    "passengers": "Passengers",
+    "plate": "Plate",
+    "rate": "Rate",
+    "rated": "Thank you!",
+    "send": "Send"
+  },
+  "user": {
+    "block": "Block",
+    "blocked": "User blocked",
+    "report": "Report",
+    "reported": "Report sent"
   }
 }

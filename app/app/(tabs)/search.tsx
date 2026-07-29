@@ -1,25 +1,25 @@
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 
 import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
-import { Button, Hint, Screen, Title, colors } from '../../src/components/ui';
-
-// A pin is a coordinate plus the label the user recognises it by. The map picker
-// fills both; typing coordinates directly is the fallback while the pilot runs
-// without a geocoder.
-type Pin = { lon: number; lat: number; label: string };
+import { Button, Card, Field, Hint, Screen, Stepper, Title } from '../../src/components/ui';
+import { colors, space, type } from '../../src/design/tokens';
+import { parsePin, type Pin } from '../../src/design/pin';
 
 export default function SearchScreen() {
   const { t } = useTranslation();
   const router = useRouter();
-  const [from, setFrom] = useState<Pin | null>(null);
-  const [to, setTo] = useState<Pin | null>(null);
-  const [seats, setSeats] = useState('1');
+  const [fromText, setFromText] = useState('');
+  const [toText, setToText] = useState('');
+  const [seats, setSeats] = useState(1);
   const [outcome, setOutcome] = useState<string | null>(null);
+
+  const from = parsePin(fromText);
+  const to = parsePin(toText);
 
   const create = useMutation({
     mutationFn: () => {
@@ -27,15 +27,15 @@ export default function SearchScreen() {
       const start = new Date();
       const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
       return api.createRequest({
-        origin_lon: from!.lon,
-        origin_lat: from!.lat,
-        destination_lon: to!.lon,
-        destination_lat: to!.lat,
-        origin_label: from!.label,
-        destination_label: to!.label,
+        origin_lon: (from as Pin).lon,
+        origin_lat: (from as Pin).lat,
+        destination_lon: (to as Pin).lon,
+        destination_lat: (to as Pin).lat,
+        origin_label: (from as Pin).label,
+        destination_label: (to as Pin).label,
         window_start: start.toISOString(),
         window_end: end.toISOString(),
-        seats: Number(seats) || 1,
+        seats,
       });
     },
     onSuccess: (res) => {
@@ -46,78 +46,71 @@ export default function SearchScreen() {
     },
     onError: (e) =>
       setOutcome(
-        e instanceof ApiError && e.code === 'outside_region'
-          ? e.message
-          : t('common.error'),
+        e instanceof ApiError && e.code === 'outside_region' ? e.message : t('common.error'),
       ),
   });
 
   return (
     <Screen>
-      <Title>{t('search.title')}</Title>
-      <PinField testID="from" label={t('search.from')} pin={from} onChange={setFrom} />
-      <PinField testID="to" label={t('search.to')} pin={to} onChange={setTo} />
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <Title>{t('search.title')}</Title>
 
-      <Text style={styles.label}>{t('search.seats')}</Text>
-      <TextInput
-        testID="seats-input"
-        style={styles.input}
-        value={seats}
-        onChangeText={(v) => setSeats(v.replace(/\D/g, '').slice(0, 1))}
-        keyboardType="number-pad"
-      />
+        <Card>
+          <View style={styles.pins}>
+            <View style={styles.rail}>
+              <View style={[styles.dot, from && styles.dotSet]} />
+              <View style={styles.line} />
+              <View style={[styles.dot, to && styles.dotSet]} />
+            </View>
+            <View style={styles.fields}>
+              <Field
+                testID="from-input"
+                label={t('search.from')}
+                value={fromText}
+                onChangeText={setFromText}
+                placeholder="25.87, 40.85 Αλεξανδρούπολη"
+                autoCapitalize="none"
+                valid={!!from}
+              />
+              <Field
+                testID="to-input"
+                label={t('search.to')}
+                value={toText}
+                onChangeText={setToText}
+                placeholder="25.40, 41.12 Κομοτηνή"
+                autoCapitalize="none"
+                valid={!!to}
+              />
+            </View>
+          </View>
 
-      {outcome ? <Hint>{outcome}</Hint> : null}
-      <Button
-        testID="search-submit"
-        label={t('search.post')}
-        onPress={() => create.mutate()}
-        disabled={!from || !to || create.isPending}
-      />
+          <View style={styles.seats}>
+            <Text style={styles.seatsLabel}>{t('search.seats')}</Text>
+            <Stepper testID="seats" value={seats} onChange={setSeats} min={1} max={4} />
+          </View>
+        </Card>
+
+        {outcome ? <Hint>{outcome}</Hint> : null}
+
+        <Button
+          testID="search-submit"
+          label={t('search.post')}
+          onPress={() => create.mutate()}
+          disabled={!from || !to || create.isPending}
+        />
+      </ScrollView>
     </Screen>
   );
 }
 
-function PinField({
-  testID,
-  label,
-  pin,
-  onChange,
-}: {
-  testID: string;
-  label: string;
-  pin: Pin | null;
-  onChange: (p: Pin | null) => void;
-}) {
-  const [text, setText] = useState('');
-
-  // "lon,lat Label" — deliberately blunt while there is no geocoder. The map
-  // picker replaces this without changing the shape it produces.
-  const parse = (value: string) => {
-    setText(value);
-    const m = value.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*(.*)$/);
-    if (!m) return onChange(null);
-    onChange({ lon: Number(m[1]), lat: Number(m[2]), label: m[3].trim() || value.trim() });
-  };
-
-  return (
-    <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput
-        testID={`${testID}-input`}
-        style={[styles.input, pin ? styles.inputValid : null]}
-        value={text}
-        onChangeText={parse}
-        placeholder="25.87, 40.85 Αλεξανδρούπολη"
-        autoCapitalize="none"
-      />
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  field: { gap: 4 },
-  label: { fontSize: 13, color: colors.muted },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, fontSize: 16 },
-  inputValid: { borderColor: colors.accent },
+  body: { gap: space.lg, paddingBottom: 140 },
+  pins: { flexDirection: 'row', gap: space.md },
+  rail: { alignItems: 'center', paddingVertical: 26 },
+  dot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2.5, borderColor: colors.line },
+  dotSet: { borderColor: colors.primary },
+  line: { flex: 1, width: 2, backgroundColor: colors.line, minHeight: 20 },
+  fields: { flex: 1, gap: space.sm },
+  seats: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  seatsLabel: { ...type.body, color: colors.ink },
 });

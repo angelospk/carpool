@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 
 import { api, type Region } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import { useSession } from '../../src/state/session';
-import { Button, Hint, Title, colors } from '../../src/components/ui';
+import { Button, Card, Field, Hint, Screen, Title } from '../../src/components/ui';
+import { colors, radius, space, type } from '../../src/design/tokens';
 
 export default function ProfileSetupScreen() {
   const { t } = useTranslation();
@@ -38,52 +39,67 @@ export default function ProfileSetupScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.screen}>
-      <Title>{t('auth.profileTitle')}</Title>
-      <TextInput
-        testID="name-input"
-        style={styles.input}
-        value={name}
-        onChangeText={setName}
-        placeholder={t('auth.namePlaceholder')}
-        autoComplete="name"
-      />
+    <Screen>
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <Title>{t('auth.profileTitle')}</Title>
 
-      <Hint>{t('auth.region')}</Hint>
-      <View style={styles.regions}>
-        {regions.map((r) => (
-          <Pressable
-            key={r.id}
-            testID={`region-${r.id}`}
-            onPress={() => setRegionId(r.id)}
-            style={[styles.region, regionId === r.id && styles.regionSelected]}
-          >
-            <Text style={regionId === r.id ? styles.regionLabelSelected : undefined}>{r.name}</Text>
-          </Pressable>
-        ))}
-      </View>
+        <Card>
+          <Field
+            testID="name-input"
+            label={t('auth.namePlaceholder')}
+            value={name}
+            onChangeText={setName}
+            placeholder={t('auth.namePlaceholder')}
+            valid={!!name.trim()}
+          />
+        </Card>
 
-      {error ? (
-        <Text testID="profile-error" style={styles.error}>
-          {error}
-        </Text>
-      ) : null}
-      <Button
-        testID="profile-submit"
-        label={t('common.next')}
-        onPress={submit}
-        disabled={!name.trim() || !regionId || busy}
-      />
-    </ScrollView>
+        <Hint>{t('auth.region')}</Hint>
+        <View style={styles.regions}>
+          {regions.map((r) => (
+            <Pressable
+              key={r.id}
+              testID={`region-${r.id}`}
+              accessibilityRole="button"
+              accessibilityState={{ selected: regionId === r.id }}
+              onPress={() => setRegionId(r.id)}
+              style={[styles.region, regionId === r.id && styles.regionSelected]}
+            >
+              <Text style={[styles.regionLabel, regionId === r.id && styles.regionLabelSelected]}>
+                {r.name}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {error ? (
+          <Text testID="profile-error" style={styles.error}>
+            {error}
+          </Text>
+        ) : null}
+
+        <Button
+          testID="profile-submit"
+          label={t('common.next')}
+          onPress={submit}
+          disabled={!name.trim() || !regionId || busy}
+        />
+      </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { padding: 20, gap: 12, backgroundColor: colors.bg, flexGrow: 1 },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 16, fontSize: 18 },
-  regions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  region: { borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingVertical: 10, paddingHorizontal: 16 },
-  regionSelected: { backgroundColor: colors.accent, borderColor: colors.accent },
-  regionLabelSelected: { color: '#fff', fontWeight: '600' },
-  error: { color: colors.danger },
+  body: { gap: space.md, paddingBottom: space.xxl },
+  regions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  region: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.pill,
+    paddingVertical: space.md,
+    paddingHorizontal: space.lg,
+  },
+  regionSelected: { backgroundColor: colors.primary },
+  regionLabel: { ...type.label, color: colors.ink },
+  regionLabelSelected: { color: colors.primaryInk },
+  error: { ...type.body, color: colors.danger },
 });

@@ -1,11 +1,23 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 
 import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
-import { Button, Hint, Title, colors } from '../../src/components/ui';
+import {
+  Button,
+  Card,
+  Chip,
+  Field,
+  Hint,
+  Screen,
+  SectionHeader,
+  Stepper,
+  Title,
+} from '../../src/components/ui';
+import { colors, space, type } from '../../src/design/tokens';
+import { parsePin, type Pin } from '../../src/design/pin';
 
 const WEEKDAYS = [
   { iso: 1, label: 'Δε' },
@@ -26,13 +38,8 @@ export default function PublishScreen() {
   const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [earliest, setEarliest] = useState('07:30');
   const [latest, setLatest] = useState('08:00');
-  const [seats, setSeats] = useState('3');
+  const [seats, setSeats] = useState(3);
   const [outcome, setOutcome] = useState<string | null>(null);
-
-  const parsePin = (s: string) => {
-    const m = s.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*(.*)$/);
-    return m ? { lon: Number(m[1]), lat: Number(m[2]), label: m[3].trim() || s.trim() } : null;
-  };
 
   const from = parsePin(origin);
   const to = parsePin(destination);
@@ -40,13 +47,13 @@ export default function PublishScreen() {
   const publish = useMutation({
     mutationFn: () =>
       api.publishRoute({
-        origin_lon: from!.lon,
-        origin_lat: from!.lat,
-        destination_lon: to!.lon,
-        destination_lat: to!.lat,
-        origin_label: from!.label,
-        destination_label: to!.label,
-        seats: Number(seats) || 3,
+        origin_lon: (from as Pin).lon,
+        origin_lat: (from as Pin).lat,
+        destination_lon: (to as Pin).lon,
+        destination_lat: (to as Pin).lat,
+        origin_label: (from as Pin).label,
+        destination_label: (to as Pin).label,
+        seats,
         kind: 'recurring',
         weekdays,
         depart_earliest: earliest,
@@ -55,9 +62,7 @@ export default function PublishScreen() {
     onSuccess: (r) => setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`),
     onError: (e) =>
       setOutcome(
-        e instanceof ApiError && e.code === 'no_driver_profile'
-          ? e.message
-          : t('common.error'),
+        e instanceof ApiError && e.code === 'no_driver_profile' ? e.message : t('common.error'),
       ),
   });
 
@@ -65,93 +70,89 @@ export default function PublishScreen() {
     setWeekdays((d) => (d.includes(iso) ? d.filter((x) => x !== iso) : [...d, iso].sort()));
 
   return (
-    <ScrollView contentContainerStyle={styles.screen}>
-      <Title>{t('publish.title')}</Title>
+    <Screen>
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <Title>{t('publish.title')}</Title>
 
-      <TextInput
-        testID="publish-origin"
-        style={styles.input}
-        value={origin}
-        onChangeText={setOrigin}
-        placeholder="25.87, 40.85 Αλεξανδρούπολη"
-        autoCapitalize="none"
-      />
-      <TextInput
-        testID="publish-destination"
-        style={styles.input}
-        value={destination}
-        onChangeText={setDestination}
-        placeholder="26.17, 40.90 Φέρες"
-        autoCapitalize="none"
-      />
+        <SectionHeader title={t('publish.route')} />
+        <Card>
+          <Field
+            testID="publish-origin"
+            label={t('search.from')}
+            value={origin}
+            onChangeText={setOrigin}
+            placeholder="25.87, 40.85 Αλεξανδρούπολη"
+            autoCapitalize="none"
+            valid={!!from}
+          />
+          <Field
+            testID="publish-destination"
+            label={t('search.to')}
+            value={destination}
+            onChangeText={setDestination}
+            placeholder="26.17, 40.90 Φέρες"
+            autoCapitalize="none"
+            valid={!!to}
+          />
+        </Card>
 
-      <Text style={styles.label}>{t('publish.recurring')}</Text>
-      <View style={styles.days}>
-        {WEEKDAYS.map((d) => (
-          <Pressable
-            key={d.iso}
-            testID={`weekday-${d.iso}`}
-            onPress={() => toggle(d.iso)}
-            style={[styles.day, weekdays.includes(d.iso) && styles.daySelected]}
-          >
-            <Text style={weekdays.includes(d.iso) ? styles.daySelectedLabel : undefined}>
-              {d.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+        <SectionHeader title={t('publish.schedule')} />
+        <Card>
+          <Text style={styles.label}>{t('publish.recurring')}</Text>
+          <View style={styles.days}>
+            {WEEKDAYS.map((d) => (
+              <Chip
+                key={d.iso}
+                testID={`weekday-${d.iso}`}
+                label={d.label}
+                selected={weekdays.includes(d.iso)}
+                onPress={() => toggle(d.iso)}
+              />
+            ))}
+          </View>
 
-      <Text style={styles.label}>{t('publish.departWindow')}</Text>
-      <View style={styles.times}>
-        <TextInput
-          testID="depart-earliest"
-          style={[styles.input, styles.time]}
-          value={earliest}
-          onChangeText={setEarliest}
+          <Text style={styles.label}>{t('publish.departWindow')}</Text>
+          <View style={styles.times}>
+            <Field
+              testID="depart-earliest"
+              label={t('publish.from')}
+              value={earliest}
+              onChangeText={setEarliest}
+              compact
+            />
+            <Field
+              testID="depart-latest"
+              label={t('publish.until')}
+              value={latest}
+              onChangeText={setLatest}
+              compact
+            />
+          </View>
+
+          <View style={styles.seats}>
+            <Text style={styles.seatsLabel}>{t('publish.seats')}</Text>
+            <Stepper testID="publish-seats" value={seats} onChange={setSeats} min={1} max={6} />
+          </View>
+        </Card>
+
+        {outcome ? <Hint>{outcome}</Hint> : null}
+
+        <Button
+          testID="publish-submit"
+          label={t('publish.publish')}
+          onPress={() => publish.mutate()}
+          disabled={!from || !to || !weekdays.length || publish.isPending}
         />
-        <TextInput
-          testID="depart-latest"
-          style={[styles.input, styles.time]}
-          value={latest}
-          onChangeText={setLatest}
-        />
-      </View>
-
-      <Text style={styles.label}>{t('publish.seats')}</Text>
-      <TextInput
-        testID="publish-seats"
-        style={styles.input}
-        value={seats}
-        onChangeText={(v) => setSeats(v.replace(/\D/g, '').slice(0, 1))}
-        keyboardType="number-pad"
-      />
-
-      {outcome ? <Hint>{outcome}</Hint> : null}
-      <Button
-        testID="publish-submit"
-        label={t('publish.publish')}
-        onPress={() => publish.mutate()}
-        disabled={!from || !to || !weekdays.length || publish.isPending}
-      />
-    </ScrollView>
+      </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { padding: 20, gap: 10, backgroundColor: colors.bg, flexGrow: 1 },
-  label: { fontSize: 13, color: colors.muted, marginTop: 6 },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, fontSize: 16 },
+  body: { gap: space.md, paddingBottom: 140 },
+  label: { ...type.caption, color: colors.muted },
   days: { flexDirection: 'row', gap: 6 },
-  day: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  daySelected: { backgroundColor: colors.accent, borderColor: colors.accent },
-  daySelectedLabel: { color: '#fff', fontWeight: '600' },
-  times: { flexDirection: 'row', gap: 10 },
-  time: { flex: 1, textAlign: 'center' },
+  times: { flexDirection: 'row', gap: space.sm },
+  seats: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  seatsLabel: { ...type.body, color: colors.ink },
 });

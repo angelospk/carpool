@@ -10,7 +10,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
-import { Button, Screen, Title, colors } from '../../src/components/ui';
+import { Badge, Button, Card, Screen, Title } from '../../src/components/ui';
+import { colors, space, type } from '../../src/design/tokens';
 
 export default function AskScreen() {
   const { t } = useTranslation();
@@ -63,7 +64,10 @@ export default function AskScreen() {
     <Screen>
       <Title>{t('ask.title')}</Title>
 
-      <View style={styles.card}>
+      {/* The detour is the decision. It gets the size, and everything else
+          arranges itself around it. */}
+      <Card tone="accent">
+        <Badge label={t('ask.waiting')} tone="accent" />
         <Text testID="ask-detour" style={styles.detour}>
           {t('ask.detour', {
             minutes: Math.round(Number(detour_min ?? 0)),
@@ -75,13 +79,15 @@ export default function AskScreen() {
             {Number(price).toFixed(2)} € <Text style={styles.suggested}>{t('ask.suggested')}</Text>
           </Text>
         ) : null}
-      </View>
+      </Card>
 
       {outcome ? (
         <Text testID="ask-outcome" style={styles.outcome}>
           {outcome}
         </Text>
       ) : null}
+
+      <View style={styles.spacer} />
 
       <Button
         testID="ask-accept"
@@ -101,16 +107,10 @@ export default function AskScreen() {
 }
 
 const styles = StyleSheet.create({
-  card: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 16,
-    padding: 20,
-    gap: 8,
-  },
-  detour: { fontSize: 30, fontWeight: '700', color: colors.text },
-  price: { fontSize: 20, color: colors.text },
+  detour: { ...type.display, fontSize: 32, color: colors.ink },
+  price: { ...type.title, color: colors.ink },
   // Never "fare": the app suggests a contribution, it does not charge one.
-  suggested: { fontSize: 14, color: colors.muted },
-  outcome: { fontSize: 16, color: colors.danger },
+  suggested: { ...type.caption, color: colors.muted },
+  outcome: { ...type.body, color: colors.danger },
+  spacer: { flex: 1 },
 });
