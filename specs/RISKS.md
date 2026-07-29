@@ -156,6 +156,22 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
    A family/session table with `revoked_at` (as Codex suggested) would be the
    structurally cleaner fix and is the thing to do if sessions grow features.
 
+   **What this costs, stated plainly** (Codex, second review): the attempt id is
+   stored and transmitted alongside the refresh token, so it is a second bearer
+   value, not proof of device identity. Anything that captures the pair — malware,
+   a device backup, a logging proxy — can present it and be handed the successor
+   instead of tripping revocation. Detection is deferred rather than removed: both
+   parties then hold the same successor, and the next rotation by either one is a
+   replay that burns the family. Only device-bound keys (DPoP, hardware-backed)
+   close this properly, and that is parked for post-MVP.
+
+   Two smaller consequences, accepted for a single-VPS pilot: rotating
+   `JWT_SECRET` invalidates outstanding retries, because the successor is derived
+   from it (worst case one extra sign-in, and that rotation already invalidates
+   every access token); and a rolling deploy across mixed versions would briefly
+   reopen both races, so if this ever runs on more than one replica the advisory
+   lock must ship everywhere before attempt ids are enabled.
+
 ## Deferred tech (parked, with triggers to revisit)
 
 | Deferred | Revisit when |
@@ -166,6 +182,7 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
 | MapLibre + self-hosted tiles | Google Maps key/cost pain |
 | Driving detection (bluetooth/activity) | post-MVP, product pull exists |
 | Live location sharing | post-MVP milestone 2 |
+| Device-bound refresh tokens (DPoP) | refresh-token theft is observed, or the pilot handles anything worth stealing |
 | Rust rewrite of hot paths | never, unless profiling proves need |
 
 ## Process notes
