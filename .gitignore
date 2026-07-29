@@ -17,3 +17,7 @@
 node_modules/
 .expo/
 dist/
+
+# Expo
+app/.expo/
+app/node_modules/

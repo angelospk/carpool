@@ -1,0 +1,71 @@
+import { useState } from 'react';
+import { StyleSheet, TextInput } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
+
+import { api } from '../../src/api/endpoints';
+import { ApiError } from '../../src/api/client';
+import { Button, Hint, Screen, Title, colors } from '../../src/components/ui';
+
+export default function PhoneScreen() {
+  const { t } = useTranslation();
+  const router = useRouter();
+  const [phone, setPhone] = useState('+30');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // E.164, matching the server's constraint. Validating here saves a round trip
+  // and gives a clearer message than the server's generic rejection.
+  const valid = /^\+[1-9][0-9]{7,14}$/.test(phone.replace(/\s/g, ''));
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    const normalized = phone.replace(/\s/g, '');
+    try {
+      await api.requestOtp(normalized);
+      router.push({ pathname: '/(auth)/otp', params: { phone: normalized } });
+    } catch (e) {
+      setError(
+        e instanceof ApiError && e.code === 'rate_limited'
+          ? t('auth.tooManyRequests')
+          : t('common.error'),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Screen>
+      <Title>{t('auth.phoneTitle')}</Title>
+      <Hint>{t('auth.phoneHint')}</Hint>
+      <TextInput
+        testID="phone-input"
+        style={styles.input}
+        value={phone}
+        onChangeText={setPhone}
+        keyboardType="phone-pad"
+        autoComplete="tel"
+        placeholder={t('auth.phonePlaceholder')}
+      />
+      {error ? <Hint>{error}</Hint> : null}
+      <Button
+        testID="phone-submit"
+        label={t('common.next')}
+        onPress={submit}
+        disabled={!valid || busy}
+      />
+    </Screen>
+  );
+}
+
+const styles = StyleSheet.create({
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 18,
+  },
+});

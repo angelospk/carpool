@@ -1,0 +1,76 @@
+{
+  "common": {
+    "next": "Continue",
+    "cancel": "Cancel",
+    "retry": "Try again",
+    "loading": "Loading…",
+    "error": "Something went wrong",
+    "offline": "No connection"
+  },
+  "auth": {
+    "phoneTitle": "Your number",
+    "phoneHint": "We'll send you a verification code.",
+    "phonePlaceholder": "+30 690 000 0000",
+    "otpTitle": "The code",
+    "otpHint": "Six digits, valid for 5 minutes.",
+    "invalidCode": "Wrong or expired code",
+    "tooManyRequests": "Too many attempts. Try again shortly.",
+    "profileTitle": "Tell us a little about you",
+    "namePlaceholder": "Your name",
+    "region": "Region"
+  },
+  "home": {
+    "title": "Your trips",
+    "empty": "You have no upcoming trips.",
+    "asDriver": "Driving",
+    "asPassenger": "Riding"
+  },
+  "search": {
+    "title": "Find a ride",
+    "from": "From",
+    "to": "To",
+    "when": "When",
+    "seats": "Seats",
+    "post": "Send request",
+    "asking": "Asking a driver…",
+    "noDrivers": "No driver right now. We'll let you know."
+  },
+  "publish": {
+    "title": "Publish a route",
+    "seats": "Seats",
+    "recurring": "Recurring",
+    "oneoff": "One-off",
+    "departWindow": "Departure time",
+    "publish": "Publish",
+    "published": "Route published"
+  },
+  "ask": {
+    "title": "New request",
+    "detour": "+{{minutes}} min, +{{km}} km",
+    "suggested": "suggested contribution",
+    "accept": "Accept",
+    "decline": "Not now",
+    "expired": "This request expired",
+    "noSeats": "No free seats left",
+    "closed": "This request was already answered"
+  },
+  "trip": {
+    "driver": "Driver",
+    "passengers": "Passengers",
+    "plate": "Plate",
+    "confirm": "The ride happened",
+    "notDeparted": "You can confirm once the trip sets off",
+    "rate": "Rate",
+    "rated": "Thank you!",
+    "chat": "Chat",
+    "messagePlaceholder": "Write a message…",
+    "send": "Send"
+  },
+  "profile": {
+    "title": "Your profile",
+    "signOut": "Sign out",
+    "car": "Your car",
+    "detourBudget": "Maximum detour",
+    "notifyRadius": "Notification radius"
+  }
+}

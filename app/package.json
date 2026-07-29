@@ -1,7 +1,7 @@
 {
   "name": "app",
   "version": "1.0.0",
-  "main": "index.ts",
+  "main": "expo-router/entry",
   "dependencies": {
     "expo": "~57.0.8",
     "expo-status-bar": "~57.0.1",
@@ -16,7 +16,11 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "tsc --noEmit",
+    "check": "tsc --noEmit && jest"
   },
   "private": true
 }
