@@ -10,9 +10,29 @@
    silently. Mitigations are specced (outbox retries, idempotency keys, receipts,
    token pruning, reconcile-on-open) — but this needs deliberate testing, incl.
    killed-app and dozing-Android scenarios.
-3. **OSRM real memory footprint.** "A few hundred MB" is an estimate, not a
-   measurement. Action: build the Greek/prefecture extract on the mini PC and
-   measure serving RSS **before** choosing the VPS plan.
+3. ~~**OSRM real memory footprint.**~~ **MEASURED 2026-07-29 — resolved, and the
+   answer changes the deployment.** Built both extracts on the mini PC with
+   `scripts/build-osrm.sh` (OSRM 26.7.3, MLD, car profile) and measured
+   `osrm-routed` RSS after warming with 200 routes:
+
+   | Extract | Artifacts | Serving RSS | Preprocess peak |
+   | --- | --- | --- | --- |
+   | `greece-latest` (whole country) | 2.0 GB | **1.15 GB** | 5.7 GB |
+   | Evros + ~30 km buffer (bbox clip) | 43 MB | **39 MB** | 291 MB |
+
+   Both return an identical Alexandroupoli→Komotini route (57.8 km / 45.4 min),
+   so clipping costs nothing for in-region trips.
+
+   DEPLOYMENT.md's 200–500 MB estimate was wrong in *both* directions: whole
+   Greece is ~2.4× worse than the top of the range, a clipped prefecture ~5×
+   better than the bottom. The RSS is anonymous memory, not shared page cache,
+   so it is real per-container resident cost.
+
+   **Consequence:** the region-clipped extract is not an optimization, it is the
+   thing that makes the 2 GB VPS target achievable. Whole-Greece
+   (1.15 GB OSRM + ~400 MB Postgres + ~100 MB API + ~30 MB Caddy ≈ 1.7 GB)
+   leaves no headroom; clipped (≈ 570 MB total) leaves plenty. Preprocessing
+   peaked at 5.7 GB, confirming it must stay off the VPS as specced.
 4. **Cold-start liquidity** (product risk, the biggest one). Matching tech is
    worthless without drivers. Pilot plan: seed one corridor/community (e.g. one
    town ↔ one city), invite codes, personally onboard the first 20 drivers.
