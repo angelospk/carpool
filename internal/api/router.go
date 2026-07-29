@@ -10,8 +10,11 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"carpool/internal/asks"
 	"carpool/internal/auth"
 	"carpool/internal/clock"
+	"carpool/internal/geo"
+	"carpool/internal/jobs"
 )
 
 // readyTimeout bounds the readiness probe so a hung database cannot hold the
@@ -29,6 +32,16 @@ type Deps struct {
 	Issuer   *auth.TokenIssuer
 	OTP      *auth.OTPService
 	Sessions *auth.SessionService
+	Asks     *asks.Service
+
+	// Router snaps published routes to the road network.
+	Router *geo.OSRM
+	// Materializer runs immediately after a route is published so it is
+	// matchable at once rather than at the next scheduled tick.
+	Materializer *jobs.Materializer
+	// OSRMDataVersion is stamped on stored routes so a map-data swap can
+	// trigger re-snapping.
+	OSRMDataVersion string
 }
 
 // NewRouter builds the versioned HTTP handler.
@@ -71,6 +84,17 @@ func NewRouter(deps Deps) http.Handler {
 
 			r.Get("/me", deps.handleGetMe)
 			r.Patch("/me", deps.handlePatchMe)
+			r.Put("/me/push-token", deps.handlePutPushToken)
+
+			if deps.Router != nil {
+				r.Post("/routes", deps.handleCreateRoute)
+			}
+			if deps.Asks != nil {
+				r.Post("/requests", deps.handleCreateRequest)
+				r.Delete("/requests/{id}", deps.handleCancelRequest)
+				r.Post("/asks/{id}/accept", deps.handleAcceptAsk)
+				r.Post("/asks/{id}/decline", deps.handleDeclineAsk)
+			}
 		})
 	})
 
@@ -94,4 +118,17 @@ func handleReadyz(ready func(context.Context) error) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	}
+}
+
+// chiURLParam reads a path parameter. It exists so handlers do not each import
+// chi directly.
+func chiURLParam(r *http.Request, name string) string {
+	return chi.URLParam(r, name)
+}
+
+// routingDeadline bounds an OSRM call made while a client waits.
+const routingDeadline = 15 * time.Second
+
+func contextWithRoutingDeadline(r *http.Request) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(r.Context(), routingDeadline)
 }

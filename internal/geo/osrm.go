@@ -174,3 +174,105 @@ func codeError(resp osrmResponse) error {
 func formatPoint(p Point) string {
 	return strconv.FormatFloat(p.Lon, 'f', -1, 64) + "," + strconv.FormatFloat(p.Lat, 'f', -1, 64)
 }
+
+// ShapedRoute is a route together with its decoded geometry.
+type ShapedRoute struct {
+	DistanceMeters float64
+	Duration       time.Duration
+	// Shape is the route line as ordered coordinates.
+	Shape []Point
+}
+
+// geoJSONRouteResponse mirrors osrmResponse but with a GeoJSON geometry.
+type geoJSONRouteResponse struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Routes  []struct {
+		Distance float64 `json:"distance"`
+		Duration float64 `json:"duration"`
+		Geometry struct {
+			Coordinates [][]float64 `json:"coordinates"`
+		} `json:"geometry"`
+	} `json:"routes"`
+}
+
+// RouteWithShape routes through the waypoints and returns the road-network
+// geometry as coordinates.
+//
+// GeoJSON is requested rather than an encoded polyline because the shape is
+// destined for PostGIS: decoding a polyline first would add a codec, and a
+// rounding bug there would quietly distort every stored route. The app is
+// served an encoded polyline from the stored geometry instead.
+func (c *OSRM) RouteWithShape(ctx context.Context, waypoints []Point) (ShapedRoute, error) {
+	if len(waypoints) < 2 {
+		return ShapedRoute{}, fmt.Errorf("osrm: a route needs at least 2 waypoints, got %d", len(waypoints))
+	}
+
+	coords := make([]string, len(waypoints))
+	for i, p := range waypoints {
+		coords[i] = formatPoint(p)
+	}
+	url := fmt.Sprintf("%s/route/v1/driving/%s?overview=full&geometries=geojson",
+		c.baseURL, strings.Join(coords, ";"))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return ShapedRoute{}, fmt.Errorf("osrm: building request: %w", err)
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		return ShapedRoute{}, fmt.Errorf("osrm: request failed: %w", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusOK {
+		snippet, _ := io.ReadAll(io.LimitReader(res.Body, 512))
+		return ShapedRoute{}, fmt.Errorf("osrm: unexpected status %d: %s",
+			res.StatusCode, strings.TrimSpace(string(snippet)))
+	}
+
+	var parsed geoJSONRouteResponse
+	if err := json.NewDecoder(res.Body).Decode(&parsed); err != nil {
+		return ShapedRoute{}, fmt.Errorf("osrm: decoding response: %w", err)
+	}
+	if parsed.Code != "Ok" {
+		return ShapedRoute{}, codeError(osrmResponse{Code: parsed.Code, Message: parsed.Message})
+	}
+	if len(parsed.Routes) == 0 {
+		return ShapedRoute{}, fmt.Errorf("osrm: response code Ok but no routes returned")
+	}
+
+	r := parsed.Routes[0]
+	shape := make([]Point, 0, len(r.Geometry.Coordinates))
+	for _, c := range r.Geometry.Coordinates {
+		if len(c) < 2 {
+			continue
+		}
+		shape = append(shape, Point{Lon: c[0], Lat: c[1]})
+	}
+	if len(shape) < 2 {
+		return ShapedRoute{}, fmt.Errorf("osrm: route geometry has %d points, need at least 2", len(shape))
+	}
+
+	return ShapedRoute{
+		DistanceMeters: r.Distance,
+		Duration:       time.Duration(r.Duration * float64(time.Second)),
+		Shape:          shape,
+	}, nil
+}
+
+// WKT renders a shape as a PostGIS LineString literal.
+func (s ShapedRoute) WKT() string {
+	var b strings.Builder
+	b.WriteString("LINESTRING(")
+	for i, p := range s.Shape {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(strconv.FormatFloat(p.Lon, 'f', -1, 64))
+		b.WriteByte(' ')
+		b.WriteString(strconv.FormatFloat(p.Lat, 'f', -1, 64))
+	}
+	b.WriteByte(')')
+	return b.String()
+}

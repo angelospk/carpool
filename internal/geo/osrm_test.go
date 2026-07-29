@@ -178,3 +178,49 @@ func TestNearestReportsNoSegmentDistinctly(t *testing.T) {
 		t.Fatalf("error = %v, want it to wrap ErrNoSegment", err)
 	}
 }
+
+func TestRouteReturnsGeoJSONCoordinatesForStorage(t *testing.T) {
+	var gotQuery string
+	c := osrmStub(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"Ok","routes":[{"distance":1000,"duration":60,
+			"geometry":{"type":"LineString","coordinates":[[25.8,40.85],[26.0,40.85]]}}]}`))
+	})
+
+	got, err := c.RouteWithShape(context.Background(),
+		[]Point{{Lon: 25.8, Lat: 40.85}, {Lon: 26.0, Lat: 40.85}})
+	if err != nil {
+		t.Fatalf("RouteWithShape: %v", err)
+	}
+
+	if !strings.Contains(gotQuery, "geometries=geojson") {
+		t.Errorf("query = %q, want it to request geojson geometry", gotQuery)
+	}
+	if len(got.Shape) != 2 {
+		t.Fatalf("got %d coordinates, want 2", len(got.Shape))
+	}
+	if got.Shape[0] != (Point{Lon: 25.8, Lat: 40.85}) {
+		t.Errorf("first coordinate = %+v, want {25.8 40.85}", got.Shape[0])
+	}
+	if got.DistanceMeters != 1000 {
+		t.Errorf("DistanceMeters = %v, want 1000", got.DistanceMeters)
+	}
+}
+
+func TestRouteWithShapeRejectsADegenerateShape(t *testing.T) {
+	c := osrmStub(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"Ok","routes":[{"distance":0,"duration":0,
+			"geometry":{"type":"LineString","coordinates":[[25.8,40.85]]}}]}`))
+	})
+
+	_, err := c.RouteWithShape(context.Background(),
+		[]Point{{Lon: 25.8, Lat: 40.85}, {Lon: 26.0, Lat: 40.85}})
+
+	// A single-point line cannot be stored as a LineString, and the matching SQL
+	// depends on having a real line to locate points along.
+	if err == nil {
+		t.Fatal("expected an error for a route whose geometry has fewer than 2 points")
+	}
+}

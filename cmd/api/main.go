@@ -5,17 +5,27 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/api"
+	"carpool/internal/asks"
 	"carpool/internal/auth"
 	"carpool/internal/clock"
 	"carpool/internal/config"
+	"carpool/internal/dispatch"
+	"carpool/internal/geo"
+	"carpool/internal/jobs"
+	"carpool/internal/outbox"
+	"carpool/internal/push"
 	"carpool/internal/store"
 )
 
@@ -74,6 +84,39 @@ func run() error {
 
 	clk := clock.Real{}
 	issuer := auth.NewTokenIssuer(cfg.JWTSecret, clk)
+	router := geo.NewOSRM(cfg.OSRMURL, nil)
+
+	askSvc := asks.NewService(pool, clk, nil).WithRouter(router)
+
+	athens, err := time.LoadLocation(schedulingZone)
+	if err != nil {
+		return fmt.Errorf("loading %s: %w", schedulingZone, err)
+	}
+
+	// Background workers. They share the process context, so SIGTERM unwinds
+	// them alongside the HTTP server.
+	var workers sync.WaitGroup
+	dispatcher := outbox.NewDispatcher(pool, clk, dispatch.NewRouter(pool, push.NewExpo("", nil),
+		func(ctx context.Context, requestID uuid.UUID) error {
+			_, err := askSvc.AskNext(ctx, requestID)
+			if errors.Is(err, asks.ErrNoCandidates) {
+				// Nobody left to ask. The request stays open and is retried when
+				// a new occurrence is materialized.
+				return nil
+			}
+			return err
+		}))
+
+	start(ctx, &workers, "outbox dispatcher", outboxInterval, func(ctx context.Context) error {
+		_, err := dispatcher.DispatchOnce(ctx)
+		return err
+	})
+	start(ctx, &workers, "ask sweeper", sweepInterval, func(ctx context.Context) error {
+		_, err := askSvc.SweepExpired(ctx)
+		return err
+	})
+	materializer := jobs.NewMaterializer(pool, clk, athens)
+	start(ctx, &workers, "occurrence materializer", materializeInterval, materializer.Run)
 
 	srv := api.NewServer(cfg.HTTPAddr, api.NewRouter(api.Deps{
 		Ready:    pool.Ping,
@@ -82,12 +125,57 @@ func run() error {
 		Issuer:   issuer,
 		OTP:      auth.NewOTPService(pool, clk, sms),
 		Sessions: auth.NewSessionService(pool, clk, issuer),
+		Asks:     askSvc,
+
+		Router:          router,
+		Materializer:    materializer,
+		OSRMDataVersion: cfg.OSRMDataVersion,
 	}))
 
 	slog.Info("listening", "addr", cfg.HTTPAddr)
-	if err := srv.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		return err
+	runErr := srv.Run(ctx)
+
+	// The server has stopped, so the context is done and the workers are
+	// unwinding; wait for them before the pool closes under them.
+	workers.Wait()
+
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		return runErr
 	}
 	slog.Info("stopped cleanly")
 	return nil
+}
+
+// Worker cadences. Each loop also runs immediately on start, so a restart does
+// not wait a full interval before catching up.
+const (
+	schedulingZone      = "Europe/Athens"
+	outboxInterval      = 5 * time.Second
+	sweepInterval       = 30 * time.Second
+	materializeInterval = 15 * time.Minute
+)
+
+// start runs fn on a ticker until ctx is cancelled. A failing tick is logged
+// and retried on the next one: a background worker must not take the process
+// down.
+func start(ctx context.Context, wg *sync.WaitGroup, name string, every time.Duration, fn func(context.Context) error) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+
+		for {
+			if err := fn(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("background worker failed", "worker", name, "error", err)
+			}
+			select {
+			case <-ctx.Done():
+				slog.Info("background worker stopped", "worker", name)
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
 }

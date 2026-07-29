@@ -1,0 +1,199 @@
+package api
+
+import (
+	"net/http"
+	"time"
+
+	"carpool/internal/domain"
+	"carpool/internal/geo"
+	"carpool/internal/store"
+)
+
+// routeBody is the publish-wizard payload.
+type routeBody struct {
+	OriginLon        float64 `json:"origin_lon"`
+	OriginLat        float64 `json:"origin_lat"`
+	DestinationLon   float64 `json:"destination_lon"`
+	DestinationLat   float64 `json:"destination_lat"`
+	OriginLabel      string  `json:"origin_label"`
+	DestinationLabel string  `json:"destination_label"`
+	Seats            int     `json:"seats"`
+	PricingMode      string  `json:"pricing_mode"`
+
+	Kind           string   `json:"kind"` // oneoff | recurring
+	OneOffDate     string   `json:"oneoff_date"`
+	Weekdays       []int    `json:"weekdays"`        // ISO 1..7
+	DepartEarliest string   `json:"depart_earliest"` // "HH:MM" local Athens
+	DepartLatest   string   `json:"depart_latest"`
+	Exceptions     []string `json:"exceptions"`
+}
+
+func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
+	userID, ok := callerID(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
+		return
+	}
+
+	var body routeBody
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+
+	schedule, err := body.schedule()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if body.Seats <= 0 {
+		body.Seats = 3 // the wizard's default
+	}
+	mode := domain.PricingMode(body.PricingMode)
+	if mode == "" {
+		mode = domain.PricingFormula
+	}
+
+	// A driver profile is what makes someone publishable; without one there is
+	// no car, no detour budget and no fuel figures to price with.
+	var hasProfile bool
+	if err := d.Pool.QueryRow(r.Context(),
+		`SELECT EXISTS (SELECT 1 FROM driver_profiles WHERE user_id = $1)`, userID).Scan(&hasProfile); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not check the driver profile")
+		return
+	}
+	if !hasProfile {
+		writeError(w, http.StatusConflict, "no_driver_profile", "add your car details before publishing a route")
+		return
+	}
+
+	origin := geo.Point{Lon: body.OriginLon, Lat: body.OriginLat}
+	destination := geo.Point{Lon: body.DestinationLon, Lat: body.DestinationLat}
+
+	// Snap the route to the road network now: the stored geometry is what the
+	// gross match locates pickups along, so it must be a real road line rather
+	// than the straight line between two pins.
+	ctx, cancel := contextWithRoutingDeadline(r)
+	defer cancel()
+
+	shaped, err := d.Router.RouteWithShape(ctx, []geo.Point{origin, destination})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "routing_failed",
+			"could not compute a driving route between those points")
+		return
+	}
+
+	templateID, err := store.CreateRouteTemplate(r.Context(), d.Pool, store.CreateRouteTemplateParams{
+		DriverID:         userID,
+		Origin:           origin,
+		Destination:      destination,
+		OriginLabel:      body.OriginLabel,
+		DestinationLabel: body.DestinationLabel,
+		RouteWKT:         shaped.WKT(),
+		RouteKm:          shaped.DistanceMeters / 1000,
+		RouteMin:         int(shaped.Duration.Minutes()) + 1,
+		Seats:            body.Seats,
+		PricingMode:      mode,
+		OSRMDataVersion:  d.OSRMDataVersion,
+		Schedule:         schedule,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "the route was rejected")
+		return
+	}
+
+	// Materialize immediately so the route is matchable straight away rather
+	// than at the next scheduled tick.
+	if d.Materializer != nil {
+		if err := d.Materializer.Run(r.Context()); err != nil {
+			// The scheduled run will pick it up; publishing still succeeded.
+			writeJSON(w, http.StatusCreated, map[string]any{
+				"template_id": templateID, "materialized": false,
+			})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"template_id":  templateID,
+		"route_km":     shaped.DistanceMeters / 1000,
+		"materialized": true,
+	})
+}
+
+// schedule converts the wire payload into a domain schedule.
+func (b routeBody) schedule() (domain.Schedule, error) {
+	s := domain.Schedule{Kind: domain.ScheduleKind(b.Kind)}
+
+	var err error
+	if s.DepartEarliest, err = parseTimeOfDay(b.DepartEarliest); err != nil {
+		return domain.Schedule{}, err
+	}
+	if s.DepartLatest, err = parseTimeOfDay(b.DepartLatest); err != nil {
+		return domain.Schedule{}, err
+	}
+
+	switch s.Kind {
+	case domain.ScheduleOneOff:
+		d, err := parseDate(b.OneOffDate)
+		if err != nil {
+			return domain.Schedule{}, err
+		}
+		s.OneOffDate = &d
+		s.EffectiveFrom = d
+	case domain.ScheduleRecurring:
+		if len(b.Weekdays) == 0 {
+			return domain.Schedule{}, errInvalid("weekdays is required for a recurring route")
+		}
+		for _, iso := range b.Weekdays {
+			if iso < 1 || iso > 7 {
+				return domain.Schedule{}, errInvalid("weekdays must be ISO numbers 1..7")
+			}
+			s.Weekdays = append(s.Weekdays, isoWeekday(iso))
+		}
+		s.EffectiveFrom = today()
+	default:
+		return domain.Schedule{}, errInvalid("kind must be oneoff or recurring")
+	}
+
+	for _, e := range b.Exceptions {
+		d, err := parseDate(e)
+		if err != nil {
+			return domain.Schedule{}, err
+		}
+		s.Exceptions = append(s.Exceptions, d)
+	}
+	return s, nil
+}
+
+func parseTimeOfDay(s string) (domain.TimeOfDay, error) {
+	t, err := time.Parse("15:04", s)
+	if err != nil {
+		return domain.TimeOfDay{}, errInvalid("departure times must be HH:MM, got " + s)
+	}
+	return domain.TimeOfDay{Hour: t.Hour(), Minute: t.Minute()}, nil
+}
+
+func parseDate(s string) (domain.Date, error) {
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return domain.Date{}, errInvalid("dates must be YYYY-MM-DD, got " + s)
+	}
+	return domain.Date{Year: t.Year(), Month: t.Month(), Day: t.Day()}, nil
+}
+
+func isoWeekday(iso int) time.Weekday {
+	if iso == 7 {
+		return time.Sunday
+	}
+	return time.Weekday(iso)
+}
+
+func today() domain.Date {
+	n := time.Now()
+	return domain.Date{Year: n.Year(), Month: n.Month(), Day: n.Day()}
+}
+
+// errInvalid is a plain error whose text is safe to show a client.
+type errInvalid string
+
+func (e errInvalid) Error() string { return string(e) }
