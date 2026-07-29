@@ -7,7 +7,8 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE regions (
     id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    name           text NOT NULL,
+    -- Unique so seeding can upsert by name and stay idempotent across deploys.
+    name           text NOT NULL UNIQUE,
     boundary       geometry(MultiPolygon, 4326) NOT NULL,
     fuel_price_eur numeric(4,3) NOT NULL CHECK (fuel_price_eur > 0),
     created_at     timestamptz NOT NULL DEFAULT now(),
