@@ -20,7 +20,7 @@ REGION=$(curl -s "$API/regions" | j "d.regions[0].id")
 signup() {
   curl -s -X POST "$API/auth/otp/request" -H 'Content-Type: application/json' -d "{\"phone\":\"$1\"}" -o /dev/null
   local code
-  code=$(grep -o '"message":"[0-9]\{6\}' "$LOG" | tail -1 | grep -o '[0-9]\{6\}')
+  code=$(grep -ao '"message":"[0-9]\{6\}' "$LOG" | tail -1 | grep -o '[0-9]\{6\}')
   curl -s -X POST "$API/auth/otp/verify" -H 'Content-Type: application/json' \
     -d "{\"phone\":\"$1\",\"code\":\"$code\",\"name\":\"$2\",\"region_id\":\"$REGION\"}" | j "d.access_token"
 }
@@ -71,5 +71,40 @@ psql "$DSN" -tAc "
   FROM bookings b
   JOIN trip_occurrences o ON o.id = b.occurrence_id
   JOIN asks a ON a.id = b.ask_id"
+
+step "8. the trip is visible to both sides"
+TRIP=$(curl -s "$API/trips/upcoming" -H "Authorization: Bearer $DRIVER" | j "d.trips[0].id")
+for who in DRIVER PASSENGER; do
+  token=${!who}
+  role=$(curl -s "$API/trips/upcoming" -H "Authorization: Bearer $token" | j "d.trips[0].role")
+  echo "   $who sees the trip as: $role"
+done
+echo "   plate revealed to the passenger: $(curl -s "$API/trips/$TRIP" -H "Authorization: Bearer $PASSENGER" | j "d.driver.car_plate")"
+
+step "9. they exchange a message"
+curl -s -X POST "$API/trips/$TRIP/messages" -H "Authorization: Bearer $PASSENGER" \
+  -H 'Content-Type: application/json' -d '{"body":"Θα είμαι στη στάση στις 07:35"}' \
+  | j "'   passenger: ' + d.body"
+curl -s "$API/trips/$TRIP/messages" -H "Authorization: Bearer $DRIVER" \
+  | j "'   driver reads ' + d.messages.length + ' message(s)'"
+
+step "10. the ride happens and both sides confirm"
+# The trip is scheduled for tomorrow; move it into the past so it can be
+# confirmed, which is what the real passage of time would do.
+psql "$DSN" -q -c "UPDATE trip_occurrences SET depart_earliest = now() - interval '2 hours',
+                                               depart_latest   = now() - interval '90 minutes'"
+curl -s -o /dev/null -w '   driver confirm: %{http_code}\n'    -X POST "$API/trips/$TRIP/confirm" -H "Authorization: Bearer $DRIVER"
+curl -s -o /dev/null -w '   passenger confirm: %{http_code}\n' -X POST "$API/trips/$TRIP/confirm" -H "Authorization: Bearer $PASSENGER"
+psql "$DSN" -tAc "SELECT '   booking is now ' || status FROM bookings"
+
+step "11. they rate each other"
+curl -s -o /dev/null -w '   passenger rates driver: %{http_code}\n' \
+  -X POST "$API/trips/$TRIP/rate" -H "Authorization: Bearer $PASSENGER" \
+  -H 'Content-Type: application/json' -d '{"stars":5,"tag":"punctual"}'
+PAX=$(psql "$DSN" -tAc "SELECT passenger_id FROM bookings LIMIT 1")
+curl -s -o /dev/null -w '   driver rates passenger: %{http_code}\n' \
+  -X POST "$API/trips/$TRIP/rate" -H "Authorization: Bearer $DRIVER" \
+  -H 'Content-Type: application/json' -d "{\"stars\":5,\"ratee_id\":\"$PAX\"}"
+psql "$DSN" -tAc "SELECT '   ' || count(*) || ' ratings stored' FROM ratings"
 
 printf '\n\033[32me2e scenario passed\033[0m\n'
