@@ -5,8 +5,23 @@ Running status log so any future session can resume cold. Updated every work ses
 ## Current state
 
 **Last updated:** 2026-07-29.
-**Not blocked.** Docker is installed and the dev stack runs. The whole suite is
-green against the spec'd `postgis/postgis:16-3.4`.
+**All milestones complete.** Backend and app are built, reviewed and verified.
+
+Definition of Done, as measured on this machine:
+
+| Check | Result |
+| --- | --- |
+| `make check` (vet + staticcheck + tests) | green |
+| Concurrency packages under `-race` | green |
+| App `tsc --noEmit` + `jest` | clean, 25 tests |
+| Android bundle exports | 2.9 MB Hermes |
+| e2e scenario from a fresh database | passes |
+| Backup + restore drill | passes |
+| RAM measured | ≈ 330 MiB whole stack |
+
+The e2e covers the whole DoD path: publish a recurring route (snapped by real
+OSRM) → passenger request → driver ask → accept → trip visible to both sides
+with the plate revealed → chat → both confirm → mutual ratings.
 
 ## How to run things
 
@@ -77,13 +92,11 @@ scripts/build-osrm.sh osrm-data/evros-buffered.osm.pbf
       card with the plate revealed only post-booking, per-side confirm →
       complete, ratings, chat with a total `(created_at, id)` cursor, an
       in-process ws hub, block and report.
-- [~] **M6 Expo app** — full expo-router tree written: auth flow, tabs
+- [x] **M6 Expo app** — full expo-router tree: auth flow, tabs
       (home/search/publish/profile), trip card + chat, the ask screen, request
-      status, user actions. API client with secure-store credentials and a
-      single-flight token refresh. Greek/English i18n at key parity. Jest tests
-      for the client and token store. **Outstanding:** dependency install was
-      still running at last check, so `npm test` and `tsc --noEmit` have not yet
-      been executed against the tree.
+      status, user actions. API client with epoch-guarded secure-store
+      credentials and a single-flight refresh. Greek/English i18n at key parity.
+      25 tests; tsc clean; the Android bundle exports.
 - [x] **M7 Deploy readiness** — production compose (durability defaults kept,
       only Caddy published), 24.6 MB distroless image, Caddyfile, backup script
       and a restore drill that compares row counts, spatial indexes and a
@@ -184,10 +197,39 @@ contract — the error envelope and auth contract were frozen in M0 instead); a
 dead-letter management UI (schema, metrics and a manual replay command suffice
 for a pilot).
 
-## Next steps
+## Deliberately not built
 
-1. Finish the M6 verification loop: `npm install` completes, then `npm run check`
-   (tsc + jest) and a device run against this machine.
-2. Optional polish deferred deliberately: map pickers currently take
-   `lon, lat Label` text instead of a map pin (no geocoder in the pilot), and
-   push registration is wired server-side but not yet requested on the device.
+Parked with a reason, not forgotten:
+
+- **Map pickers.** Origin and destination are typed as `lon, lat Label` rather
+  than dropped on a map. There is no geocoder in the pilot, and the pin UI does
+  not change the shape the screen produces, so it can land later without
+  touching anything else.
+- **Push registration on the device.** The server side is complete — tokens,
+  pruning on `DeviceNotRegistered`, delivery through the outbox — but the app
+  does not yet ask for permission and register. That needs a dev build on real
+  hardware, which is the next physical step.
+- **Everything in SPEC.md's "explicitly deferred" list**: live location sharing,
+  driving detection, learned routes, waypoints, web app, payments.
+
+## Known limitations
+
+- A websocket subscription is authorized once, at connect. A passenger whose
+  booking is cancelled mid-connection keeps receiving that trip's chat until
+  they disconnect. Sockets are short-lived and chat is not sensitive, so this is
+  accepted for the pilot rather than fixed with periodic revalidation.
+- Refresh-token rotation has an unavoidable commit window: if the app dies after
+  the server rotates but before the new token is stored, the next launch replays
+  the old one and the family is revoked, forcing a re-login. Closing it properly
+  needs server-side refresh idempotency or a short reuse grace window.
+- The party cap counts parties per occurrence rather than concurrently aboard.
+  Stricter than MATCHING.md's wording; it can only refuse rides a
+  concurrency-aware cap would allow, never admit ones it would not.
+
+## If you are picking this up cold
+
+1. `docker compose -f docker-compose.dev.yml up -d`
+2. `export CARPOOL_TEST_DSN=...` then `make check`
+3. `scripts/e2e.sh` against a running API to see the whole product work
+4. Read `specs/RISKS.md` "Open decisions" for every place the implementation
+   knowingly diverges from the specs, and why
