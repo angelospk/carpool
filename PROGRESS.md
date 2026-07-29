@@ -73,11 +73,21 @@ scripts/build-osrm.sh osrm-data/evros-buffered.osm.pbf
       behind an interface; `POST /routes`, `POST /requests`,
       `POST /asks/{id}/accept|decline`, `PUT /me/push-token`; background workers
       in `cmd/api`; `scripts/e2e.sh` drives the whole journey over real HTTP.
-- [ ] **M5 Trips & social** — not started. Trip endpoints, confirm/complete,
-      ratings, chat (REST + ws hub), report/block.
-- [ ] **M6 Expo app** — not started.
-- [ ] **M7 Deploy readiness** — RAM measured; production compose, backup +
-      restore drill and the final numbers outstanding.
+- [x] **M5 Trips & social** — upcoming trips (driving and riding merged), trip
+      card with the plate revealed only post-booking, per-side confirm →
+      complete, ratings, chat with a total `(created_at, id)` cursor, an
+      in-process ws hub, block and report.
+- [~] **M6 Expo app** — full expo-router tree written: auth flow, tabs
+      (home/search/publish/profile), trip card + chat, the ask screen, request
+      status, user actions. API client with secure-store credentials and a
+      single-flight token refresh. Greek/English i18n at key parity. Jest tests
+      for the client and token store. **Outstanding:** dependency install was
+      still running at last check, so `npm test` and `tsc --noEmit` have not yet
+      been executed against the tree.
+- [x] **M7 Deploy readiness** — production compose (durability defaults kept,
+      only Caddy published), 24.6 MB distroless image, Caddyfile, backup script
+      and a restore drill that compares row counts, spatial indexes and a
+      representative PostGIS query. Whole-stack RAM measured.
 
 ## Deviations from spec
 
@@ -95,6 +105,19 @@ Plus, recorded in RISKS.md risk 3: **the region-clipped OSRM extract is now
 required, not optional** — whole-Greece serving RSS is 1.15 GB against the
 200–500 MB DEPLOYMENT.md assumed, which would leave no headroom on a 2 GB VPS.
 The Evros clip is 39 MB for identical in-region routes.
+
+## Measured RAM (2026-07-29, containers under load)
+
+| Container | Measured | DEPLOYMENT.md estimate |
+| --- | --- | --- |
+| `api` (distroless, 24.6 MB image) | **7.2 MiB** | ~100 MB |
+| `db` (postgis:16-3.4, shared_buffers 256MB) | **261 MiB** | ~400 MB |
+| `osrm` (Evros + 30 km clip, MLD) | **32 MiB** | 200–500 MB |
+| `caddy` (upstream figure, not yet run) | ~30 MB | ~30 MB |
+| **total** | **≈ 330 MiB** | ~1 GB |
+
+The stack fits a 1 GB VPS provided the OSRM extract stays region-clipped.
+Postgres dominates, and `shared_buffers` is what sets its floor.
 
 ## Adversarial review (Codex, high effort)
 
@@ -163,8 +186,8 @@ for a pilot).
 
 ## Next steps
 
-1. M5: trip endpoints, confirm/complete, ratings, chat (REST + ws hub via
-   `github.com/coder/websocket`), report/block.
-2. M6: the Expo app per MOBILE.md, pointed at this machine.
-3. M7: production compose (without the dev fsync settings), backup + restore
-   drill, and the final measured RSS table.
+1. Finish the M6 verification loop: `npm install` completes, then `npm run check`
+   (tsc + jest) and a device run against this machine.
+2. Optional polish deferred deliberately: map pickers currently take
+   `lon, lat Label` text instead of a map pin (no geocoder in the pilot), and
+   push registration is wired server-side but not yet requested on the device.
