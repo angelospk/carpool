@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -120,4 +121,11 @@ func ListRegions(ctx context.Context, pool *pgxpool.Pool) ([]Region, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// isUniqueViolation reports whether err is a Postgres unique-constraint error,
+// which is how the store distinguishes "already exists" from a real failure.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }

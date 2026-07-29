@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/api"
+	"carpool/internal/asks"
 	"carpool/internal/auth"
 	"carpool/internal/clock"
 	"carpool/internal/store"
@@ -62,6 +63,7 @@ func newHarness(t *testing.T) *harness {
 		Issuer:   issuer,
 		OTP:      auth.NewOTPService(pool, c, sms),
 		Sessions: auth.NewSessionService(pool, c, issuer),
+		Asks:     asks.NewService(pool, c, nil),
 	})
 
 	return &harness{t: t, router: router, pool: pool, clock: c, sms: sms, regionID: regionID}
@@ -138,4 +140,34 @@ func (h *harness) signUp(phone, name string) (accessToken, refreshToken string) 
 	}
 	h.decode(rec, &body)
 	return body.AccessToken, body.RefreshToken
+}
+
+// mustExec runs a statement, failing the test on error.
+func (h *harness) mustExec(sql string, args ...any) {
+	h.t.Helper()
+	if _, err := h.pool.Exec(context.Background(), sql, args...); err != nil {
+		h.t.Fatalf("exec %q: %v", sql, err)
+	}
+}
+
+// mustQuery scans a single row into dest. Any trailing args are query
+// parameters, so callers can write mustQuery(sql, &out, param).
+func (h *harness) mustQuery(sql string, dest ...any) {
+	h.t.Helper()
+
+	// Split dest into scan targets and query args: a target is a pointer we
+	// created in the test, an arg is a plain value.
+	var scan []any
+	var args []any
+	for _, d := range dest {
+		switch d.(type) {
+		case *string, *int, *bool, *uuid.UUID, *float64:
+			scan = append(scan, d)
+		default:
+			args = append(args, d)
+		}
+	}
+	if err := h.pool.QueryRow(context.Background(), sql, args...).Scan(scan...); err != nil {
+		h.t.Fatalf("query %q: %v", sql, err)
+	}
 }

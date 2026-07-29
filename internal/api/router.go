@@ -15,6 +15,7 @@ import (
 	"carpool/internal/clock"
 	"carpool/internal/geo"
 	"carpool/internal/jobs"
+	"carpool/internal/ws"
 )
 
 // readyTimeout bounds the readiness probe so a hung database cannot hold the
@@ -42,6 +43,8 @@ type Deps struct {
 	// OSRMDataVersion is stamped on stored routes so a map-data swap can
 	// trigger re-snapping.
 	OSRMDataVersion string
+	// Hub fans chat messages out to foregrounded apps. Optional.
+	Hub *ws.Hub
 }
 
 // NewRouter builds the versioned HTTP handler.
@@ -95,6 +98,24 @@ func NewRouter(deps Deps) http.Handler {
 				r.Post("/asks/{id}/accept", deps.handleAcceptAsk)
 				r.Post("/asks/{id}/decline", deps.handleDeclineAsk)
 			}
+
+			r.Get("/trips/upcoming", deps.handleUpcomingTrips)
+			r.Route("/trips/{id}", func(r chi.Router) {
+				r.Get("/", deps.handleGetTrip)
+				r.Post("/confirm", deps.handleConfirmTrip)
+				r.Post("/rate", deps.handleRateTrip)
+				r.Get("/messages", deps.handleListMessages)
+				r.Post("/messages", deps.handlePostMessage)
+				if deps.Hub != nil {
+					r.Get("/socket", deps.handleTripSocket)
+				}
+			})
+
+			r.Route("/users/{id}", func(r chi.Router) {
+				r.Post("/block", deps.handleBlockUser)
+				r.Delete("/block", deps.handleUnblockUser)
+				r.Post("/report", deps.handleReportUser)
+			})
 		})
 	})
 

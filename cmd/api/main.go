@@ -27,6 +27,7 @@ import (
 	"carpool/internal/outbox"
 	"carpool/internal/push"
 	"carpool/internal/store"
+	"carpool/internal/ws"
 )
 
 func main() {
@@ -130,6 +131,7 @@ func run() error {
 		Router:          router,
 		Materializer:    materializer,
 		OSRMDataVersion: cfg.OSRMDataVersion,
+		Hub:             ws.NewHub(),
 	}))
 
 	slog.Info("listening", "addr", cfg.HTTPAddr)
