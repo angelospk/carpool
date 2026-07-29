@@ -312,3 +312,90 @@ func mustExec(t *testing.T, f *fixture, sql string) {
 		t.Fatalf("exec %q: %v", sql, err)
 	}
 }
+
+// The suggested contribution has to carry the barriers the passenger will
+// actually sit through. This drives the whole production path — gross match,
+// insertion, pricing — over a route that crosses the Μέστης plaza on the
+// Egnatia, and checks the toll reaches the ask.
+func TestAskPriceIncludesTheTollsThePassengerRidesThrough(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	mustExec(t, f, `DELETE FROM asks`)
+
+	// The Egnatia through Μέστης (41.0172, 25.5288), running south-east. Both
+	// the template and the occurrence carry it: the matcher reads one, the toll
+	// share reads the other.
+	const egnatia = `LINESTRING(25.45 41.06, 25.5288 41.0172, 25.62 40.97, 25.70 40.92)`
+	mustExec(t, f, `UPDATE route_templates SET
+		origin = ST_SetSRID(ST_MakePoint(25.45, 41.06), 4326),
+		destination = ST_SetSRID(ST_MakePoint(25.70, 40.92), 4326),
+		route_geom = ST_GeomFromText('`+egnatia+`', 4326), route_km = 30`)
+	mustExec(t, f, `UPDATE trip_occurrences SET
+		route_geom = ST_GeomFromText('`+egnatia+`', 4326), route_km = 30`)
+
+	// The passenger rides the first half — through the plaza.
+	mustExec(t, f, `UPDATE ride_requests SET status = 'open',
+		origin = ST_SetSRID(ST_MakePoint(25.46, 41.055), 4326),
+		destination = ST_SetSRID(ST_MakePoint(25.60, 40.985), 4326)`)
+
+	askID, err := f.matcher().AskNext(ctx, f.requestID)
+	if err != nil {
+		t.Fatalf("AskNext: %v", err)
+	}
+	if askID == uuid.Nil {
+		t.Fatal("no ask created")
+	}
+
+	var price float64
+	must(t, f.pool.QueryRow(ctx,
+		`SELECT suggested_price_eur FROM asks WHERE id = $1`, askID).Scan(&price), "ask price")
+
+	// Μέστης costs 2.75 €, shared with the driver: 1.37 or 1.38 depending on
+	// which side the odd cent falls. The fuel part is rounded to 50-cent steps,
+	// so the toll is what puts a non-multiple of 0.50 on the end.
+	cents := int(price*100 + 0.5)
+	if cents%50 == 0 {
+		t.Fatalf("suggested %.2f € is a whole 50-cent step; the toll never reached it", price)
+	}
+	if got := cents % 50; got != 37 && got != 38 {
+		t.Fatalf("suggested %.2f €; the toll part is %d cents, want 137 or 138 over the fuel step",
+			price, got)
+	}
+}
+
+// The mirror image: a passenger who joins after the last barrier owes nothing
+// towards it, so the suggestion stays on a whole fuel step.
+func TestAskPriceCarriesNoTollForAPassengerWhoJoinsAfterThePlaza(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	mustExec(t, f, `DELETE FROM asks`)
+
+	const egnatia = `LINESTRING(25.45 41.06, 25.5288 41.0172, 25.62 40.97, 25.70 40.92)`
+	mustExec(t, f, `UPDATE route_templates SET
+		origin = ST_SetSRID(ST_MakePoint(25.45, 41.06), 4326),
+		destination = ST_SetSRID(ST_MakePoint(25.70, 40.92), 4326),
+		route_geom = ST_GeomFromText('`+egnatia+`', 4326), route_km = 30`)
+	mustExec(t, f, `UPDATE trip_occurrences SET
+		route_geom = ST_GeomFromText('`+egnatia+`', 4326), route_km = 30`)
+
+	// Boarding past Μέστης, riding to the end.
+	mustExec(t, f, `UPDATE ride_requests SET status = 'open',
+		origin = ST_SetSRID(ST_MakePoint(25.62, 40.97), 4326),
+		destination = ST_SetSRID(ST_MakePoint(25.70, 40.92), 4326)`)
+
+	askID, err := f.matcher().AskNext(ctx, f.requestID)
+	if err != nil {
+		t.Fatalf("AskNext: %v", err)
+	}
+	if askID == uuid.Nil {
+		t.Fatal("no ask created")
+	}
+
+	var price float64
+	must(t, f.pool.QueryRow(ctx,
+		`SELECT suggested_price_eur FROM asks WHERE id = $1`, askID).Scan(&price), "ask price")
+
+	if cents := int(price*100 + 0.5); cents%50 != 0 {
+		t.Fatalf("suggested %.2f € carries a toll the passenger drove past before boarding", price)
+	}
+}
