@@ -41,6 +41,62 @@
 - Whether targeted join requests bypass the sequential-ask flow (currently: yes,
   a targeted request creates an ask for that driver directly).
 
+## Open decisions (raised during implementation, 2026-07-29)
+
+Recorded per the build handoff: where the specs contradicted themselves or a spec
+detail turned out to be unimplementable as written, the smallest reasonable
+resolution was chosen and logged here. Source: Codex plan review (high effort),
+2026-07-29.
+
+1. **The buffered functional GIST index cannot serve the gross-match query.**
+   DATA-MODEL.md specs `route_templates_buffer_gist` on
+   `ST_Buffer(route_geom::geography, 3000)::geometry`, and MATCHING.md filters with
+   `ST_DWithin(route_geom::geography, :origin::geography, notify_radius_km*1000)`.
+   Postgres can only use an index on the expression the query actually references,
+   so a `ST_DWithin` over *unbuffered* geography will never touch a *buffered*
+   index — the specced index would be dead weight and the gross match would
+   seq-scan.
+   **Resolution:** index the expression the query uses —
+   `CREATE INDEX ... USING GIST ((route_geom::geography))` — and drop the buffered
+   index. This also supports the per-driver variable radius directly, which a
+   single fixed 3 km buffer cannot. The EXPLAIN test asserts *this* index is used.
+
+2. **Occurrence identity keyed on `depart_earliest` is not DST-safe.**
+   DATA-MODEL.md specs `UNIQUE (template_id, depart_earliest)`. `depart_earliest`
+   is a concrete instant derived from a local Athens wall time; a tzdata update or
+   a DST policy change moves the instant and would silently create a duplicate
+   occurrence for the same calendar day.
+   **Resolution:** materialize a `service_date date` (Athens local calendar date)
+   on `trip_occurrences` and key identity on `UNIQUE (template_id, service_date)`.
+   `depart_earliest`/`depart_latest` remain as the concrete instants.
+
+3. **Ambiguous local wall times need an explicit policy.** Go's `time.Date` does
+   not guarantee which offset it picks for skipped (spring-forward) or repeated
+   (fall-back) wall times, so recurrence generation would be silently
+   implementation-defined twice a year.
+   **Resolution:** resolve wall times by round-trip search rather than trusting
+   `time.Date`. Policy: a **nonexistent** local time skips that date and records a
+   materialization error; a **repeated** local time picks the earlier (first, DST-)
+   instant. Both are covered by explicit tests.
+
+4. **Detour re-verification cannot happen inside the accept transaction.** The
+   accept path must re-verify the detour against the current itinerary, but that
+   needs an OSRM round-trip — holding row locks across a slow, failure-prone
+   sidecar call is a liveness hazard.
+   **Resolution:** optimistic concurrency instead. Read `itinerary_version`, call
+   OSRM outside any transaction, then open the transaction, take locks in the
+   canonical order `occurrence → ride_request → asks(pk order)`, and confirm the
+   version is unchanged; on mismatch roll back and recompute, bounded retries.
+   The TOCTOU window stays closed without holding locks across I/O.
+
+5. **The outbox `idempotency_key` does not make delivery exactly-once.** A unique
+   key stops the same business transaction enqueuing twice; it cannot prevent
+   "provider accepted → worker crashed before marking done → sent again".
+   **Resolution:** keep at-least-once as the honest contract, add lease columns
+   (`locked_by`, `locked_until`) so a crashed worker's rows are reclaimable, and
+   rely on client-side dedupe by idempotency key (already specced in MOBILE.md).
+   Duplicate push delivery is documented as possible, not designed away.
+
 ## Deferred tech (parked, with triggers to revisit)
 
 | Deferred | Revisit when |

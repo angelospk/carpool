@@ -1,0 +1,19 @@
+# Go
+/bin/
+*.test
+*.out
+
+# Env / secrets
+.env
+.env.local
+*.pem
+
+# OSRM artifacts (large, built locally)
+/osrm-data/
+*.osm.pbf
+*.osrm*
+
+# Node / Expo
+node_modules/
+.expo/
+dist/
