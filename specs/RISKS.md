@@ -29,10 +29,24 @@
    so it is real per-container resident cost.
 
    **Consequence:** the region-clipped extract is not an optimization, it is the
-   thing that makes the 2 GB VPS target achievable. Whole-Greece
-   (1.15 GB OSRM + ~400 MB Postgres + ~100 MB API + ~30 MB Caddy ≈ 1.7 GB)
-   leaves no headroom; clipped (≈ 570 MB total) leaves plenty. Preprocessing
-   peaked at 5.7 GB, confirming it must stay off the VPS as specced.
+   thing that makes the 2 GB VPS target achievable. Preprocessing peaked at
+   5.7 GB, confirming it must stay off the VPS as specced.
+
+   **Whole-stack measurement (2026-07-29), containers under load:**
+
+   | Container | Measured | DEPLOYMENT.md estimate |
+   | --- | --- | --- |
+   | `api` (distroless, 24.6 MB image) | **7.2 MiB** | ~100 MB |
+   | `db` (postgis:16-3.4, shared_buffers 256MB) | **261 MiB** | ~400 MB |
+   | `osrm` (Evros + 30 km clip, MLD) | **32 MiB** | 200–500 MB |
+   | `caddy` (not yet run; upstream figure) | ~30 MB | ~30 MB |
+   | **total** | **≈ 330 MiB** | ~1 GB |
+
+   The Go API is an order of magnitude smaller than estimated — the estimate
+   appears to have assumed a runtime with a heavier baseline. The stack fits a
+   1 GB VPS with room to spare, provided the OSRM extract stays region-clipped.
+   Postgres dominates and is the knob to turn if the box is smaller: it is
+   `shared_buffers` that sets the floor, not the workload.
 4. **Cold-start liquidity** (product risk, the biggest one). Matching tech is
    worthless without drivers. Pilot plan: seed one corridor/community (e.g. one
    town ↔ one city), invite codes, personally onboard the first 20 drivers.
