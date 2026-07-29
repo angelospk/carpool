@@ -16,6 +16,7 @@ import (
 	"carpool/internal/clock"
 	"carpool/internal/match"
 	"carpool/internal/outbox"
+	"carpool/internal/tolls"
 )
 
 // DefaultTTL is how long a driver has to answer before the ask expires and the
@@ -56,12 +57,20 @@ type Service struct {
 	clock    clock.Clock
 	verifier Verifier
 	router   match.Router
+	// tolls is the shipped toll network. Nil when the dataset failed to load,
+	// which costs the toll component of the suggested contribution and nothing
+	// else — the app must still match rides.
+	tolls *tolls.Dataset
 }
 
 // NewService returns a service. verifier may be nil, in which case the stored
 // detour is trusted as-is. router is required by AskNext but not by Accept.
 func NewService(pool *pgxpool.Pool, c clock.Clock, v Verifier) *Service {
-	return &Service{pool: pool, clock: c, verifier: v}
+	s := &Service{pool: pool, clock: c, verifier: v}
+	if set, err := tolls.Load(); err == nil {
+		s.tolls = set
+	}
+	return s
 }
 
 // WithRouter returns a copy of the service that uses r for the fine matching

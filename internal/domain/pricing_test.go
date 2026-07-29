@@ -116,3 +116,61 @@ func TestSuggestedPriceIsNeverNegative(t *testing.T) {
 		t.Fatalf("SuggestedPriceCents = %d cents, want a non-negative value", got)
 	}
 }
+
+// Tolls are money the driver actually hands over, so they are added on top of
+// the fuel suggestion rather than folded into it — and they are not rounded to
+// the nearest 50 cents, because unlike the fuel estimate they are exact.
+func TestTollShareIsAddedOnTopOfTheFuelSuggestion(t *testing.T) {
+	in := PricingInputs{
+		TripKm:                   60,
+		FuelConsumptionLPer100Km: 7,
+		FuelPriceEUR:             1.8,
+		WearFactor:               1.0,
+		CurrentPassengers:        0,
+		Mode:                     PricingFormula,
+	}
+
+	without := SuggestedPriceCents(in)
+	in.TollShareCents = 275
+	withTolls := SuggestedPriceCents(in)
+
+	if withTolls != without+275 {
+		t.Fatalf("with tolls = %d, want %d + 275", withTolls, without)
+	}
+}
+
+// A driver who asks for nothing asks for nothing, tolls included. The figure is
+// a suggestion, and suppressing it must suppress all of it.
+func TestATollShareIsNotSuggestedWhenTheDriverAsksForNothing(t *testing.T) {
+	in := PricingInputs{
+		TripKm:                   60,
+		FuelConsumptionLPer100Km: 7,
+		FuelPriceEUR:             1.8,
+		WearFactor:               1.0,
+		TollShareCents:           275,
+		Mode:                     PricingFree,
+	}
+
+	if got := SuggestedPriceCents(in); got != 0 {
+		t.Fatalf("suggested %d, want 0", got)
+	}
+}
+
+// A short hop under the driver's free-below threshold still costs whatever
+// barrier it passed. Waiving the fuel share is a kindness; waiving a toll the
+// driver paid in cash is a loss.
+func TestATollShareSurvivesTheFreeBelowThreshold(t *testing.T) {
+	in := PricingInputs{
+		TripKm:                   4,
+		FreeBelowKm:              5,
+		FuelConsumptionLPer100Km: 7,
+		FuelPriceEUR:             1.8,
+		WearFactor:               1.0,
+		TollShareCents:           140,
+		Mode:                     PricingFormula,
+	}
+
+	if got := SuggestedPriceCents(in); got != 140 {
+		t.Fatalf("suggested %d, want the 140 of toll alone", got)
+	}
+}

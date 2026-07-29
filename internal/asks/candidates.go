@@ -15,6 +15,7 @@ import (
 	"carpool/internal/geo"
 	"carpool/internal/match"
 	"carpool/internal/outbox"
+	"carpool/internal/tolls"
 )
 
 // ErrNoCandidates means no driver is left to ask for this request.
@@ -171,6 +172,15 @@ func (s *Service) evaluate(ctx context.Context, c match.Candidate, req request) 
 	if err != nil {
 		return match.Insertion{}, 0, err
 	}
+
+	// What this passenger owes for barriers is not proportional to anything —
+	// it depends on which ones they are actually in the car for. A rider joining
+	// after the last toll plaza owes nothing towards it.
+	share, err := s.tollShare(ctx, c.OccurrenceID, req)
+	if err != nil {
+		return match.Insertion{}, 0, err
+	}
+	pricing.TollShareCents = share
 	return insertion, domain.SuggestedPriceCents(pricing), nil
 }
 
@@ -236,6 +246,88 @@ func (s *Service) pricingInputs(ctx context.Context, occurrenceID uuid.UUID, tri
 	}
 	in.Mode = domain.PricingMode(mode)
 	return in, nil
+}
+
+// tollShare works out this passenger's part of the motorway tolls on the
+// driver's route: the barriers between where they get in and where they get
+// out, each divided among the people aboard when it is paid.
+//
+// A route with no tolls, geometry we cannot read, or a station whose price the
+// dataset does not know all come back as zero rather than as an error: a
+// suggested contribution that is missing its toll component is worth far more
+// to a pilot than an ask that never reaches a driver.
+func (s *Service) tollShare(ctx context.Context, occurrenceID uuid.UUID, req request) (int, error) {
+	if s.tolls == nil {
+		return 0, nil
+	}
+
+	var encoded string
+	err := s.pool.QueryRow(ctx,
+		`SELECT ST_AsEncodedPolyline(route_geom, 6) FROM trip_occurrences WHERE id = $1`,
+		occurrenceID).Scan(&encoded)
+	if err != nil {
+		return 0, fmt.Errorf("asks: loading route geometry: %w", err)
+	}
+
+	route, err := geo.DecodePolylinePrecision(encoded, 6)
+	if err != nil || len(route) < 2 {
+		return 0, nil
+	}
+
+	gates, priced := s.tolls.Match(route).Gates(tolls.Car)
+	if !priced || len(gates) == 0 {
+		return 0, nil
+	}
+
+	riders, err := s.ridersAboard(ctx, occurrenceID, route, req)
+	if err != nil {
+		return 0, err
+	}
+
+	shares, err := tolls.Split(gates, riders)
+	if err != nil {
+		return 0, nil // a backwards segment is the matcher's problem, not the price's
+	}
+	return shares.Riders[req.ID.String()], nil
+}
+
+// ridersAboard is everyone whose share of a barrier has to be counted: the
+// passengers already booked, plus the one being priced.
+func (s *Service) ridersAboard(
+	ctx context.Context, occurrenceID uuid.UUID, route []geo.Point, req request,
+) ([]tolls.Rider, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, ST_X(pickup_point), ST_Y(pickup_point),
+		           ST_X(dropoff_point), ST_Y(dropoff_point)
+		FROM bookings
+		WHERE occurrence_id = $1 AND status IN ('confirmed','completed')`, occurrenceID)
+	if err != nil {
+		return nil, fmt.Errorf("asks: loading riders: %w", err)
+	}
+	defer rows.Close()
+
+	var riders []tolls.Rider
+	for rows.Next() {
+		var id uuid.UUID
+		var pickup, dropoff geo.Point
+		if err := rows.Scan(&id, &pickup.Lon, &pickup.Lat, &dropoff.Lon, &dropoff.Lat); err != nil {
+			return nil, fmt.Errorf("asks: scanning rider: %w", err)
+		}
+		from, to, err := tolls.Segment(route, pickup, dropoff)
+		if err != nil {
+			continue // a booking the geometry no longer supports; not this price's problem
+		}
+		riders = append(riders, tolls.Rider{ID: id.String(), FromMetres: from, ToMetres: to})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("asks: reading riders: %w", err)
+	}
+
+	from, to, err := tolls.Segment(route, req.Origin, req.Destination)
+	if err != nil {
+		return nil, err
+	}
+	return append(riders, tolls.Rider{ID: req.ID.String(), FromMetres: from, ToMetres: to}), nil
 }
 
 // errAskExists signals that a pending ask already existed for this request.
