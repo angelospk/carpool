@@ -1,5 +1,5 @@
 import { ApiError, NetworkError, configure, request } from '../client';
-import { clearTokens, resetTokenCache, setTokens } from '../../state/tokens';
+import { clearTokens, getTokens, resetTokenCache, setTokens } from '../../state/tokens';
 
 const json = (status: number, body: unknown) =>
   Promise.resolve(
@@ -20,23 +20,23 @@ beforeEach(async () => {
 
 test('sends the access token as a bearer header', async () => {
   await setTokens({ accessToken: 'access-1', refreshToken: 'refresh-1' });
-  const fetchMock = jest.fn(() => json(200, { ok: true }));
+  const fetchMock = jest.fn((_url: string, init?: RequestInit) => json(200, { ok: true }));
   global.fetch = fetchMock as unknown as typeof fetch;
 
   await request('/v1/me');
 
-  const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+  const headers = fetchMock.mock.calls[0][1]!.headers as Record<string, string>;
   expect(headers.Authorization).toBe('Bearer access-1');
 });
 
 test('omits the bearer header on anonymous requests', async () => {
   await setTokens({ accessToken: 'access-1', refreshToken: 'refresh-1' });
-  const fetchMock = jest.fn(() => json(200, {}));
+  const fetchMock = jest.fn((_url: string, init?: RequestInit) => json(200, {}));
   global.fetch = fetchMock as unknown as typeof fetch;
 
   await request('/v1/regions', { anonymous: true });
 
-  const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+  const headers = fetchMock.mock.calls[0][1]!.headers as Record<string, string>;
   expect(headers.Authorization).toBeUndefined();
 });
 
@@ -64,7 +64,7 @@ test('refreshes once on a 401 and replays the request', async () => {
   await setTokens({ accessToken: 'stale', refreshToken: 'refresh-1' });
 
   const fetchMock = jest
-    .fn()
+    .fn<Promise<Response>, [string, RequestInit?]>()
     .mockImplementationOnce(() => json(401, { error: { code: 'unauthorized' } }))
     .mockImplementationOnce(() => json(200, { access_token: 'fresh', refresh_token: 'refresh-2' }))
     .mockImplementationOnce(() => json(200, { id: 'u1' }));
@@ -73,7 +73,7 @@ test('refreshes once on a 401 and replays the request', async () => {
   const me = await request<{ id: string }>('/v1/me');
 
   expect(me.id).toBe('u1');
-  const replayHeaders = (fetchMock.mock.calls[2][1] as RequestInit).headers as Record<string, string>;
+  const replayHeaders = fetchMock.mock.calls[2][1]!.headers as Record<string, string>;
   expect(replayHeaders.Authorization).toBe('Bearer fresh');
 });
 
@@ -109,7 +109,6 @@ test('a failed refresh clears the session rather than looping', async () => {
 
   await expect(request('/v1/me')).rejects.toBeInstanceOf(ApiError);
 
-  const { getTokens } = await import('../../state/tokens');
   expect(await getTokens()).toBeNull();
 });
 

@@ -19,3 +19,7 @@ jest.mock('expo-constants', () => ({
 
 // Silence the animation warning React Native emits in a jsdom environment.
 global.__DEV__ = true;
+
+// Screens render translated copy, so i18n has to be initialised or every label
+// comes out as its key and assertions test nothing.
+require('./src/i18n');
