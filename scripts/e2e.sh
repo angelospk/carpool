@@ -107,4 +107,28 @@ curl -s -o /dev/null -w '   driver rates passenger: %{http_code}\n' \
   -H 'Content-Type: application/json' -d "{\"stars\":5,\"ratee_id\":\"$PAX\"}"
 psql "$DSN" -tAc "SELECT '   ' || count(*) || ' ratings stored' FROM ratings"
 
+step "12. a lost refresh response does not sign anyone out"
+# The app persists a rotated token only after the response arrives. Retrying with
+# the attempt id that spent the old token must return that same successor rather
+# than looking like a replay and ending the session.
+curl -s -X POST "$API/auth/otp/request" -H 'Content-Type: application/json' \
+  -d '{"phone":"+306900000023"}' -o /dev/null
+CODE=$(grep -ao '"message":"[0-9]\{6\}' "$LOG" | tail -1 | grep -o '[0-9]\{6\}')
+REFRESH=$(curl -s -X POST "$API/auth/otp/verify" -H 'Content-Type: application/json' \
+  -d "{\"phone\":\"+306900000023\",\"code\":\"$CODE\",\"name\":\"Δοκιμή\",\"region_id\":\"$REGION\"}" \
+  | j "d.refresh_token")
+ATTEMPT=$(uuidgen | tr 'A-Z' 'a-z')
+rotate() {
+  curl -s -X POST "$API/auth/refresh" -H 'Content-Type: application/json' \
+    -d "{\"refresh_token\":\"$REFRESH\",\"attempt_id\":\"$1\"}"
+}
+FIRST=$(rotate "$ATTEMPT" | j "d.refresh_token")
+RETRY=$(rotate "$ATTEMPT" | j "d.refresh_token")
+[ "$FIRST" = "$RETRY" ] || { echo "   retry returned a different token"; exit 1; }
+echo "   the retry got the same token back"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/auth/refresh" \
+  -H 'Content-Type: application/json' -d "{\"refresh_token\":\"$RETRY\"}")
+[ "$STATUS" = "200" ] || { echo "   the session did not survive the retry ($STATUS)"; exit 1; }
+echo "   the session is still alive"
+
 printf '\n\033[32me2e scenario passed\033[0m\n'

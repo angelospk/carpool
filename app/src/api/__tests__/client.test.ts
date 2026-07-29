@@ -178,3 +178,42 @@ test('a refresh that lands after sign-out does not restore credentials', async (
 
   expect(await getTokens()).toBeNull();
 });
+
+// The new token is only persisted after the response arrives. If the app dies
+// in between, the token on disk is already spent and the next launch looks like
+// a replay — which the server answers by ending the session. The attempt id is
+// what tells the server "this is my retry, not a thief": it is written to disk
+// *before* the request and reused until a refresh completes.
+test('persists a refresh attempt id before asking, and reuses it after a lost response', async () => {
+  await setTokens({ accessToken: 'access-1', refreshToken: 'refresh-1' });
+
+  // First attempt: the response never arrives.
+  global.fetch = jest.fn((url: string) =>
+    url.endsWith('/v1/auth/refresh')
+      ? Promise.reject(new TypeError('offline'))
+      : json(401, { error: { code: 'expired', message: '' } }),
+  ) as unknown as typeof fetch;
+  await request('/v1/me').catch(() => undefined);
+
+  const stored = await getTokens();
+  expect(stored?.refreshAttemptId).toEqual(expect.any(String));
+
+  // Second attempt, after a restart: the same id must go out.
+  let meCalls = 0;
+  const fetchMock = jest.fn((url: string, _init?: RequestInit) => {
+    if (url.endsWith('/v1/auth/refresh')) {
+      return json(200, { access_token: 'access-2', refresh_token: 'refresh-2' });
+    }
+    meCalls += 1;
+    return meCalls === 1 ? json(401, { error: { code: 'expired', message: '' } }) : json(200, { ok: true });
+  });
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await request('/v1/me');
+
+  const refreshCall = fetchMock.mock.calls.find(([url]) => url.endsWith('/v1/auth/refresh'))!;
+  const sent = JSON.parse(refreshCall[1]!.body as string);
+  expect(sent.attempt_id).toBe(stored!.refreshAttemptId);
+
+  // Once the rotation lands, the id is spent and must not be reused.
+  expect((await getTokens())?.refreshAttemptId).toBeUndefined();
+});

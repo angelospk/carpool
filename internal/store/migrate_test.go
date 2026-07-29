@@ -76,11 +76,16 @@ func TestConcurrentMigratorsBothSucceed(t *testing.T) {
 		}
 	}
 
-	var version int
-	if err := pool.QueryRow(ctx, `SELECT max(version_id) FROM goose_db_version`).Scan(&version); err != nil {
+	// Every migration must be recorded exactly once, however many ran at the
+	// same time: a duplicate row means two runners applied the same file.
+	var applied, distinct int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*), count(DISTINCT version_id) FROM goose_db_version WHERE version_id > 0`).
+		Scan(&applied, &distinct); err != nil {
 		t.Fatalf("reading schema version: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("schema version = %d, want 1", version)
+	want := len(store.MigrationVersions())
+	if applied != want || distinct != want {
+		t.Fatalf("%d migration rows (%d distinct), want %d of each", applied, distinct, want)
 	}
 }

@@ -131,6 +131,31 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
    rely on client-side dedupe by idempotency key (already specced in MOBILE.md).
    Duplicate push delivery is documented as possible, not designed away.
 
+6. **Refresh rotation logged users out after a lost response.** Single-use
+   rotation is right, but the client can only persist the new token *after* the
+   response arrives. An app killed in that window relaunched holding a spent
+   token, which is indistinguishable from a replay, so the family was revoked and
+   a blameless user had to sign in again.
+   **Resolution:** the client writes a random `attempt_id` to secure storage
+   *before* sending and reuses it on retry. A spent token presented with the id
+   that spent it is one request arriving twice and gets the same successor back;
+   any other id is still a replay and still burns the family. The successor is
+   derived as `HMAC(server secret, parent digest || attempt id)` so it can be
+   recomputed for the retry without ever storing a live token. A blind time-based
+   grace window was considered first and rejected on Codex review: it cannot tell
+   a lost response from a thief racing the legitimate client, and it hands the
+   session to whoever asks second.
+
+7. **"Revoke the whole family" could leave a live token behind.** Revocation is
+   an `UPDATE` over the rows that exist when it runs, so a rotation committing
+   alongside it inserted a token the revocation never saw — precisely the token a
+   thief would hold.
+   **Resolution:** every mutation of a family takes `pg_advisory_xact_lock` on
+   the family id first, before the token row, so a revocation cannot interleave
+   with a rotation. A stress test reproduces the old behaviour within two rounds.
+   A family/session table with `revoked_at` (as Codex suggested) would be the
+   structurally cleaner fix and is the thing to do if sessions grow features.
+
 ## Deferred tech (parked, with triggers to revisit)
 
 | Deferred | Revisit when |

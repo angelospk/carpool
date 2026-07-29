@@ -53,3 +53,17 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 	return nil
 }
+
+// MigrationVersions lists the embedded migrations, newest last. Tests use it so
+// that adding a migration does not mean editing a hard-coded number.
+func MigrationVersions() []string {
+	entries, err := migrationsFS.ReadDir("migrations")
+	if err != nil {
+		panic("store: reading embedded migrations: " + err.Error())
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}

@@ -98,12 +98,26 @@ func (d Deps) handleOTPVerify(w http.ResponseWriter, r *http.Request) {
 func (d Deps) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		RefreshToken string `json:"refresh_token"`
+		// AttemptID lets a client that lost the response retry safely; see
+		// SessionService.Refresh. Optional: an absent id means the strict
+		// no-retry rule applies.
+		AttemptID string `json:"attempt_id"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
 
-	pair, err := d.Sessions.Refresh(r.Context(), body.RefreshToken)
+	var attemptID uuid.UUID
+	if body.AttemptID != "" {
+		parsed, err := uuid.Parse(body.AttemptID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "attempt_id must be a uuid")
+			return
+		}
+		attemptID = parsed
+	}
+
+	pair, err := d.Sessions.Refresh(r.Context(), body.RefreshToken, attemptID)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid_token", "the refresh token is not valid")
 		return

@@ -218,10 +218,14 @@ Parked with a reason, not forgotten:
   booking is cancelled mid-connection keeps receiving that trip's chat until
   they disconnect. Sockets are short-lived and chat is not sensitive, so this is
   accepted for the pilot rather than fixed with periodic revalidation.
-- Refresh-token rotation has an unavoidable commit window: if the app dies after
-  the server rotates but before the new token is stored, the next launch replays
-  the old one and the family is revoked, forcing a re-login. Closing it properly
-  needs server-side refresh idempotency or a short reuse grace window.
+- Refresh retries are idempotent per attempt id, but a retry only works while
+  its successor is unused: a client that somehow used the new token and *then*
+  retried the old request gets a clean 401 rather than a resend. That is the
+  intended fail-closed direction.
+- Family revocation is serialised by an advisory lock rather than by a family
+  row. Correct, but it means every rotation takes one extra lock; a
+  `refresh_token_families` table would be the tidier shape if sessions gain
+  features (device names, per-session logout in the UI).
 - The party cap counts parties per occurrence rather than concurrently aboard.
   Stricter than MATCHING.md's wording; it can only refuse rides a
   concurrency-aware cap would allow, never admit ones it would not.

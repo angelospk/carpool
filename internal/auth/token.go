@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -91,6 +92,23 @@ func NewRefreshToken() (string, error) {
 		return "", fmt.Errorf("auth: generating refresh token: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// DeriveRefreshToken returns the refresh token that a given rotation attempt
+// mints. It is deterministic, which is the whole point: only the digest of a
+// refresh token is stored, so answering a retry with the *same* token would
+// otherwise mean keeping the plaintext around. Recomputing it from the server
+// secret keeps the database free of live credentials.
+//
+// The secret is the server's, so possession of the parent token and the attempt
+// id alone does not let a client predict its own next token.
+func (i *TokenIssuer) DeriveRefreshToken(parentHash string, attemptID uuid.UUID) string {
+	mac := hmac.New(sha256.New, i.secret)
+	mac.Write([]byte("carpool/refresh-rotation\x00"))
+	mac.Write([]byte(parentHash))
+	mac.Write([]byte{0})
+	mac.Write([]byte(attemptID.String()))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 // HashRefreshToken returns the digest stored in place of the raw token, so a

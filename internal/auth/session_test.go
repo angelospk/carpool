@@ -77,7 +77,7 @@ func TestRefreshRotatesTheToken(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	second, err := svc.Refresh(ctx, first.RefreshToken)
+	second, err := svc.Refresh(ctx, first.RefreshToken, uuid.Nil)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestRefreshRotatesTheToken(t *testing.T) {
 	if second.RefreshToken == first.RefreshToken {
 		t.Fatal("Refresh must issue a new refresh token, not return the same one")
 	}
-	if _, err := svc.Refresh(ctx, second.RefreshToken); err != nil {
+	if _, err := svc.Refresh(ctx, second.RefreshToken, uuid.Nil); err != nil {
 		t.Fatalf("the rotated token should itself be usable: %v", err)
 	}
 }
@@ -93,7 +93,7 @@ func TestRefreshRotatesTheToken(t *testing.T) {
 func TestRefreshRejectsAnUnknownToken(t *testing.T) {
 	svc, _, _, _ := newSessions(t)
 
-	if _, err := svc.Refresh(context.Background(), "not-a-real-token"); !errors.Is(err, auth.ErrInvalidRefresh) {
+	if _, err := svc.Refresh(context.Background(), "not-a-real-token", uuid.Nil); !errors.Is(err, auth.ErrInvalidRefresh) {
 		t.Fatalf("error = %v, want ErrInvalidRefresh", err)
 	}
 }
@@ -108,7 +108,7 @@ func TestRefreshRejectsAnExpiredToken(t *testing.T) {
 
 	c.Advance(auth.RefreshTokenTTL + time.Hour)
 
-	if _, err := svc.Refresh(ctx, pair.RefreshToken); !errors.Is(err, auth.ErrInvalidRefresh) {
+	if _, err := svc.Refresh(ctx, pair.RefreshToken, uuid.Nil); !errors.Is(err, auth.ErrInvalidRefresh) {
 		t.Fatalf("error = %v, want ErrInvalidRefresh", err)
 	}
 }
@@ -123,18 +123,18 @@ func TestReplayingARotatedTokenRevokesTheWholeFamily(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	second, err := svc.Refresh(ctx, first.RefreshToken)
+	second, err := svc.Refresh(ctx, first.RefreshToken, uuid.Nil)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
 
 	// The attacker replays the already-used token.
-	if _, err := svc.Refresh(ctx, first.RefreshToken); !errors.Is(err, auth.ErrInvalidRefresh) {
+	if _, err := svc.Refresh(ctx, first.RefreshToken, uuid.Nil); !errors.Is(err, auth.ErrInvalidRefresh) {
 		t.Fatalf("replay returned %v, want ErrInvalidRefresh", err)
 	}
 
 	// The legitimate client's current token must now be dead too.
-	if _, err := svc.Refresh(ctx, second.RefreshToken); !errors.Is(err, auth.ErrInvalidRefresh) {
+	if _, err := svc.Refresh(ctx, second.RefreshToken, uuid.Nil); !errors.Is(err, auth.ErrInvalidRefresh) {
 		t.Fatalf("after a replay the live token returned %v, want ErrInvalidRefresh", err)
 	}
 }
@@ -151,7 +151,7 @@ func TestRevokeEndsTheSession(t *testing.T) {
 		t.Fatalf("Revoke: %v", err)
 	}
 
-	if _, err := svc.Refresh(ctx, pair.RefreshToken); !errors.Is(err, auth.ErrInvalidRefresh) {
+	if _, err := svc.Refresh(ctx, pair.RefreshToken, uuid.Nil); !errors.Is(err, auth.ErrInvalidRefresh) {
 		t.Fatalf("error = %v, want ErrInvalidRefresh after revocation", err)
 	}
 }
@@ -173,7 +173,7 @@ func TestSessionsAreIndependentAcrossDevices(t *testing.T) {
 	}
 
 	// Logging out on one device must not sign the user out everywhere.
-	if _, err := svc.Refresh(ctx, tablet.RefreshToken); err != nil {
+	if _, err := svc.Refresh(ctx, tablet.RefreshToken, uuid.Nil); err != nil {
 		t.Fatalf("the other device's session was ended too: %v", err)
 	}
 }
@@ -198,7 +198,7 @@ func TestConcurrentRefreshOfOneTokenSucceedsExactlyOnce(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, errs[i] = svc.Refresh(ctx, pair.RefreshToken)
+			_, errs[i] = svc.Refresh(ctx, pair.RefreshToken, uuid.Nil)
 		}()
 	}
 	close(start)
@@ -212,5 +212,192 @@ func TestConcurrentRefreshOfOneTokenSucceedsExactlyOnce(t *testing.T) {
 	}
 	if ok != 1 {
 		t.Fatalf("%d of %d concurrent refreshes succeeded, want exactly 1", ok, racers)
+	}
+}
+
+// The app persists a new refresh token only after the response arrives. If it
+// dies in between — or the response is lost — the token it still holds is
+// already spent on the server, and the strict rule above would log the user out
+// through no fault of their own.
+//
+// The client therefore stores a random attempt id *before* sending, and replays
+// the request with the same id. A used token presented with the attempt id that
+// consumed it is a retry of one logical request, not a replay of a stolen one,
+// so it gets the same successor back.
+func TestRetryingARefreshWithTheSameAttemptIDReturnsTheSameToken(t *testing.T) {
+	svc, _, _, userID := newSessions(t)
+	ctx := context.Background()
+	first, err := svc.Create(ctx, userID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	attempt := uuid.New()
+	second, err := svc.Refresh(ctx, first.RefreshToken, attempt)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// The response never reached the client, so it retries with the same id.
+	retried, err := svc.Refresh(ctx, first.RefreshToken, attempt)
+	if err != nil {
+		t.Fatalf("retrying with the same attempt id failed: %v", err)
+	}
+	if retried.RefreshToken != second.RefreshToken {
+		t.Fatal("a retry must return the same refresh token, not a different one")
+	}
+	if retried.AccessToken == "" {
+		t.Fatal("a retry must still return a usable access token")
+	}
+	// And the session is intact: the family was not burned.
+	if _, err := svc.Refresh(ctx, retried.RefreshToken, uuid.New()); err != nil {
+		t.Fatalf("the session did not survive the retry: %v", err)
+	}
+}
+
+// A retry proves nothing about a *different* request. Presenting a spent token
+// with any other attempt id is still the signature of a stolen token.
+func TestReplayingWithADifferentAttemptIDStillBurnsTheFamily(t *testing.T) {
+	svc, _, _, userID := newSessions(t)
+	ctx := context.Background()
+	first, err := svc.Create(ctx, userID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	second, err := svc.Refresh(ctx, first.RefreshToken, uuid.New())
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	if _, err := svc.Refresh(ctx, first.RefreshToken, uuid.New()); !errors.Is(err, auth.ErrInvalidRefresh) {
+		t.Fatalf("replay with a fresh attempt id returned %v, want ErrInvalidRefresh", err)
+	}
+	if _, err := svc.Refresh(ctx, second.RefreshToken, uuid.New()); !errors.Is(err, auth.ErrInvalidRefresh) {
+		t.Fatalf("after a replay the live token returned %v, want the family revoked", err)
+	}
+}
+
+// A retry that arrives after the client has already moved on must fail closed —
+// but it must not take the working session down with it.
+func TestALateRetryFailsWithoutEndingTheSession(t *testing.T) {
+	svc, _, _, userID := newSessions(t)
+	ctx := context.Background()
+	first, err := svc.Create(ctx, userID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	attempt := uuid.New()
+	second, err := svc.Refresh(ctx, first.RefreshToken, attempt)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	third, err := svc.Refresh(ctx, second.RefreshToken, uuid.New())
+	if err != nil {
+		t.Fatalf("Refresh (second rotation): %v", err)
+	}
+
+	// The successor has since been spent, so there is nothing to hand back.
+	if _, err := svc.Refresh(ctx, first.RefreshToken, attempt); !errors.Is(err, auth.ErrInvalidRefresh) {
+		t.Fatalf("late retry returned %v, want ErrInvalidRefresh", err)
+	}
+	if _, err := svc.Refresh(ctx, third.RefreshToken, uuid.New()); err != nil {
+		t.Fatalf("a late retry ended the live session: %v", err)
+	}
+}
+
+// Duplicate delivery of one logical refresh must never let one successful
+// response invalidate another. Every racer sees the same token, and the family
+// gains exactly one successor.
+func TestConcurrentRetriesOfOneAttemptAllReturnTheSameToken(t *testing.T) {
+	svc, pool, _, userID := newSessions(t)
+	ctx := context.Background()
+	first, err := svc.Create(ctx, userID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	const racers = 6
+	attempt := uuid.New()
+	pairs := make([]auth.TokenPair, racers)
+	errs := make([]error, racers)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range racers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			pairs[i], errs[i] = svc.Refresh(ctx, first.RefreshToken, attempt)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("racer %d failed: %v", i, err)
+		}
+		if pairs[i].RefreshToken != pairs[0].RefreshToken {
+			t.Fatalf("racer %d got a different refresh token", i)
+		}
+	}
+
+	var tokens int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM refresh_tokens WHERE user_id = $1`, userID).Scan(&tokens); err != nil {
+		t.Fatalf("counting tokens: %v", err)
+	}
+	if tokens != 2 {
+		t.Fatalf("%d refresh tokens exist, want 2 (the original and one successor)", tokens)
+	}
+}
+
+// Revoking a family is an UPDATE over the rows that exist when it runs. A
+// rotation committing at the same moment inserts a row that update never saw,
+// so "the whole family is revoked" could leave one live token behind — exactly
+// the token a thief would be holding.
+func TestBurningAFamilyRacesNoRotation(t *testing.T) {
+	svc, pool, _, userID := newSessions(t)
+	ctx := context.Background()
+
+	for round := range 30 {
+		spent, err := svc.Create(ctx, userID)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		live, err := svc.Refresh(ctx, spent.RefreshToken, uuid.Nil)
+		if err != nil {
+			t.Fatalf("Refresh: %v", err)
+		}
+
+		// One goroutine rotates the live token; the other replays the spent one
+		// and burns the family.
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		var rotated auth.TokenPair
+		var rotErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			rotated, rotErr = svc.Refresh(ctx, live.RefreshToken, uuid.Nil)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _ = svc.Refresh(ctx, spent.RefreshToken, uuid.Nil)
+		}()
+		close(start)
+		wg.Wait()
+
+		// Whatever the interleaving, nothing in that family may still work.
+		if rotErr == nil {
+			if _, err := svc.Refresh(ctx, rotated.RefreshToken, uuid.Nil); !errors.Is(err, auth.ErrInvalidRefresh) {
+				t.Fatalf("round %d: a token survived the family revocation (err=%v)", round, err)
+			}
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM refresh_tokens WHERE user_id = $1`, userID); err != nil {
+			t.Fatalf("cleanup: %v", err)
+		}
 	}
 }

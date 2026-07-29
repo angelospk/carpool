@@ -16,6 +16,14 @@ const KEY = 'carpool.tokens';
 export type Tokens = {
   accessToken: string;
   refreshToken: string;
+  /**
+   * Identifies the in-flight rotation of `refreshToken`, written to disk before
+   * the request goes out. Presenting a spent token with the id that spent it
+   * tells the server this is a retry of one request rather than two parties
+   * holding one credential, so a lost response costs a round trip instead of
+   * the whole session. Absent when no rotation is outstanding.
+   */
+  refreshAttemptId?: string;
 };
 
 let cached: Tokens | null | undefined;

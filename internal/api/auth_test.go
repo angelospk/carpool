@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"github.com/google/uuid"
 	"net/http"
 	"testing"
 	"time"
@@ -135,6 +136,43 @@ func TestRefreshReturnsANewTokenPair(t *testing.T) {
 	}
 	if body.AccessToken == "" {
 		t.Fatal("no access token returned")
+	}
+}
+
+// The client retries a refresh whose response it never saw, presenting the same
+// attempt id. Over HTTP that must come back with the same token pair rather than
+// a 401, which is what the old strict rule returned and what logged users out.
+func TestRetryingARefreshOverHTTPReturnsTheSamePair(t *testing.T) {
+	h := newHarness(t)
+	_, refresh := h.signUp(phone, "Test")
+	attempt := uuid.New().String()
+
+	body := map[string]any{"refresh_token": refresh, "attempt_id": attempt}
+	first := h.do(http.MethodPost, "/v1/auth/refresh", body, "")
+	second := h.do(http.MethodPost, "/v1/auth/refresh", body, "")
+
+	if first.Code != http.StatusOK || second.Code != http.StatusOK {
+		t.Fatalf("status = %d then %d, want 200 twice; %s", first.Code, second.Code, second.Body.String())
+	}
+	var a, b struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	h.decode(first, &a)
+	h.decode(second, &b)
+	if a.RefreshToken != b.RefreshToken {
+		t.Fatal("the retry returned a different refresh token")
+	}
+}
+
+func TestRefreshRejectsAMalformedAttemptID(t *testing.T) {
+	h := newHarness(t)
+	_, refresh := h.signUp(phone, "Test")
+
+	rec := h.do(http.MethodPost, "/v1/auth/refresh",
+		map[string]any{"refresh_token": refresh, "attempt_id": "not-a-uuid"}, "")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 }
 

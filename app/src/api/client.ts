@@ -60,6 +60,19 @@ export function setSessionEndedHandler(fn: (() => void) | null) {
   onSessionEnded = fn;
 }
 
+/**
+ * A fresh rotation attempt id.
+ *
+ * Expo's runtime provides `crypto.randomUUID`; the fallback only has to be
+ * unique, not unguessable — the id is a request nonce, and on its own it grants
+ * nothing without the refresh token it accompanies.
+ */
+function newAttemptId(): string {
+  const c = globalThis.crypto;
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+}
+
 async function refreshTokens(): Promise<boolean> {
   // Captured before the round trip. If the user signs out or signs in as
   // someone else meanwhile, the write below is refused rather than resurrecting
@@ -69,12 +82,20 @@ async function refreshTokens(): Promise<boolean> {
   const tokens = await getTokens();
   if (!tokens?.refreshToken) return false;
 
+  // Durable before the request, so a retry after a crash presents the same id.
+  // An id already on disk belongs to an attempt that never completed; reusing it
+  // is the whole point.
+  const attemptId = tokens.refreshAttemptId ?? newAttemptId();
+  if (!tokens.refreshAttemptId) {
+    if (!(await setTokens({ ...tokens, refreshAttemptId: attemptId }, startedAt))) return false;
+  }
+
   let res: Response;
   try {
     res = await fetch(`${baseUrl}/v1/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: tokens.refreshToken }),
+      body: JSON.stringify({ refresh_token: tokens.refreshToken, attempt_id: attemptId }),
     });
   } catch {
     // A transport failure says nothing about the token. Keep it.
