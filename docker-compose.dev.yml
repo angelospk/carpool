@@ -45,10 +45,13 @@ services:
     volumes:
       - ./osrm-data:/data:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:5000/nearest/v1/driving/25.87,40.85 || exit 1"]
+      # The OSRM image ships neither wget nor curl, but it does have bash, so
+      # use bash's /dev/tcp to check the port is accepting connections.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5000"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
 volumes:
   pgdata:
