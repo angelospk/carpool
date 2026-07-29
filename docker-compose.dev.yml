@@ -30,7 +30,17 @@ services:
       - -c
       - work_mem=16MB
       - -c
-      - max_connections=30
+      - max_connections=100
+      # Durability is deliberately traded away HERE ONLY. This file is the
+      # development and test stack, where every integration test creates and
+      # drops a database and fsync dominates the runtime. The production compose
+      # must never carry these.
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U carpool -d carpool"]
       interval: 5s

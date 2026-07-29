@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/api"
+	"carpool/internal/auth"
+	"carpool/internal/clock"
 	"carpool/internal/config"
 	"carpool/internal/store"
 )
@@ -51,12 +53,35 @@ func run() error {
 	}
 	slog.Info("schema is up to date")
 
-	if cfg.DevMode {
-		slog.Warn("DEV_MODE is enabled: OTP codes are printed to the console and not sent by SMS")
+	if cfg.RegionFixture != "" {
+		if err := store.SeedRegionsFromFile(ctx, pool, cfg.RegionFixture, cfg.FuelPriceEUR); err != nil {
+			return err
+		}
+		slog.Info("regions seeded", "fixture", cfg.RegionFixture)
 	}
 
+	// The SMS provider is a deployment choice. Only DEV_MODE may select the
+	// console sender, which prints codes instead of sending them.
+	var sms auth.SMSSender
+	if cfg.DevMode {
+		slog.Warn("DEV_MODE is enabled: OTP codes are printed to the console and not sent by SMS")
+		sms = auth.ConsoleSender{}
+	} else {
+		// No production SMS provider is wired yet; refusing to boot is safer
+		// than silently starting an instance whose sign-up cannot work.
+		return errors.New("no SMS provider is configured: set DEV_MODE=true for local development")
+	}
+
+	clk := clock.Real{}
+	issuer := auth.NewTokenIssuer(cfg.JWTSecret, clk)
+
 	srv := api.NewServer(cfg.HTTPAddr, api.NewRouter(api.Deps{
-		Ready: pool.Ping,
+		Ready:    pool.Ping,
+		Pool:     pool,
+		Clock:    clk,
+		Issuer:   issuer,
+		OTP:      auth.NewOTPService(pool, clk, sms),
+		Sessions: auth.NewSessionService(pool, clk, issuer),
 	}))
 
 	slog.Info("listening", "addr", cfg.HTTPAddr)

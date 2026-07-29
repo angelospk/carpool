@@ -8,6 +8,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"carpool/internal/auth"
+	"carpool/internal/clock"
 )
 
 // readyTimeout bounds the readiness probe so a hung database cannot hold the
@@ -19,6 +23,12 @@ type Deps struct {
 	// Ready reports whether downstream dependencies (currently Postgres) are
 	// usable. A nil error means ready.
 	Ready func(context.Context) error
+
+	Pool     *pgxpool.Pool
+	Clock    clock.Clock
+	Issuer   *auth.TokenIssuer
+	OTP      *auth.OTPService
+	Sessions *auth.SessionService
 }
 
 // NewRouter builds the versioned HTTP handler.
@@ -39,6 +49,29 @@ func NewRouter(deps Deps) http.Handler {
 		// liveness probe, so it shares the handler.
 		r.Get("/health", handleLivez)
 		r.Get("/readyz", handleReadyz(deps.Ready))
+
+		// The health probes above are the only routes that work without the
+		// service dependencies, so that a half-configured process still reports
+		// honestly rather than panicking.
+		if deps.Pool == nil {
+			return
+		}
+
+		r.Get("/regions", deps.handleListRegions)
+
+		r.Route("/auth", func(r chi.Router) {
+			r.Post("/otp/request", deps.handleOTPRequest)
+			r.Post("/otp/verify", deps.handleOTPVerify)
+			r.Post("/refresh", deps.handleRefresh)
+			r.Post("/logout", deps.handleLogout)
+		})
+
+		r.Group(func(r chi.Router) {
+			r.Use(requireAuth(deps.Issuer))
+
+			r.Get("/me", deps.handleGetMe)
+			r.Patch("/me", deps.handlePatchMe)
+		})
 	})
 
 	return r

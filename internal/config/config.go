@@ -5,7 +5,10 @@
 // mutating global process state.
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+)
 
 // minJWTSecretLen is 32 bytes — a 256-bit key, matching HS256's block size.
 const minJWTSecretLen = 32
@@ -20,6 +23,14 @@ type Config struct {
 	HTTPAddr    string
 	JWTSecret   string
 
+	// RegionFixture, when set, is a GeoJSON file seeded into regions at boot.
+	RegionFixture string
+	// FuelPriceEUR is the price seeded regions start with; admins update it later.
+	FuelPriceEUR float64
+	// OSRMDataVersion is stamped onto stored routes so a map-data swap can
+	// trigger re-snapping.
+	OSRMDataVersion string
+
 	// DevMode enables developer conveniences that must never be reachable in
 	// production — most importantly printing the OTP to the console instead of
 	// sending an SMS. It defaults to false so production is the safe default.
@@ -33,9 +44,17 @@ func Load(lookup LookupFunc) (Config, error) {
 		OSRMURL:  optional(lookup, "OSRM_URL", "http://localhost:5000"),
 		HTTPAddr: optional(lookup, "HTTP_ADDR", ":8080"),
 		DevMode:  optional(lookup, "DEV_MODE", "false") == "true",
+
+		RegionFixture:   optional(lookup, "REGION_FIXTURE", ""),
+		OSRMDataVersion: optional(lookup, "OSRM_DATA_VERSION", "unknown"),
 	}
 
 	var err error
+	cfg.FuelPriceEUR, err = parseFloat(optional(lookup, "FUEL_PRICE_EUR", "1.800"), "FUEL_PRICE_EUR")
+	if err != nil {
+		return Config{}, err
+	}
+
 	if cfg.DatabaseURL, err = required(lookup, "DATABASE_URL"); err != nil {
 		return Config{}, err
 	}
@@ -47,6 +66,14 @@ func Load(lookup LookupFunc) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func parseFloat(v, key string) (float64, error) {
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s must be a number, got %q", key, v)
+	}
+	return f, nil
 }
 
 func required(lookup LookupFunc, key string) (string, error) {
