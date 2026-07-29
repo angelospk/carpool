@@ -172,6 +172,36 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
    reopen both races, so if this ever runs on more than one replica the advisory
    lock must ship everywhere before attempt ids are enabled.
 
+8. **Toll estimates are quoted per ask, and the roster moves underneath them.**
+   The suggested contribution now includes each passenger's share of the motorway
+   barriers they will be in the car for (`internal/tolls`). Four limits, all
+   raised by Codex review of the implementation and all accepted for the pilot
+   *because the app never moves money* — the figure is a suggestion the two sides
+   settle in cash:
+   - The share is computed against the driver's **current** route, not the route
+     the new passenger's detour would create. A detour that adds or avoids a
+     barrier is not reflected until the booking is made.
+   - Quotes are not rebalanced. A first passenger quoted half a barrier is not
+     re-quoted when a second joins and the fair share becomes a third. The trip
+     screen recomputes for everyone aboard; the ask does not.
+   - The occupancy count for fuel and the roster for tolls are read in separate
+     queries, so a booking confirmed between them makes the two disagree.
+   - A route that retraces itself (A→B→A) projects a passenger's stops onto the
+     first traversal, so a return passenger cannot be priced. The gross-match
+     filter already refuses such candidates, so this is unreachable today.
+   Closing the first three properly means freezing an allocation at booking and
+   settling it at completion — a ledger, which the pilot deliberately does not
+   have. Revisit if contributions ever become anything other than cash.
+
+9. **The toll dataset is a copy, and copies go stale.** Prices are the operators'
+   own published cash tariffs, collected through vriskoapostasi.gr by
+   `scripts/harvest-tolls.py` and checked in. Electronic-pass discounts and
+   permanent-resident exemptions are not modelled, so the figure is an estimate
+   and is labelled as one. The refresh script refuses to write silently when a
+   station moves, changes direction, disappears, or changes price by more than a
+   quarter — those want a human. Re-run it when tariffs change, then run
+   `go test ./internal/tolls/`, which replays 22 real routes.
+
 ## Deferred tech (parked, with triggers to revisit)
 
 | Deferred | Revisit when |

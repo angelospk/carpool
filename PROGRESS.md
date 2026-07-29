@@ -219,6 +219,31 @@ Parked with a reason, not forgotten:
 - **Everything in SPEC.md's "explicitly deferred" list**: live location sharing,
   driving detection, learned routes, waypoints, web app, payments.
 
+## Tolls (added 2026-07-29)
+
+`internal/tolls` computes the motorway barriers on a route and splits them by
+the stretch each rider actually travels. 93 stations, harvested from
+vriskoapostasi.gr by routing every Greek motorway corridor in both directions
+(`scripts/harvest-tolls.py`) and shipped in the binary — the source cannot answer
+"which barriers was this passenger in the car for", which is the whole point.
+
+Matching is a gate line, not a proximity test: 25 stations are co-located pairs
+distinguished only by direction. A route must cross a segment laid across the
+carriageway, in an agreeing direction, within 10 m of the barrier — a threshold
+measured from 162 true traversals (worst 3.2 m) against the A8 running 22 m past
+the Attiki Odos plaza it does not pay.
+
+Verified against 22 real routes covering every operator and both directions of
+four corridors: identical stations, identical totals, to the cent. Try it:
+
+```bash
+go build -o bin/tolls ./cmd/tolls
+./bin/tolls -from 40.8457,25.8740 -to 41.1214,25.4058 \
+            -rider "Κομοτηνή:41.0,25.6:41.1214,25.4058"
+```
+
+Limits are written up in RISKS.md items 8 and 9.
+
 ## Known limitations
 
 - A websocket subscription is authorized once, at connect. A passenger whose

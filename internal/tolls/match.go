@@ -37,6 +37,11 @@ const (
 	headingToleranceDeg = 45
 	// headingAmbiguousDeg is reported rather than charged.
 	headingAmbiguousDeg = 70
+	// samePassageM is how far apart two crossings of one plaza have to be before
+	// they count as two separate passages through it. Dense geometry can cross
+	// one gate line twice; a car that loops back through the same plaza an hour
+	// later has genuinely paid twice.
+	samePassageM = 500
 	// headingChordM is the distance either side of the barrier used to measure
 	// the route's heading. One segment is too short: OSRM geometry is dense in
 	// bends, and a single 5 m segment inside a toll plaza points anywhere.
@@ -53,90 +58,118 @@ func (d *Dataset) Match(route []geo.Point) Result {
 
 	cumulative := cumulativeMetres(route)
 
-	// Group members are the two carriageways of one physical plaza. Only the
-	// best-agreeing member of a group may charge.
-	bestInGroup := map[int]Crossing{}
+	var accepted []Crossing
 	var ambiguous []Ambiguity
 
 	for _, s := range d.Stations {
-		hit, off, metres, ok := crossesGate(route, cumulative, s)
-		if !ok {
+		passes, near := gatePasses(route, cumulative, s)
+		if !near {
 			continue
 		}
-		if !hit {
-			if off <= headingAmbiguousDeg {
-				ambiguous = append(ambiguous, Ambiguity{Station: s, HeadingOff: off})
+		for _, p := range passes {
+			if p.headingOff > headingToleranceDeg {
+				if p.headingOff <= headingAmbiguousDeg {
+					ambiguous = append(ambiguous, Ambiguity{Station: s, HeadingOff: p.headingOff})
+				}
+				continue
+			}
+			accepted = append(accepted, Crossing{
+				Station: s, MetresAlong: p.metres, HeadingOff: p.headingOff,
+			})
+		}
+	}
+
+	sort.Slice(accepted, func(i, j int) bool {
+		return accepted[i].MetresAlong < accepted[j].MetresAlong
+	})
+
+	// Both carriageways of one plaza sit at the same place, so a route can
+	// appear to cross both. Only the better-agreeing one is real — but only
+	// within a single passage: a route that comes back the other way later has
+	// genuinely paid the plaza twice, and must be charged twice.
+	for _, c := range accepted {
+		if i := lastOfGroupNear(res.Crossings, c); i >= 0 {
+			if c.HeadingOff < res.Crossings[i].HeadingOff {
+				res.Crossings[i] = c
 			}
 			continue
 		}
-
-		candidate := Crossing{Station: s, MetresAlong: metres, HeadingOff: off}
-		if existing, seen := bestInGroup[s.Group]; !seen || off < existing.HeadingOff {
-			bestInGroup[s.Group] = candidate
-		}
-	}
-
-	for _, c := range bestInGroup {
 		res.Crossings = append(res.Crossings, c)
 	}
-	sort.Slice(res.Crossings, func(i, j int) bool {
-		return res.Crossings[i].MetresAlong < res.Crossings[j].MetresAlong
-	})
 	res.Ambiguous = ambiguous
 	return res
 }
 
-// crossesGate reports whether the route crosses the station's gate line, how
-// far the route's heading was from the station's, and how far along the route
-// the barrier is.
-//
-// ok is false when the route never came near the station at all, which is the
-// overwhelmingly common case and worth leaving out of the ambiguity list.
-func crossesGate(route []geo.Point, cumulative []float64, s Station) (hit bool, headingOff float64, metres float64, ok bool) {
-	near := false
-	bestOff := math.MaxFloat64
-	var bestMetres float64
-	closest := math.MaxFloat64
+// pass is one crossing of one station's gate line.
+type pass struct {
+	metres     float64
+	headingOff float64
+}
 
+// gatePasses returns every place the route crosses this station's gate line.
+//
+// near is false when the route never came within the candidate radius, which is
+// the overwhelmingly common case and worth leaving out of the ambiguity list.
+//
+// Consecutive segments crossing the same gate are one passage: a plaza is wide
+// enough that dense geometry can cross the line more than once while the car
+// goes through it exactly once.
+func gatePasses(route []geo.Point, cumulative []float64, s Station) (passes []pass, near bool) {
 	for i := 0; i+1 < len(route); i++ {
 		a, b := route[i], route[i+1]
+		// The approach distance is judged on the segment that crosses the
+		// barrier, never on the route as a whole: a road that brushes past the
+		// plaza somewhere else says nothing about whether this crossing is real.
 		d := pointToSegmentM(s.Lat, s.Lon, a, b)
-		if d < closest {
-			closest = d
-		}
 		if d > candidateRadiusM {
 			continue
 		}
 		near = true
+		if d > maxApproachM {
+			continue
+		}
 
+		best := math.MaxFloat64
+		var at float64
 		for _, bearing := range s.Bearings {
 			p, q := gateLine(s, bearing)
 			frac, crossed := segmentIntersection(a, b, p, q)
 			if !crossed {
 				continue
 			}
-
-			at := cumulative[i] + frac*(cumulative[i+1]-cumulative[i])
-			off := angleBetween(headingAt(route, cumulative, at), bearing)
-			if off < bestOff {
-				bestOff, bestMetres = off, at
+			metres := cumulative[i] + frac*(cumulative[i+1]-cumulative[i])
+			off := angleBetween(headingAt(route, cumulative, metres), bearing)
+			if off < best {
+				best, at = off, metres
 			}
 		}
-	}
+		if best == math.MaxFloat64 {
+			continue
+		}
 
-	if !near {
-		return false, 0, 0, false
+		if n := len(passes); n > 0 && at-passes[n-1].metres < samePassageM {
+			if best < passes[n-1].headingOff {
+				passes[n-1] = pass{metres: at, headingOff: best}
+			}
+			continue
+		}
+		passes = append(passes, pass{metres: at, headingOff: best})
 	}
-	if bestOff == math.MaxFloat64 {
-		// Came close but never crossed the barrier — an exit taken before the
-		// plaza, or the road on the other side of it.
-		return false, 0, 0, false
+	return passes, near
+}
+
+// lastOfGroupNear finds an already-accepted crossing of the same physical plaza
+// close enough to be the same passage through it.
+func lastOfGroupNear(accepted []Crossing, c Crossing) int {
+	for i := len(accepted) - 1; i >= 0; i-- {
+		if accepted[i].MetresAlong < c.MetresAlong-samePassageM {
+			return -1
+		}
+		if accepted[i].Station.Group == c.Station.Group {
+			return i
+		}
 	}
-	if closest > maxApproachM {
-		// Passing the plaza is not the same as going through it.
-		return false, 0, 0, false
-	}
-	return bestOff <= headingToleranceDeg, bestOff, bestMetres, true
+	return -1
 }
 
 // gateLine returns the two ends of a segment laid across the carriageway at the
