@@ -117,3 +117,64 @@ test('a 204 resolves without a body', async () => {
 
   await expect(request('/v1/trips/1/confirm', { method: 'POST' })).resolves.toBeUndefined();
 });
+
+// --- regression tests for issues found in adversarial review ---
+
+// A refresh token is the whole session. A 500 or a rate limit from the refresh
+// endpoint says nothing about whether the token is still valid, so discarding
+// it there signs the user out for a server hiccup.
+test('a server error during refresh keeps the refresh token', async () => {
+  await setTokens({ accessToken: 'stale', refreshToken: 'refresh-1' });
+
+  global.fetch = jest.fn((url: string) =>
+    String(url).endsWith('/v1/auth/refresh')
+      ? json(503, { error: { code: 'unavailable' } })
+      : json(401, { error: { code: 'unauthorized' } }),
+  ) as unknown as typeof fetch;
+
+  await expect(request('/v1/me')).rejects.toBeInstanceOf(ApiError);
+
+  expect(await getTokens()).not.toBeNull();
+});
+
+test('a rate-limited refresh keeps the refresh token', async () => {
+  await setTokens({ accessToken: 'stale', refreshToken: 'refresh-1' });
+
+  global.fetch = jest.fn((url: string) =>
+    String(url).endsWith('/v1/auth/refresh')
+      ? json(429, { error: { code: 'rate_limited' } })
+      : json(401, { error: { code: 'unauthorized' } }),
+  ) as unknown as typeof fetch;
+
+  await expect(request('/v1/me')).rejects.toBeInstanceOf(ApiError);
+
+  expect(await getTokens()).not.toBeNull();
+});
+
+// Signing out while a refresh is in flight must not put credentials back on the
+// device: the next launch would silently sign the user back in.
+test('a refresh that lands after sign-out does not restore credentials', async () => {
+  await setTokens({ accessToken: 'stale', refreshToken: 'refresh-1' });
+
+  let releaseRefresh: () => void = () => {};
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+
+  global.fetch = jest.fn(async (url: string) => {
+    if (String(url).endsWith('/v1/auth/refresh')) {
+      await refreshGate;
+      return (await json(200, { access_token: 'fresh', refresh_token: 'refresh-2' })) as Response;
+    }
+    return (await json(401, { error: { code: 'unauthorized' } })) as Response;
+  }) as unknown as typeof fetch;
+
+  const inFlight = request('/v1/me').catch(() => undefined);
+
+  // The user signs out while the refresh is still open.
+  await clearTokens();
+  releaseRefresh();
+  await inFlight;
+
+  expect(await getTokens()).toBeNull();
+});

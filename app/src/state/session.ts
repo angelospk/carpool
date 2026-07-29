@@ -4,7 +4,8 @@
 import { create } from 'zustand';
 
 import { api } from '../api/endpoints';
-import { clearTokens, getTokens, setTokens } from './tokens';
+import { bumpTokenEpoch, clearTokens, getTokens, setTokens, tokenEpoch } from './tokens';
+import { ApiError, setSessionEndedHandler } from '../api/client';
 import type { Me } from '../api/endpoints';
 
 type SessionState = {
@@ -23,21 +24,40 @@ export const useSession = create<SessionState>((set) => ({
   // Called once at startup. A stored token is not proof of a live session, so
   // it is validated against /me before the app decides the user is signed in.
   restore: async () => {
+    const startedAt = tokenEpoch();
+
     const tokens = await getTokens();
     if (!tokens) {
       set({ status: 'signedOut', me: null });
       return;
     }
+
     try {
       const me = await api.me();
+      // A sign-out or sign-in that happened while /me was outstanding wins;
+      // applying this result would sign the user back in after they left.
+      if (tokenEpoch() !== startedAt) return;
       set({ status: 'signedIn', me });
-    } catch {
+    } catch (e) {
+      if (tokenEpoch() !== startedAt) return;
+
+      // Only an authentication failure means the session is dead. Being offline
+      // at launch, or a server having a bad minute, must not delete a perfectly
+      // good refresh token and force the user to sign in again.
+      const rejected = e instanceof ApiError && (e.status === 401 || e.status === 403);
+      if (!rejected) {
+        set({ status: 'signedOut', me: null });
+        return;
+      }
       await clearTokens();
       set({ status: 'signedOut', me: null });
     }
   },
 
   signIn: async (tokens) => {
+    // A sign-in replaces whatever session was there, so any refresh still in
+    // flight for the previous account is invalidated before the new tokens land.
+    bumpTokenEpoch();
     await setTokens(tokens);
     const me = await api.me();
     set({ status: 'signedIn', me });
@@ -60,3 +80,10 @@ export const useSession = create<SessionState>((set) => ({
 
   setMe: (me) => set({ me }),
 }));
+
+// When the server rejects a refresh, the UI has to follow the credentials out.
+// Without this the app keeps showing authenticated screens while every request
+// underneath it is anonymous.
+setSessionEndedHandler(() => {
+  useSession.setState({ status: 'signedOut', me: null });
+});

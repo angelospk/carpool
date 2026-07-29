@@ -5,7 +5,7 @@
 // look". Second, a 401 must not turn into a refresh storm — several queries
 // failing together share one refresh.
 
-import { getTokens, setTokens, clearTokens } from '../state/tokens';
+import { clearTokens, getTokens, setTokens, tokenEpoch } from '../state/tokens';
 
 export class ApiError extends Error {
   constructor(
@@ -53,31 +53,56 @@ export function currentBaseUrl() {
 // A single in-flight refresh, shared by every request that gets a 401.
 let refreshing: Promise<boolean> | null = null;
 
+/** Called when the server tells us the session is over, so the UI can follow. */
+let onSessionEnded: (() => void) | null = null;
+
+export function setSessionEndedHandler(fn: (() => void) | null) {
+  onSessionEnded = fn;
+}
+
 async function refreshTokens(): Promise<boolean> {
+  // Captured before the round trip. If the user signs out or signs in as
+  // someone else meanwhile, the write below is refused rather than resurrecting
+  // a dead session or clobbering the new one.
+  const startedAt = tokenEpoch();
+
   const tokens = await getTokens();
   if (!tokens?.refreshToken) return false;
 
+  let res: Response;
   try {
-    const res = await fetch(`${baseUrl}/v1/auth/refresh`, {
+    res = await fetch(`${baseUrl}/v1/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: tokens.refreshToken }),
     });
-    if (!res.ok) {
-      // The refresh token is spent or revoked; the session is over.
-      await clearTokens();
-      return false;
-    }
-    const body = await res.json();
-    await setTokens({
-      accessToken: body.access_token,
-      refreshToken: body.refresh_token,
-    });
-    return true;
   } catch {
-    // A network failure is not a dead session; leave the tokens alone.
+    // A transport failure says nothing about the token. Keep it.
     return false;
   }
+
+  // Only an explicit rejection means the token is spent or revoked. A 500, a
+  // 503 or a rate limit says nothing about validity, and discarding the token
+  // there would sign the user out over a server hiccup.
+  if (res.status === 401 || res.status === 403) {
+    await clearTokens();
+    onSessionEnded?.();
+    return false;
+  }
+  if (!res.ok) return false;
+
+  let body: { access_token?: string; refresh_token?: string };
+  try {
+    body = await res.json();
+  } catch {
+    return false;
+  }
+  if (!body.access_token || !body.refresh_token) return false;
+
+  return setTokens(
+    { accessToken: body.access_token, refreshToken: body.refresh_token },
+    startedAt,
+  );
 }
 
 /** Ensures at most one refresh runs at a time, whatever else is in flight. */

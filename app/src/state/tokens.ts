@@ -1,7 +1,13 @@
 // Credential storage.
 //
 // Tokens live in the secure store (Keychain / Keystore), never in AsyncStorage:
-// AsyncStorage is plain text on disk and is included in device backups.
+// AsyncStorage is plain text on disk and is swept into device backups.
+//
+// Every mutation carries an epoch. A refresh is a read-modify-write that spans a
+// network round trip, so by the time it finishes the user may have signed out or
+// signed in as someone else. Writing unconditionally would put credentials back
+// on a device that just logged out, or overwrite one account's tokens with
+// another's. The epoch makes those writes detectable and refusable.
 
 import * as SecureStore from 'expo-secure-store';
 
@@ -12,28 +18,70 @@ export type Tokens = {
   refreshToken: string;
 };
 
-// Read-through cache, so the common path does not hit the keychain on every
-// request.
 let cached: Tokens | null | undefined;
+let epoch = 0;
 
-export async function getTokens(): Promise<Tokens | null> {
-  if (cached !== undefined) return cached;
-  const raw = await SecureStore.getItemAsync(KEY);
-  cached = raw ? (JSON.parse(raw) as Tokens) : null;
-  return cached;
+// All access is serialized through this chain. Without it a slow cold read can
+// land after a clear and put the old tokens back into the cache.
+let queue: Promise<unknown> = Promise.resolve();
+
+function serialize<T>(fn: () => Promise<T>): Promise<T> {
+  const run = queue.then(fn, fn);
+  queue = run.catch(() => undefined);
+  return run;
 }
 
-export async function setTokens(tokens: Tokens): Promise<void> {
-  cached = tokens;
-  await SecureStore.setItemAsync(KEY, JSON.stringify(tokens));
+/** The current credential epoch. It changes on every sign-in and sign-out. */
+export function tokenEpoch(): number {
+  return epoch;
 }
 
-export async function clearTokens(): Promise<void> {
-  cached = null;
-  await SecureStore.deleteItemAsync(KEY);
+export function getTokens(): Promise<Tokens | null> {
+  return serialize(async () => {
+    if (cached !== undefined) return cached;
+    const raw = await SecureStore.getItemAsync(KEY);
+    // Re-check: a clear may have run while the read was outstanding.
+    if (cached !== undefined) return cached;
+    cached = raw ? (JSON.parse(raw) as Tokens) : null;
+    return cached;
+  });
+}
+
+/**
+ * Stores tokens, unless the epoch moved while the caller was working.
+ *
+ * Returns false when the write was refused, which tells a refresh that its
+ * result is stale and must be dropped rather than applied.
+ */
+export function setTokens(tokens: Tokens, expectedEpoch?: number): Promise<boolean> {
+  return serialize(async () => {
+    if (expectedEpoch !== undefined && expectedEpoch !== epoch) return false;
+
+    // Disk first: if the write fails, the cache must not claim a token that is
+    // not durably stored, or a restart would replay the older one and the
+    // server would revoke the whole family.
+    await SecureStore.setItemAsync(KEY, JSON.stringify(tokens));
+    cached = tokens;
+    return true;
+  });
+}
+
+/** Clears credentials and advances the epoch, invalidating any in-flight write. */
+export function clearTokens(): Promise<void> {
+  return serialize(async () => {
+    epoch += 1;
+    cached = null;
+    await SecureStore.deleteItemAsync(KEY);
+  });
+}
+
+/** Advances the epoch without clearing, for a sign-in that replaces a session. */
+export function bumpTokenEpoch(): void {
+  epoch += 1;
 }
 
 /** Drops the in-memory copy. Tests use this to start from a clean slate. */
 export function resetTokenCache(): void {
   cached = undefined;
+  queue = Promise.resolve();
 }
