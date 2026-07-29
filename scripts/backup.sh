@@ -12,6 +12,9 @@
 # — an untested backup is not a backup.
 set -euo pipefail
 
+# COMPOSE_FILE selects the stack; the dev one is useful for rehearsing this.
+COMPOSE=(docker compose ${COMPOSE_FILE:+-f "$COMPOSE_FILE"})
+
 BACKUP_DIR=${BACKUP_DIR:-./backups}
 KEEP_DAYS=${KEEP_DAYS:-14}
 SERVICE=${SERVICE:-db}
@@ -23,7 +26,7 @@ stamp=$(date -u +%Y%m%dT%H%M%SZ)
 out="$BACKUP_DIR/carpool-$stamp.dump"
 
 echo "==> dumping $DB to $out"
-docker compose exec -T "$SERVICE" pg_dump -U "$USER" -d "$DB" -Fc > "$out"
+"${COMPOSE[@]}" exec -T "$SERVICE" pg_dump -U "$USER" -d "$DB" -Fc > "$out"
 
 # A dump that is suspiciously small usually means the command failed but the
 # redirect still created a file.

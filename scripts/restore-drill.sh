@@ -8,25 +8,28 @@
 # the spatial indexes and a representative PostGIS query survived.
 set -euo pipefail
 
+# COMPOSE_FILE selects the stack; the dev one is useful for rehearsing this.
+COMPOSE=(docker compose ${COMPOSE_FILE:+-f "$COMPOSE_FILE"})
+
 DUMP=${1:?usage: restore-drill.sh <dump file>}
 SERVICE=${SERVICE:-db}
 USER=${USER_NAME:-carpool}
 SCRATCH=${SCRATCH:-carpool_restore_drill}
 
-psql_scratch() { docker compose exec -T "$SERVICE" psql -U "$USER" -d "$SCRATCH" -tAc "$1"; }
+psql_scratch() { "${COMPOSE[@]}" exec -T "$SERVICE" psql -U "$USER" -d "$SCRATCH" -tAc "$1"; }
 
 echo "==> creating scratch database $SCRATCH"
-docker compose exec -T "$SERVICE" psql -U "$USER" -d postgres -c "DROP DATABASE IF EXISTS $SCRATCH WITH (FORCE)"
-docker compose exec -T "$SERVICE" psql -U "$USER" -d postgres -c "CREATE DATABASE $SCRATCH"
+"${COMPOSE[@]}" exec -T "$SERVICE" psql -U "$USER" -d postgres -c "DROP DATABASE IF EXISTS $SCRATCH WITH (FORCE)"
+"${COMPOSE[@]}" exec -T "$SERVICE" psql -U "$USER" -d postgres -c "CREATE DATABASE $SCRATCH"
 
 echo "==> restoring"
-docker compose exec -T "$SERVICE" pg_restore -U "$USER" -d "$SCRATCH" --no-owner < "$DUMP"
+"${COMPOSE[@]}" exec -T "$SERVICE" pg_restore -U "$USER" -d "$SCRATCH" --no-owner < "$DUMP"
 
 echo "==> comparing row counts against the live database"
 fail=0
 for table in regions users driver_profiles route_templates route_schedules \
              trip_occurrences ride_requests asks bookings ratings trip_messages; do
-	live=$(docker compose exec -T "$SERVICE" psql -U "$USER" -d carpool -tAc "SELECT count(*) FROM $table")
+	live=$("${COMPOSE[@]}" exec -T "$SERVICE" psql -U "$USER" -d "${DB:-carpool}" -tAc "SELECT count(*) FROM $table")
 	restored=$(psql_scratch "SELECT count(*) FROM $table")
 	if [ "$live" = "$restored" ]; then
 		printf '    %-18s %s\n' "$table" "$restored"
@@ -48,7 +51,7 @@ psql_scratch "SELECT count(*) FROM route_templates
                                ST_SetSRID(ST_MakePoint(25.87, 40.85), 4326)::geography, 2000)" >/dev/null
 
 echo "==> dropping the scratch database"
-docker compose exec -T "$SERVICE" psql -U "$USER" -d postgres -c "DROP DATABASE $SCRATCH WITH (FORCE)"
+"${COMPOSE[@]}" exec -T "$SERVICE" psql -U "$USER" -d postgres -c "DROP DATABASE $SCRATCH WITH (FORCE)"
 
 if [ "$fail" -ne 0 ]; then
 	echo "restore drill FAILED" >&2
