@@ -13,7 +13,7 @@ Definition of Done, as measured on this machine:
 | --- | --- |
 | `make check` (vet + staticcheck + tests) | green |
 | Concurrency packages under `-race` | green |
-| App `tsc --noEmit` + `jest` | clean, 28 tests |
+| App `tsc --noEmit` + `jest` | clean, 50 tests |
 | Android bundle exports | 2.9 MB Hermes |
 | e2e scenario from a fresh database | passes (12 steps) |
 | Backup + restore drill | passes |
@@ -92,11 +92,18 @@ scripts/build-osrm.sh osrm-data/evros-buffered.osm.pbf
       card with the plate revealed only post-booking, per-side confirm →
       complete, ratings, chat with a total `(created_at, id)` cursor, an
       in-process ws hub, block and report.
-- [x] **M6 Expo app** — full expo-router tree: auth flow, tabs
+- [x] **M6 Expo app (redesigned 2026-07-29)** — full expo-router tree: auth flow, tabs
       (home/search/publish/profile), trip card + chat, the ask screen, request
       status, user actions. API client with epoch-guarded secure-store
       credentials and a single-flight refresh. Greek/English i18n at key parity.
       25 tests; tsc clean; the Android bundle exports.
+      Redesigned onto a real design system (`src/design/tokens.ts`): warm paper
+      canvas, floating cards, pill tab bar, pine/amber palette. The signature
+      element is the **route glyph** — the real OSRM geometry drawn as a small
+      vector mark, so a trip is recognisable by the shape of its road without map
+      tiles or an API key. Seats read as pips; times are pinned to Athens.
+      Glyph geometry, Athens formatting and pin parsing are tested modules
+      (50 tests). One new dependency: `react-native-svg`.
 - [x] **M7 Deploy readiness** — production compose (durability defaults kept,
       only Caddy published), 24.6 MB distroless image, Caddyfile, backup script
       and a restore drill that compares row counts, spatial indexes and a
