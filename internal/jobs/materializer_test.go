@@ -1,0 +1,484 @@
+package jobs_test
+
+import (
+	"context"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"carpool/internal/clock"
+	"carpool/internal/domain"
+	"carpool/internal/geo"
+	"carpool/internal/jobs"
+	"carpool/internal/store"
+	"carpool/internal/store/testdb"
+)
+
+const corridorWKT = "LINESTRING(25.80 40.85, 26.00 40.85)"
+
+type fixture struct {
+	t           *testing.T
+	pool        *pgxpool.Pool
+	clock       *clock.Fake
+	driverID    uuid.UUID
+	passengerID uuid.UUID
+	templateID  uuid.UUID
+}
+
+// newFixture seeds a driver with a Monday-only recurring route.
+func newFixture(t *testing.T, weekdays ...time.Weekday) *fixture {
+	t.Helper()
+	ctx := context.Background()
+	pool := testdb.Fresh(t)
+	if err := store.Migrate(ctx, pool); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	var regionID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO regions (name, boundary, fuel_price_eur)
+		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25.3 40.3, 26.7 40.3, 26.7 41.8, 25.3 41.8, 25.3 40.3))', 4326)), 1.8)
+		RETURNING id`).Scan(&regionID); err != nil {
+		t.Fatalf("seeding region: %v", err)
+	}
+
+	newUser := func(phone, name string) uuid.UUID {
+		var id uuid.UUID
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO users (phone, name, home_region_id) VALUES ($1, $2, $3) RETURNING id`,
+			phone, name, regionID).Scan(&id); err != nil {
+			t.Fatalf("seeding user %s: %v", name, err)
+		}
+		return id
+	}
+
+	driverID := newUser("+306900000001", "Driver")
+	passengerID := newUser("+306900000002", "Passenger")
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO driver_profiles (user_id, car_model, car_plate) VALUES ($1, 'Yaris', 'ABC-1234')`,
+		driverID); err != nil {
+		t.Fatalf("seeding driver profile: %v", err)
+	}
+
+	if len(weekdays) == 0 {
+		weekdays = []time.Weekday{time.Monday}
+	}
+
+	templateID, err := store.CreateRouteTemplate(ctx, pool, store.CreateRouteTemplateParams{
+		DriverID:         driverID,
+		Origin:           geo.Point{Lon: 25.80, Lat: 40.85},
+		Destination:      geo.Point{Lon: 26.00, Lat: 40.85},
+		OriginLabel:      "A",
+		DestinationLabel: "B",
+		RouteWKT:         corridorWKT,
+		RouteKm:          17,
+		RouteMin:         20,
+		Seats:            3,
+		PricingMode:      domain.PricingFormula,
+		OSRMDataVersion:  "test",
+		Schedule: domain.Schedule{
+			Kind:           domain.ScheduleRecurring,
+			Weekdays:       weekdays,
+			DepartEarliest: domain.TimeOfDay{Hour: 7, Minute: 30},
+			DepartLatest:   domain.TimeOfDay{Hour: 8, Minute: 0},
+			EffectiveFrom:  domain.Date{Year: 2026, Month: time.July, Day: 1},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateRouteTemplate: %v", err)
+	}
+
+	// 2026-07-06 is a Monday.
+	c := clock.NewFake(time.Date(2026, time.July, 6, 3, 0, 0, 0, time.UTC))
+	return &fixture{t: t, pool: pool, clock: c, driverID: driverID, passengerID: passengerID, templateID: templateID}
+}
+
+func (f *fixture) materializer() *jobs.Materializer {
+	return jobs.NewMaterializer(f.pool, f.clock, athens(f.t))
+}
+
+func athens(t *testing.T) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation("Europe/Athens")
+	if err != nil {
+		t.Fatalf("loading Europe/Athens: %v", err)
+	}
+	return loc
+}
+
+func (f *fixture) serviceDates() []string {
+	f.t.Helper()
+	rows, err := f.pool.Query(context.Background(),
+		`SELECT service_date::text FROM trip_occurrences
+		 WHERE status <> 'cancelled' ORDER BY service_date`)
+	if err != nil {
+		f.t.Fatalf("listing occurrences: %v", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			f.t.Fatalf("scanning: %v", err)
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+func TestMaterializeCreatesOccurrencesAcrossTheHorizon(t *testing.T) {
+	f := newFixture(t)
+
+	if err := f.materializer().Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// A 21-day half-open horizon from Monday 6 July covers the 6th, 13th, 20th.
+	got := f.serviceDates()
+	want := []string{"2026-07-06", "2026-07-13", "2026-07-20"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d occurrences %v, want %d %v", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("occurrence %d = %s, want %s", i, got[i], want[i])
+		}
+	}
+}
+
+func TestMaterializeIsIdempotent(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	for i := range 3 {
+		if err := f.materializer().Run(ctx); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+
+	if got := f.serviceDates(); len(got) != 3 {
+		t.Fatalf("got %d occurrences after three runs, want 3: %v", len(got), got)
+	}
+}
+
+func TestMaterializeStoresConcreteAthensDepartureInstants(t *testing.T) {
+	f := newFixture(t)
+
+	if err := f.materializer().Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var earliest, latest time.Time
+	if err := f.pool.QueryRow(context.Background(), `
+		SELECT depart_earliest, depart_latest FROM trip_occurrences
+		WHERE service_date = '2026-07-06'`).Scan(&earliest, &latest); err != nil {
+		t.Fatalf("reading occurrence: %v", err)
+	}
+
+	// July is EEST (UTC+3), so a 07:30 local departure is 04:30 UTC.
+	wantEarliest := time.Date(2026, time.July, 6, 4, 30, 0, 0, time.UTC)
+	if !earliest.Equal(wantEarliest) {
+		t.Errorf("depart_earliest = %v, want %v", earliest.UTC(), wantEarliest)
+	}
+	if !latest.Equal(time.Date(2026, time.July, 6, 5, 0, 0, 0, time.UTC)) {
+		t.Errorf("depart_latest = %v, want 05:00 UTC", latest.UTC())
+	}
+}
+
+func TestMaterializeSnapshotsTheTemplateOntoTheOccurrence(t *testing.T) {
+	f := newFixture(t)
+
+	if err := f.materializer().Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var routeKm float64
+	var revision int
+	var sameGeom bool
+	if err := f.pool.QueryRow(context.Background(), `
+		SELECT o.route_km, o.template_revision, ST_Equals(o.route_geom, t.route_geom)
+		FROM trip_occurrences o JOIN route_templates t ON t.id = o.template_id
+		LIMIT 1`).Scan(&routeKm, &revision, &sameGeom); err != nil {
+		t.Fatalf("reading snapshot: %v", err)
+	}
+
+	if routeKm != 17 {
+		t.Errorf("route_km = %v, want 17", routeKm)
+	}
+	if revision != 1 {
+		t.Errorf("template_revision = %d, want 1", revision)
+	}
+	if !sameGeom {
+		t.Error("the occurrence did not snapshot the template geometry")
+	}
+}
+
+func TestMaterializeAdvancesTheHorizonAsTimePasses(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	// A week later the horizon should have rolled forward to include 27 July.
+	f.clock.Advance(7 * 24 * time.Hour)
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	got := f.serviceDates()
+	if len(got) == 0 || got[len(got)-1] != "2026-07-27" {
+		t.Fatalf("occurrences = %v, want the horizon to reach 2026-07-27", got)
+	}
+}
+
+func TestMaterializeSkipsExceptionDates(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE route_schedules SET exceptions = ARRAY['2026-07-13']::date[] WHERE template_id = $1`,
+		f.templateID); err != nil {
+		t.Fatalf("setting exception: %v", err)
+	}
+
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for _, d := range f.serviceDates() {
+		if d == "2026-07-13" {
+			t.Fatal("the excepted date was materialized")
+		}
+	}
+}
+
+// A schedule edit must reshape future occurrences that nobody is depending on.
+func TestMaterializeCancelsOccurrencesTheScheduleNoLongerWants(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	// Move the route from Mondays to Tuesdays.
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE route_schedules SET weekdays = ARRAY[2]::int[] WHERE template_id = $1`,
+		f.templateID); err != nil {
+		t.Fatalf("changing weekdays: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	got := f.serviceDates()
+	want := []string{"2026-07-07", "2026-07-14", "2026-07-21"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want the Tuesdays %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("occurrence %d = %s, want %s", i, got[i], want[i])
+		}
+	}
+}
+
+// The core safety rule: an occurrence someone has booked is frozen. Rewriting
+// or cancelling it would silently change what a passenger already agreed to.
+func TestMaterializeNeverTouchesABookedOccurrence(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	occurrenceID := f.bookOccurrence("2026-07-13")
+
+	// Move the route to Tuesdays: the booked Monday must survive anyway.
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE route_schedules SET weekdays = ARRAY[2]::int[] WHERE template_id = $1`,
+		f.templateID); err != nil {
+		t.Fatalf("changing weekdays: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	var status string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT status FROM trip_occurrences WHERE id = $1`, occurrenceID).Scan(&status); err != nil {
+		t.Fatalf("reading booked occurrence: %v", err)
+	}
+	if status != "scheduled" {
+		t.Fatalf("the booked occurrence is now %q; it must stay scheduled", status)
+	}
+}
+
+// Same rule for an occurrence with a pending ask: a driver is being asked about
+// it right now, and accepting must not land on a cancelled trip.
+func TestMaterializeNeverTouchesAnOccurrenceWithAPendingAsk(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	occurrenceID := f.addPendingAsk("2026-07-13")
+
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE route_schedules SET weekdays = ARRAY[2]::int[] WHERE template_id = $1`,
+		f.templateID); err != nil {
+		t.Fatalf("changing weekdays: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	var status string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT status FROM trip_occurrences WHERE id = $1`, occurrenceID).Scan(&status); err != nil {
+		t.Fatalf("reading occurrence: %v", err)
+	}
+	if status != "scheduled" {
+		t.Fatalf("the occurrence under a pending ask is now %q; it must stay scheduled", status)
+	}
+}
+
+func TestMaterializeLeavesPastOccurrencesAlone(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	// Roll forward past the first two Mondays and re-run.
+	f.clock.Advance(14 * 24 * time.Hour)
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	var count int
+	if err := f.pool.QueryRow(ctx,
+		`SELECT count(*) FROM trip_occurrences WHERE service_date < '2026-07-20' AND status = 'cancelled'`).
+		Scan(&count); err != nil {
+		t.Fatalf("counting cancelled past occurrences: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("%d past occurrences were cancelled; history must not be rewritten", count)
+	}
+}
+
+func TestMaterializeSkipsAnInactiveTemplate(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE route_templates SET active = false WHERE id = $1`, f.templateID); err != nil {
+		t.Fatalf("deactivating template: %v", err)
+	}
+
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got := f.serviceDates(); len(got) != 0 {
+		t.Fatalf("got %v, want no occurrences for an inactive template", got)
+	}
+}
+
+// Two materializers can overlap (a scheduled tick and an edit-triggered run).
+// They must not race into duplicate rows.
+func TestConcurrentMaterializersProduceNoDuplicates(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	const runners = 4
+	errs := make([]error, runners)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range runners {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs[i] = f.materializer().Run(ctx)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("runner %d: %v", i, err)
+		}
+	}
+	if got := f.serviceDates(); len(got) != 3 {
+		t.Fatalf("got %d occurrences %v, want 3", len(got), got)
+	}
+}
+
+// bookOccurrence attaches a confirmed booking to the occurrence on the date.
+func (f *fixture) bookOccurrence(serviceDate string) uuid.UUID {
+	f.t.Helper()
+	ctx := context.Background()
+
+	var occurrenceID uuid.UUID
+	if err := f.pool.QueryRow(ctx,
+		`SELECT id FROM trip_occurrences WHERE service_date = $1::date`, serviceDate).Scan(&occurrenceID); err != nil {
+		f.t.Fatalf("finding occurrence for %s: %v", serviceDate, err)
+	}
+
+	requestID, askID := f.addAsk(occurrenceID, "accepted")
+
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO bookings (occurrence_id, request_id, passenger_id, ask_id, seats, price_eur,
+		                      pickup_point, dropoff_point)
+		VALUES ($1, $2, $3, $4, 1, 2.50,
+		        ST_SetSRID(ST_MakePoint(25.82, 40.85), 4326),
+		        ST_SetSRID(ST_MakePoint(25.98, 40.85), 4326))`,
+		occurrenceID, requestID, f.passengerID, askID); err != nil {
+		f.t.Fatalf("inserting booking: %v", err)
+	}
+	return occurrenceID
+}
+
+// addPendingAsk attaches a pending ask to the occurrence on the date.
+func (f *fixture) addPendingAsk(serviceDate string) uuid.UUID {
+	f.t.Helper()
+	var occurrenceID uuid.UUID
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT id FROM trip_occurrences WHERE service_date = $1::date`, serviceDate).Scan(&occurrenceID); err != nil {
+		f.t.Fatalf("finding occurrence for %s: %v", serviceDate, err)
+	}
+	f.addAsk(occurrenceID, "pending")
+	return occurrenceID
+}
+
+func (f *fixture) addAsk(occurrenceID uuid.UUID, status string) (requestID, askID uuid.UUID) {
+	f.t.Helper()
+	ctx := context.Background()
+
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end, kind, status)
+		VALUES ($1,
+		        ST_SetSRID(ST_MakePoint(25.82, 40.85), 4326),
+		        ST_SetSRID(ST_MakePoint(25.98, 40.85), 4326),
+		        now(), now() + interval '2 hours', 'open', 'asking')
+		RETURNING id`, f.passengerID).Scan(&requestID); err != nil {
+		f.t.Fatalf("inserting ride request: %v", err)
+	}
+
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km,
+		                  pickup_point, dropoff_point, suggested_price_eur,
+		                  itinerary_version, status, expires_at)
+		VALUES ($1, $2, 5, 2,
+		        ST_SetSRID(ST_MakePoint(25.82, 40.85), 4326),
+		        ST_SetSRID(ST_MakePoint(25.98, 40.85), 4326),
+		        2.50, 0, $3, now() + interval '30 minutes')
+		RETURNING id`, requestID, occurrenceID, status).Scan(&askID); err != nil {
+		f.t.Fatalf("inserting ask: %v", err)
+	}
+	return requestID, askID
+}
