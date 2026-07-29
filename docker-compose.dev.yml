@@ -1,0 +1,54 @@
+# Development stack for the mini PC.
+#
+# Only the backing services run here; the API is normally run from source with
+# `go run ./cmd/api` so the edit loop stays fast. Bring it up with:
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# The OSRM extract is NOT built here — preprocessing peaks around 5.7 GB for
+# whole Greece and belongs off the server. Build it once with
+# `scripts/build-osrm.sh` and mount the artifacts read-only.
+
+name: carpool-dev
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: carpool
+      POSTGRES_PASSWORD: carpool
+      POSTGRES_DB: carpool
+    ports:
+      - "5433:5432" # 5433 on the host to stay clear of any local postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Tuned small to mirror the 2 GB VPS target rather than the mini PC.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - max_connections=30
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U carpool -d carpool"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:latest
+    command: osrm-routed --algorithm mld --port 5000 /data/evros-buffered.osrm
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./osrm-data:/data:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5000/nearest/v1/driving/25.87,40.85 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
