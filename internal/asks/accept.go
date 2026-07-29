@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/clock"
+	"carpool/internal/match"
 	"carpool/internal/outbox"
 )
 
@@ -54,12 +55,21 @@ type Service struct {
 	pool     *pgxpool.Pool
 	clock    clock.Clock
 	verifier Verifier
+	router   match.Router
 }
 
 // NewService returns a service. verifier may be nil, in which case the stored
-// detour is trusted as-is.
+// detour is trusted as-is. router is required by AskNext but not by Accept.
 func NewService(pool *pgxpool.Pool, c clock.Clock, v Verifier) *Service {
 	return &Service{pool: pool, clock: c, verifier: v}
+}
+
+// WithRouter returns a copy of the service that uses r for the fine matching
+// stage.
+func (s *Service) WithRouter(r match.Router) *Service {
+	out := *s
+	out.router = r
+	return &out
 }
 
 // Accept books the seat an ask offers.
@@ -77,14 +87,38 @@ func NewService(pool *pgxpool.Pool, c clock.Clock, v Verifier) *Service {
 func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.UUID, error) {
 	// Read the version the ask was quoted against, then verify outside any
 	// transaction.
-	var quotedVersion int
-	err := s.pool.QueryRow(ctx,
-		`SELECT itinerary_version FROM asks WHERE id = $1`, askID).Scan(&quotedVersion)
+	var (
+		quotedVersion int
+		preState      string
+		preExpiresAt  time.Time
+		preDriver     uuid.UUID
+	)
+	err := s.pool.QueryRow(ctx, `
+		SELECT a.itinerary_version, a.status, a.expires_at, t.driver_id
+		FROM asks a
+		JOIN trip_occurrences o ON o.id = a.occurrence_id
+		JOIN route_templates  t ON t.id = o.template_id
+		WHERE a.id = $1`, askID).Scan(&quotedVersion, &preState, &preExpiresAt, &preDriver)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, ErrAskNotPending
 	}
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("asks: loading ask: %w", err)
+	}
+
+	// Reject the obvious cases before spending an OSRM round trip. Anyone
+	// holding an ask id could otherwise drive routing load with calls that were
+	// always going to fail, and a declined ask would surface a routing error
+	// instead of the documented ErrAskNotPending. These are all re-checked under
+	// lock below; this is a cheap filter, not the authority.
+	if preDriver != driverID {
+		return uuid.Nil, ErrNotYours
+	}
+	if preState != "pending" {
+		return uuid.Nil, ErrAskNotPending
+	}
+	if !s.clock.Now().Before(preExpiresAt) {
+		return uuid.Nil, ErrAskExpired
 	}
 
 	if s.verifier != nil {
@@ -261,8 +295,10 @@ func (s *Service) Decline(ctx context.Context, askID, driverID uuid.UUID) error 
 	}
 
 	var askState string
+	var expiresAt time.Time
 	if err := tx.QueryRow(ctx,
-		`SELECT status FROM asks WHERE id = $1 FOR UPDATE`, askID).Scan(&askState); err != nil {
+		`SELECT status, expires_at FROM asks WHERE id = $1 FOR UPDATE`, askID).
+		Scan(&askState, &expiresAt); err != nil {
 		return fmt.Errorf("asks: locking ask: %w", err)
 	}
 
@@ -271,6 +307,12 @@ func (s *Service) Decline(ctx context.Context, askID, driverID uuid.UUID) error 
 	}
 	if askState != "pending" {
 		return ErrAskNotPending
+	}
+	// The TTL is authoritative. Without this check the outcome would depend on
+	// whether the driver or the sweeper got there first after the deadline, so
+	// the same late tap could land as either 'declined' or 'expired'.
+	if !s.clock.Now().Before(expiresAt) {
+		return ErrAskExpired
 	}
 
 	if _, err := tx.Exec(ctx,
@@ -362,10 +404,18 @@ func (s *Service) expireOne(ctx context.Context, askID, requestID uuid.UUID, now
 // requeue puts a request back in the matching queue via the outbox, so the next
 // candidate is approached by the same at-least-once path as everything else.
 func (s *Service) requeue(ctx context.Context, tx pgx.Tx, requestID uuid.UUID, reason string) error {
-	if _, err := tx.Exec(ctx,
+	tag, err := tx.Exec(ctx,
 		`UPDATE ride_requests SET status = 'open', updated_at = now()
-		 WHERE id = $1 AND status IN ('open','asking')`, requestID); err != nil {
+		 WHERE id = $1 AND status IN ('open','asking')`, requestID)
+	if err != nil {
 		return fmt.Errorf("asks: reopening request: %w", err)
+	}
+	// If the request had already moved on (matched by another ask, cancelled by
+	// the passenger), there is nothing to hand to the next driver. Emitting the
+	// event regardless would send a second driver after an already-matched
+	// passenger.
+	if tag.RowsAffected() == 0 {
+		return nil
 	}
 
 	payload, err := json.Marshal(map[string]any{"request_id": requestID, "reason": reason})

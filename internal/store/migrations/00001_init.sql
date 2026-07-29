@@ -280,7 +280,10 @@ CREATE TABLE bookings (
     occurrence_id       uuid NOT NULL REFERENCES trip_occurrences(id) ON DELETE CASCADE,
     request_id          uuid NOT NULL REFERENCES ride_requests(id) ON DELETE CASCADE,
     passenger_id        uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    ask_id              uuid NOT NULL REFERENCES asks(id),
+    -- Unique so an accept whose commit acknowledgement was lost can be
+    -- reconciled by looking the booking up from its ask, instead of the retry
+    -- reporting failure for work that actually succeeded.
+    ask_id              uuid NOT NULL UNIQUE REFERENCES asks(id),
     seats               int NOT NULL CHECK (seats BETWEEN 1 AND 4),
     price_eur           numeric(5,2) NOT NULL CHECK (price_eur >= 0), -- frozen at accept
     pickup_point        geometry(Point, 4326) NOT NULL,

@@ -447,3 +447,52 @@ func TestDeclineReopensTheRequestForTheNextCandidate(t *testing.T) {
 		t.Errorf("seats_free = %d; declining must not touch seats", got)
 	}
 }
+
+// --- regression tests for issues found in adversarial review ---
+
+// The TTL is authoritative. Without an expiry check in Decline, a late tap would
+// land as 'declined' or 'expired' purely depending on whether the driver or the
+// sweeper got there first.
+func TestDeclineIsRejectedOnceTheAskHasExpired(t *testing.T) {
+	f := newFixture(t)
+	f.clock.Advance(asks.DefaultTTL + time.Minute)
+
+	err := f.service().Decline(context.Background(), f.askID, f.driverID)
+
+	if !errors.Is(err, asks.ErrAskExpired) {
+		t.Fatalf("error = %v, want ErrAskExpired", err)
+	}
+	if got := f.askStatus(f.askID); got == "declined" {
+		t.Error("a late decline was recorded, overwriting what the sweeper should expire")
+	}
+}
+
+// Expiring an ask whose request has already moved on must not send another
+// driver after the passenger.
+//
+// The asks_one_pending index makes this hard to reach through the API — it
+// permits only one pending ask per request — so the state is forced directly.
+// The guard is defence in depth behind that index, not a substitute for it.
+func TestExpiringAnAskDoesNotRequeueARequestThatMovedOn(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	// The ask stays pending while its request is already matched.
+	mustExec(t, f, `UPDATE ride_requests SET status = 'matched'`)
+	mustExec(t, f, `DELETE FROM outbox WHERE kind = 'ask_next'`)
+
+	f.clock.Advance(asks.DefaultTTL + time.Minute)
+	if _, err := f.service().SweepExpired(ctx); err != nil {
+		t.Fatalf("SweepExpired: %v", err)
+	}
+
+	if got := f.askStatus(f.askID); got != "expired" {
+		t.Errorf("ask status = %q, want expired", got)
+	}
+	var queued int
+	must(t, f.pool.QueryRow(ctx,
+		`SELECT count(*) FROM outbox WHERE kind = 'ask_next'`).Scan(&queued), "outbox")
+	if queued != 0 {
+		t.Fatalf("queued %d ask_next messages for a request that already moved on, want 0", queued)
+	}
+}

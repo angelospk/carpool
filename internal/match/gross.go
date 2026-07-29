@@ -50,6 +50,9 @@ type Candidate struct {
 	RouteMin       int
 	DetourBudget   int
 	SeatsFree      int
+	// ItineraryVersion is the occurrence's plan version at the time of the
+	// query. An ask records it so the accept path can detect that the plan moved.
+	ItineraryVersion int
 }
 
 // grossSQL is the stage-1 filter from MATCHING.md.
@@ -81,6 +84,7 @@ WITH cand AS (
 	       o.route_km          AS route_km,
 	       o.route_min         AS route_min,
 	       o.seats_free        AS seats_free,
+	       o.itinerary_version AS itinerary_version,
 	       d.notify_radius_km  AS notify_radius_km,
 	       d.detour_budget_min AS detour_budget_min
 	FROM trip_occurrences o
@@ -98,14 +102,14 @@ WITH cand AS (
 	        WHERE (b.blocker_id = t.driver_id AND b.blocked_id = $7::uuid)
 	           OR (b.blocker_id = $7::uuid    AND b.blocked_id = t.driver_id)))
 ), located AS (
-	SELECT occurrence_id, driver_id, route_km, route_min, seats_free, detour_budget_min,
+	SELECT occurrence_id, driver_id, route_km, route_min, seats_free, itinerary_version, detour_budget_min,
 	       ST_LineLocatePoint(route_geom, ST_ClosestPoint(route_geom, $1)) AS f_o,
 	       ST_LineLocatePoint(route_geom, ST_ClosestPoint(route_geom, $2)) AS f_d
 	FROM cand
 )
 SELECT occurrence_id, driver_id, f_o, f_d,
        (f_d - f_o) * route_km AS shared_km,
-       route_km, route_min, detour_budget_min, seats_free
+       route_km, route_min, detour_budget_min, seats_free, itinerary_version
 FROM located
 WHERE f_o < f_d
   AND (f_d - f_o) * route_km >= GREATEST(1.0, 0.2 * $6)
@@ -126,7 +130,8 @@ func Gross(ctx context.Context, pool *pgxpool.Pool, q GrossQuery) ([]Candidate, 
 	for rows.Next() {
 		var c Candidate
 		if err := rows.Scan(&c.OccurrenceID, &c.DriverID, &c.FractionOrigin, &c.FractionDest,
-			&c.SharedKm, &c.RouteKm, &c.RouteMin, &c.DetourBudget, &c.SeatsFree); err != nil {
+			&c.SharedKm, &c.RouteKm, &c.RouteMin, &c.DetourBudget, &c.SeatsFree,
+			&c.ItineraryVersion); err != nil {
 			return nil, fmt.Errorf("match: scanning candidate: %w", err)
 		}
 		out = append(out, c)

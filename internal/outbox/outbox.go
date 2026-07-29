@@ -15,6 +15,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -47,6 +48,9 @@ type Message struct {
 	Payload        []byte
 	IdempotencyKey string
 	Attempts       int
+	// claimToken fences this delivery attempt. A worker may only write a result
+	// for the claim it actually holds; see markDone/markFailed.
+	claimToken string
 }
 
 // Handler performs the effect a message describes.
@@ -65,11 +69,25 @@ type tx interface {
 // A duplicate idempotency key is ignored rather than being an error: the same
 // business event asking for the same effect twice is a no-op, not a failure.
 func Enqueue(ctx context.Context, t tx, m Message) error {
+	return EnqueueAt(ctx, t, m, time.Time{})
+}
+
+// EnqueueAt is Enqueue with an explicit due time.
+//
+// The dispatcher compares run_after against its injected clock, so run_after
+// must come from that same clock. Letting the database's now() set it mixes two
+// clock domains: under a fake or skewed clock a due message becomes invisible.
+// A zero runAfter falls back to the database default.
+func EnqueueAt(ctx context.Context, t tx, m Message, runAfter time.Time) error {
+	var due *time.Time
+	if !runAfter.IsZero() {
+		due = &runAfter
+	}
 	_, err := t.Exec(ctx, `
-		INSERT INTO outbox (kind, payload, idempotency_key)
-		VALUES ($1, $2, $3)
+		INSERT INTO outbox (kind, payload, idempotency_key, run_after)
+		VALUES ($1, $2, $3, COALESCE($4, now()))
 		ON CONFLICT (idempotency_key) DO NOTHING`,
-		m.Kind, m.Payload, m.IdempotencyKey)
+		m.Kind, m.Payload, m.IdempotencyKey, due)
 	if err != nil {
 		return fmt.Errorf("outbox: enqueuing %s: %w", m.IdempotencyKey, err)
 	}
@@ -131,11 +149,24 @@ func (d *Dispatcher) DispatchOnce(ctx context.Context) (int, error) {
 func (d *Dispatcher) claim(ctx context.Context) ([]Message, error) {
 	now := d.clock.Now()
 
+	// Attempts are counted here rather than on completion, because a worker that
+	// dies mid-delivery never reports back. Retiring exhausted messages at claim
+	// time is therefore the only place MaxAttempts can actually be enforced: a
+	// message that keeps killing its worker would otherwise retry forever.
+	if err := d.retireExhausted(ctx, now); err != nil {
+		return nil, err
+	}
+
+	// A fresh token per claim. locked_by alone cannot distinguish one dispatcher
+	// run from the next, so it cannot fence a stale result.
+	token := uuid.NewString()
+
 	rows, err := d.pool.Query(ctx, `
 		WITH due AS (
 			SELECT id FROM outbox
 			WHERE done_at IS NULL
 			  AND dead_at IS NULL
+			  AND attempts < $5
 			  AND run_after <= $1
 			  AND (locked_until IS NULL OR locked_until <= $1)
 			ORDER BY run_after, id
@@ -147,7 +178,7 @@ func (d *Dispatcher) claim(ctx context.Context) ([]Message, error) {
 		FROM due
 		WHERE o.id = due.id
 		RETURNING o.id, o.kind, o.payload, o.idempotency_key, o.attempts`,
-		now, batchSize, d.worker, now.Add(LeaseDuration))
+		now, batchSize, token, now.Add(LeaseDuration), MaxAttempts)
 	if err != nil {
 		return nil, fmt.Errorf("outbox: claiming messages: %w", err)
 	}
@@ -159,20 +190,47 @@ func (d *Dispatcher) claim(ctx context.Context) ([]Message, error) {
 		if err := rows.Scan(&m.ID, &m.Kind, &m.Payload, &m.IdempotencyKey, &m.Attempts); err != nil {
 			return nil, fmt.Errorf("outbox: scanning message: %w", err)
 		}
+		m.claimToken = token
 		out = append(out, m)
 	}
 	return out, rows.Err()
 }
 
-func (d *Dispatcher) markDone(ctx context.Context, m Message) error {
-	_, err := d.pool.Exec(ctx,
-		`UPDATE outbox SET done_at = $2, locked_by = NULL, locked_until = NULL WHERE id = $1`,
-		m.ID, d.clock.Now())
+// retireExhausted dead-letters messages that have spent their attempt budget
+// and are no longer leased.
+func (d *Dispatcher) retireExhausted(ctx context.Context, now time.Time) error {
+	_, err := d.pool.Exec(ctx, `
+		UPDATE outbox
+		SET dead_at = $1,
+		    last_error = COALESCE(last_error, 'attempt budget exhausted without a reported result')
+		WHERE done_at IS NULL
+		  AND dead_at IS NULL
+		  AND attempts >= $2
+		  AND (locked_until IS NULL OR locked_until <= $1)`, now, MaxAttempts)
 	if err != nil {
-		return fmt.Errorf("outbox: marking %s delivered: %w", m.IdempotencyKey, err)
+		return fmt.Errorf("outbox: retiring exhausted messages: %w", err)
 	}
 	return nil
 }
+
+func (d *Dispatcher) markDone(ctx context.Context, m Message) error {
+	tag, err := d.pool.Exec(ctx,
+		`UPDATE outbox SET done_at = $2, locked_by = NULL, locked_until = NULL
+		 WHERE id = $1 AND `+fence, m.ID, d.clock.Now(), m.claimToken, m.Attempts)
+	if err != nil {
+		return fmt.Errorf("outbox: marking %s delivered: %w", m.IdempotencyKey, err)
+	}
+	if tag.RowsAffected() == 0 {
+		// The lease expired and another worker took over; its result stands.
+		slog.Warn("discarding a stale outbox result", "key", m.IdempotencyKey, "attempt", m.Attempts)
+	}
+	return nil
+}
+
+// fence restricts a result write to the claim the worker actually holds. Without
+// it a worker whose lease expired mid-delivery could clear a newer owner's lease
+// or mark a message dead that the new owner had already delivered.
+const fence = `locked_by = $3 AND attempts = $4 AND done_at IS NULL AND dead_at IS NULL`
 
 // markFailed schedules a retry, or dead-letters when the failure is permanent
 // or the attempt budget is spent.
@@ -180,20 +238,26 @@ func (d *Dispatcher) markFailed(ctx context.Context, m Message, cause error, per
 	now := d.clock.Now()
 
 	if permanent || m.Attempts >= MaxAttempts {
-		_, err := d.pool.Exec(ctx, `
-			UPDATE outbox SET dead_at = $2, last_error = $3, locked_by = NULL, locked_until = NULL
-			WHERE id = $1`, m.ID, now, cause.Error())
+		tag, err := d.pool.Exec(ctx, `
+			UPDATE outbox SET dead_at = $2, last_error = $5, locked_by = NULL, locked_until = NULL
+			WHERE id = $1 AND `+fence, m.ID, now, m.claimToken, m.Attempts, cause.Error())
 		if err != nil {
 			return fmt.Errorf("outbox: dead-lettering %s: %w", m.IdempotencyKey, err)
+		}
+		if tag.RowsAffected() == 0 {
+			slog.Warn("discarding a stale outbox failure", "key", m.IdempotencyKey, "attempt", m.Attempts)
 		}
 		return nil
 	}
 
-	_, err := d.pool.Exec(ctx, `
-		UPDATE outbox SET run_after = $2, last_error = $3, locked_by = NULL, locked_until = NULL
-		WHERE id = $1`, m.ID, now.Add(backoff(m.Attempts)), cause.Error())
+	tag, err := d.pool.Exec(ctx, `
+		UPDATE outbox SET run_after = $2, last_error = $5, locked_by = NULL, locked_until = NULL
+		WHERE id = $1 AND `+fence, m.ID, now.Add(backoff(m.Attempts)), m.claimToken, m.Attempts, cause.Error())
 	if err != nil {
 		return fmt.Errorf("outbox: scheduling retry for %s: %w", m.IdempotencyKey, err)
+	}
+	if tag.RowsAffected() == 0 {
+		slog.Warn("discarding a stale outbox failure", "key", m.IdempotencyKey, "attempt", m.Attempts)
 	}
 	return nil
 }

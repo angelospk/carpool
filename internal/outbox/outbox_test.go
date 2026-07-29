@@ -361,3 +361,137 @@ func TestAnExpiredLeaseIsReclaimed(t *testing.T) {
 type handlerFunc func(context.Context, outbox.Message) error
 
 func (f handlerFunc) Handle(ctx context.Context, m outbox.Message) error { return f(ctx, m) }
+
+// --- regression tests for issues found in adversarial review ---
+
+// A worker whose lease expired must not be able to write a result: another
+// worker has already taken the message over, and a stale write would clear the
+// new owner's lease or produce a row that is both done and dead.
+func TestAStaleWorkerCannotOverwriteANewerClaim(t *testing.T) {
+	pool, c := newOutbox(t)
+	enqueue(t, pool, "ask:1")
+	ctx := context.Background()
+
+	stalled := make(chan struct{})
+	released := make(chan struct{})
+	slow := handlerFunc(func(context.Context, outbox.Message) error {
+		close(stalled)
+		<-released
+		return errors.New("stale worker finally fails")
+	})
+
+	// W1 claims and stalls inside its handler.
+	w1 := outbox.NewDispatcher(pool, c, slow)
+	done := make(chan error, 1)
+	go func() { _, err := w1.DispatchOnce(ctx); done <- err }()
+	<-stalled
+
+	// The lease expires and W2 takes the message over and delivers it.
+	c.Advance(outbox.LeaseDuration + time.Minute)
+	w2h := &recorder{}
+	if _, err := outbox.NewDispatcher(pool, c, w2h).DispatchOnce(ctx); err != nil {
+		t.Fatalf("W2 dispatch: %v", err)
+	}
+	if w2h.count() != 1 {
+		t.Fatalf("W2 handled %d messages, want 1", w2h.count())
+	}
+
+	// Now the stale W1 reports its failure.
+	close(released)
+	if err := <-done; err != nil {
+		t.Fatalf("W1 dispatch: %v", err)
+	}
+
+	var doneAt, deadAt *time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT done_at, dead_at FROM outbox WHERE idempotency_key = 'ask:1'`).Scan(&doneAt, &deadAt); err != nil {
+		t.Fatalf("reading message: %v", err)
+	}
+	if doneAt == nil {
+		t.Error("the message should be marked delivered by W2")
+	}
+	if deadAt != nil {
+		t.Error("the stale worker's failure was applied; the message is both done and dead")
+	}
+}
+
+// Attempts are counted when a message is claimed, so a worker that dies before
+// reporting still burns one. Without a limit enforced at claim time, a
+// crash-looping message retries forever regardless of MaxAttempts.
+func TestAMessageThatKeepsCrashingWorkersIsEventuallyDeadLettered(t *testing.T) {
+	pool, c := newOutbox(t)
+	enqueue(t, pool, "poison")
+	ctx := context.Background()
+
+	// Each round simulates a worker that claims the message and then dies before
+	// reporting anything: the attempt is spent and the lease is left behind. A
+	// real DispatchOnce always writes a result, so the claim is reproduced
+	// directly here.
+	for range outbox.MaxAttempts {
+		if _, err := pool.Exec(ctx, `
+			UPDATE outbox SET attempts = attempts + 1, locked_by = 'doomed-worker', locked_until = $1
+			WHERE idempotency_key = 'poison' AND done_at IS NULL AND dead_at IS NULL`,
+			c.Now().Add(outbox.LeaseDuration)); err != nil {
+			t.Fatalf("simulating a crashed worker: %v", err)
+		}
+		c.Advance(outbox.LeaseDuration + time.Minute)
+	}
+
+	// A healthy worker now arrives. It must retire the message rather than
+	// handing it to the handler for a seventh attempt.
+	handled := 0
+	if _, err := outbox.NewDispatcher(pool, c, handlerFunc(
+		func(context.Context, outbox.Message) error { handled++; return nil },
+	)).DispatchOnce(ctx); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if handled != 0 {
+		t.Errorf("the handler ran %d times; a message past MaxAttempts must not be retried", handled)
+	}
+
+	var attempts int
+	var dead bool
+	if err := pool.QueryRow(ctx,
+		`SELECT attempts, dead_at IS NOT NULL FROM outbox WHERE idempotency_key = 'poison'`).
+		Scan(&attempts, &dead); err != nil {
+		t.Fatalf("reading message: %v", err)
+	}
+	if attempts > outbox.MaxAttempts {
+		t.Errorf("attempts = %d, want it capped at MaxAttempts (%d)", attempts, outbox.MaxAttempts)
+	}
+	if !dead {
+		t.Error("a message that exhausted its attempts was never dead-lettered")
+	}
+}
+
+// run_after must come from the same clock the dispatcher compares against.
+// Reading it from the database's now() means a fake or skewed clock makes a
+// due message invisible.
+func TestEnqueueUsesTheInjectedClockNotTheDatabaseClock(t *testing.T) {
+	pool, _ := newOutbox(t)
+	// A clock deliberately far from the database's wall clock.
+	c := clock.NewFake(time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC))
+	ctx := context.Background()
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if err := outbox.EnqueueAt(ctx, tx, outbox.Message{
+		Kind: "push", IdempotencyKey: "skewed", Payload: []byte(`{}`),
+	}, c.Now()); err != nil {
+		t.Fatalf("EnqueueAt: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	h := &recorder{}
+	n, err := outbox.NewDispatcher(pool, c, h).DispatchOnce(ctx)
+	if err != nil {
+		t.Fatalf("DispatchOnce: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("dispatched %d; a message due by the injected clock was not visible", n)
+	}
+}
