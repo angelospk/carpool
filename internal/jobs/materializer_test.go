@@ -482,3 +482,172 @@ func (f *fixture) addAsk(occurrenceID uuid.UUID, status string) (requestID, askI
 	}
 	return requestID, askID
 }
+
+// --- regression tests for issues found in adversarial review ---
+
+// Cancellation must be bounded by the same horizon as planning. Without an
+// upper bound, every occurrence beyond the horizon looks "unwanted".
+func TestMaterializeLeavesOccurrencesBeyondTheHorizonAlone(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	// A Monday further out than the 21-day horizon, as a longer horizon or an
+	// earlier run would have left behind.
+	var beyondID uuid.UUID
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO trip_occurrences (template_id, service_date, depart_earliest, depart_latest,
+			seats_total, seats_free, template_revision, route_geom, route_km, route_min, pricing_mode)
+		SELECT template_id, '2026-08-24', '2026-08-24T04:30:00Z', '2026-08-24T05:00:00Z',
+			seats_total, seats_free, template_revision, route_geom, route_km, route_min, pricing_mode
+		FROM trip_occurrences LIMIT 1
+		RETURNING id`).Scan(&beyondID); err != nil {
+		t.Fatalf("seeding an out-of-horizon occurrence: %v", err)
+	}
+
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	var status string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT status FROM trip_occurrences WHERE id = $1`, beyondID).Scan(&status); err != nil {
+		t.Fatalf("reading occurrence: %v", err)
+	}
+	if status != "scheduled" {
+		t.Fatalf("an occurrence beyond the horizon is now %q; it is simply not in scope yet", status)
+	}
+}
+
+// A date cancelled by an exception must come back when the exception is lifted.
+// Identity is (template_id, service_date), so a tombstone would otherwise block
+// the row forever.
+func TestMaterializeRestoresAnOccurrenceWhenItsExceptionIsLifted(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	// Materialize first so the date exists, then except it: that is what leaves
+	// a cancelled tombstone on the (template, service_date) key.
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("initial run: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE route_schedules SET exceptions = ARRAY['2026-07-13']::date[] WHERE template_id = $1`,
+		f.templateID); err != nil {
+		t.Fatalf("setting exception: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("run with exception: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx,
+		`SELECT 1 FROM trip_occurrences WHERE service_date = '2026-07-13' AND status = 'cancelled'`); err != nil {
+		t.Fatalf("checking the tombstone: %v", err)
+	}
+
+	// The driver changes their mind and removes the exception.
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE route_schedules SET exceptions = '{}'::date[] WHERE template_id = $1`,
+		f.templateID); err != nil {
+		t.Fatalf("clearing exception: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("run without exception: %v", err)
+	}
+
+	for _, d := range f.serviceDates() {
+		if d == "2026-07-13" {
+			return
+		}
+	}
+	t.Fatalf("2026-07-13 was not restored after the exception was lifted; got %v", f.serviceDates())
+}
+
+// Editing the departure window must reshape occurrences nothing depends on.
+func TestMaterializeAppliesAScheduleTimeChangeToAnUntouchedOccurrence(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE route_schedules SET depart_earliest = make_time(9,0,0), depart_latest = make_time(9,30,0)
+		WHERE template_id = $1`, f.templateID); err != nil {
+		t.Fatalf("changing the departure window: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	var earliest time.Time
+	if err := f.pool.QueryRow(ctx,
+		`SELECT depart_earliest FROM trip_occurrences WHERE service_date = '2026-07-13'`).
+		Scan(&earliest); err != nil {
+		t.Fatalf("reading occurrence: %v", err)
+	}
+	// 09:00 Athens in July (EEST, UTC+3) is 06:00 UTC.
+	want := time.Date(2026, time.July, 13, 6, 0, 0, 0, time.UTC)
+	if !earliest.Equal(want) {
+		t.Fatalf("depart_earliest = %v, want the edited %v", earliest.UTC(), want)
+	}
+}
+
+// A booked occurrence must keep its original times even when the schedule moves.
+func TestMaterializeDoesNotRetimeABookedOccurrence(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	occurrenceID := f.bookOccurrence("2026-07-13")
+
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE route_schedules SET depart_earliest = make_time(9,0,0), depart_latest = make_time(9,30,0)
+		WHERE template_id = $1`, f.templateID); err != nil {
+		t.Fatalf("changing the departure window: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	var earliest time.Time
+	if err := f.pool.QueryRow(ctx,
+		`SELECT depart_earliest FROM trip_occurrences WHERE id = $1`, occurrenceID).Scan(&earliest); err != nil {
+		t.Fatalf("reading occurrence: %v", err)
+	}
+	want := time.Date(2026, time.July, 13, 4, 30, 0, 0, time.UTC) // the original 07:30 Athens
+	if !earliest.Equal(want) {
+		t.Fatalf("a booked occurrence was retimed to %v; it must stay at %v", earliest.UTC(), want)
+	}
+}
+
+// A trip that already departed today is history, even if the schedule changed.
+func TestMaterializeDoesNotCancelATripThatAlreadyDepartedToday(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	// It is now the afternoon of the first service date; that morning's trip ran.
+	f.clock.Advance(12 * time.Hour)
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE route_schedules SET weekdays = ARRAY[2]::int[] WHERE template_id = $1`,
+		f.templateID); err != nil {
+		t.Fatalf("changing weekdays: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	var status string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT status FROM trip_occurrences WHERE service_date = '2026-07-06'`).Scan(&status); err != nil {
+		t.Fatalf("reading occurrence: %v", err)
+	}
+	if status != "scheduled" {
+		t.Fatalf("a trip that already departed is now %q; history must not be rewritten", status)
+	}
+}

@@ -4,6 +4,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -72,19 +73,54 @@ func (m *Materializer) Run(ctx context.Context) error {
 
 // reconcile brings one template's occurrences in line with its schedule.
 //
-// The desired set is computed from the schedule, then compared with what
-// exists. Occurrences are only created or cancelled when nothing depends on
-// them: an occurrence that is booked, carries a live ask, has already departed
-// or is not scheduled any more is frozen. Rewriting one of those would change
-// the meaning of an arrangement two people have already made.
+// Everything the decision depends on — the schedule, the template snapshot and
+// the horizon — is read *after* the advisory lock is taken and inside the same
+// transaction. Reading before the lock let a concurrent schedule edit, or a run
+// that started before midnight, reconcile against a stale plan and cancel rows
+// a newer run had just created.
+//
+// An occurrence is mutable only while nothing depends on it: no live booking,
+// no pending ask, and it has not departed. Mutable rows are created, retimed or
+// cancelled freely. Everything else is left exactly as it is, because rewriting
+// it would change an arrangement two people already made.
 func (m *Materializer) reconcile(ctx context.Context, templateID uuid.UUID) error {
-	schedule, err := store.GetSchedule(ctx, m.pool, templateID)
+	tx, err := m.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("jobs: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Serialise against any other materializer working on this template before
+	// reading anything it might be changing.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2))`,
+		materializeLockNamespace, templateID.String()); err != nil {
+		return fmt.Errorf("jobs: taking template lock: %w", err)
+	}
+
+	// Lock the template row so its revision cannot change mid-reconciliation.
+	// Under READ COMMITTED each statement takes a fresh snapshot, so without
+	// this a single run could commit a horizon spanning two revisions.
+	var tmpl templateSnapshot
+	err = tx.QueryRow(ctx, `
+		SELECT revision, seats, route_km, route_min, pricing_mode, ST_AsText(route_geom)
+		FROM route_templates WHERE id = $1 AND active
+		FOR UPDATE`, templateID).Scan(
+		&tmpl.revision, &tmpl.seats, &tmpl.routeKm, &tmpl.routeMin, &tmpl.pricingMode, &tmpl.routeWKT)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // deactivated between listing and locking
+	}
+	if err != nil {
+		return fmt.Errorf("jobs: loading template: %w", err)
+	}
+
+	schedule, err := store.GetSchedule(ctx, tx, templateID)
 	if err != nil {
 		return err
 	}
 
-	now := m.clock.Now().In(m.loc)
-	from := domain.Date{Year: now.Year(), Month: now.Month(), Day: now.Day()}
+	now := m.clock.Now()
+	local := now.In(m.loc)
+	from := domain.Date{Year: local.Year(), Month: local.Month(), Day: local.Day()}
 	to := from.AddDays(HorizonDays)
 
 	planned, planErrs := domain.Plan(schedule, m.loc, from, to)
@@ -94,28 +130,10 @@ func (m *Materializer) reconcile(ctx context.Context, templateID uuid.UUID) erro
 		slog.Warn("skipping an unmaterializable occurrence", "template", templateID, "error", err)
 	}
 
-	tx, err := m.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("jobs: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	// Serialise against any other materializer working on this template. Two
-	// runners would otherwise both see "missing" and both insert.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2))`,
-		materializeLockNamespace, templateID.String()); err != nil {
-		return fmt.Errorf("jobs: taking template lock: %w", err)
-	}
-
-	wanted := make(map[string]domain.PlannedOccurrence, len(planned))
-	for _, p := range planned {
-		wanted[p.ServiceDate.String()] = p
-	}
-
-	if err := m.insertMissing(ctx, tx, templateID, planned); err != nil {
+	if err := m.upsert(ctx, tx, templateID, tmpl, planned, now); err != nil {
 		return err
 	}
-	if err := m.cancelUnwanted(ctx, tx, templateID, wanted, from); err != nil {
+	if err := m.cancelUnwanted(ctx, tx, templateID, planned, from, to, now); err != nil {
 		return err
 	}
 
@@ -125,59 +143,103 @@ func (m *Materializer) reconcile(ctx context.Context, templateID uuid.UUID) erro
 	return nil
 }
 
-// insertMissing creates occurrences that the schedule wants and that do not
-// exist yet. Existing rows are left untouched, which is what keeps a booked or
-// asked-about occurrence stable.
-func (m *Materializer) insertMissing(ctx context.Context, tx pgx.Tx, templateID uuid.UUID, planned []domain.PlannedOccurrence) error {
+// templateSnapshot is the template state copied onto each occurrence.
+type templateSnapshot struct {
+	revision    int
+	seats       int
+	routeKm     float64
+	routeMin    int
+	pricingMode string
+	routeWKT    string
+}
+
+// upsert creates the occurrences the schedule wants, and brings mutable
+// existing ones back in line — including reviving one that a lifted exception
+// had previously cancelled.
+func (m *Materializer) upsert(
+	ctx context.Context, tx pgx.Tx, templateID uuid.UUID,
+	tmpl templateSnapshot, planned []domain.PlannedOccurrence, now time.Time,
+) error {
 	for _, p := range planned {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO trip_occurrences (
 				template_id, service_date, depart_earliest, depart_latest,
 				seats_total, seats_free, template_revision,
 				route_geom, route_km, route_min, pricing_mode)
-			SELECT t.id, $2::date, $3, $4,
-			       t.seats, t.seats, t.revision,
-			       t.route_geom, t.route_km, t.route_min, t.pricing_mode
-			FROM route_templates t
-			WHERE t.id = $1
-			ON CONFLICT (template_id, service_date) DO NOTHING`,
-			templateID, p.ServiceDate.String(), p.DepartEarliest, p.DepartLatest)
+			VALUES ($1, $2::date, $3, $4,
+			        $5, $5, $6, ST_GeomFromText($7, 4326), $8, $9, $10)
+			ON CONFLICT (template_id, service_date) DO UPDATE
+			SET depart_earliest   = EXCLUDED.depart_earliest,
+			    depart_latest     = EXCLUDED.depart_latest,
+			    status            = 'scheduled',
+			    seats_total       = EXCLUDED.seats_total,
+			    -- Preserve seats already taken; only the unsold remainder moves.
+			    seats_free        = EXCLUDED.seats_total
+			                        - (trip_occurrences.seats_total - trip_occurrences.seats_free),
+			    template_revision = EXCLUDED.template_revision,
+			    route_geom        = EXCLUDED.route_geom,
+			    route_km          = EXCLUDED.route_km,
+			    route_min         = EXCLUDED.route_min,
+			    pricing_mode      = EXCLUDED.pricing_mode,
+			    updated_at        = now()
+			WHERE `+mutablePredicate("$11"),
+			templateID, p.ServiceDate.String(), p.DepartEarliest, p.DepartLatest,
+			tmpl.seats, tmpl.revision, tmpl.routeWKT, tmpl.routeKm, tmpl.routeMin, tmpl.pricingMode,
+			now)
 		if err != nil {
-			return fmt.Errorf("jobs: inserting occurrence %s: %w", p.ServiceDate, err)
+			return fmt.Errorf("jobs: upserting occurrence %s: %w", p.ServiceDate, err)
 		}
 	}
 	return nil
 }
 
-// cancelUnwanted cancels future occurrences the schedule no longer wants, but
-// only those nothing depends on.
+// mutablePredicate is the shared definition of "nothing depends on this yet":
+// it has not departed, nobody has booked it, and no driver is being asked about
+// it right now.
+//
+// The departure comparison takes the instant as a parameter rather than calling
+// now(). SQL's now() is the database's wall clock, while every other decision
+// here comes from the injected clock; mixing the two makes the rules depend on
+// which clock happens to be ahead.
+func mutablePredicate(nowParam string) string {
+	return `
+	trip_occurrences.depart_earliest > ` + nowParam + `
+	AND NOT EXISTS (
+	      SELECT 1 FROM bookings b
+	      WHERE b.occurrence_id = trip_occurrences.id
+	        AND b.status IN ('confirmed','completed'))
+	AND NOT EXISTS (
+	      SELECT 1 FROM asks a
+	      WHERE a.occurrence_id = trip_occurrences.id
+	        AND a.status = 'pending')`
+}
+
+// cancelUnwanted cancels mutable occurrences inside the horizon that the
+// schedule no longer wants.
+//
+// The upper bound matters as much as the lower one: occurrences beyond the
+// rolling horizon are simply not in scope yet, not unwanted.
 func (m *Materializer) cancelUnwanted(
 	ctx context.Context, tx pgx.Tx, templateID uuid.UUID,
-	wanted map[string]domain.PlannedOccurrence, from domain.Date,
+	planned []domain.PlannedOccurrence, from, to domain.Date, now time.Time,
 ) error {
-	keep := make([]string, 0, len(wanted))
-	for date := range wanted {
-		keep = append(keep, date)
+	keep := make([]string, 0, len(planned))
+	for _, p := range planned {
+		keep = append(keep, p.ServiceDate.String())
 	}
 
 	// Cancelled rather than deleted: asks and bookings reference occurrences,
-	// and a tombstone keeps that history intact.
+	// and a tombstone keeps that history intact. A later run can revive it.
 	_, err := tx.Exec(ctx, `
-		UPDATE trip_occurrences o
+		UPDATE trip_occurrences
 		SET status = 'cancelled', updated_at = now()
-		WHERE o.template_id = $1
-		  AND o.status = 'scheduled'
-		  AND o.service_date >= $2::date
-		  AND NOT (o.service_date = ANY($3::date[]))
-		  AND NOT EXISTS (
-		        SELECT 1 FROM bookings b
-		        WHERE b.occurrence_id = o.id
-		          AND b.status IN ('confirmed','completed'))
-		  AND NOT EXISTS (
-		        SELECT 1 FROM asks a
-		        WHERE a.occurrence_id = o.id
-		          AND a.status = 'pending')`,
-		templateID, from.String(), keep)
+		WHERE trip_occurrences.template_id = $1
+		  AND trip_occurrences.status = 'scheduled'
+		  AND trip_occurrences.service_date >= $2::date
+		  AND trip_occurrences.service_date <  $3::date
+		  AND NOT (trip_occurrences.service_date = ANY($4::date[]))
+		  AND `+mutablePredicate("$5"),
+		templateID, from.String(), to.String(), keep, now)
 	if err != nil {
 		return fmt.Errorf("jobs: cancelling superseded occurrences: %w", err)
 	}

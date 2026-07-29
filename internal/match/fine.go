@@ -13,9 +13,21 @@ import (
 // explicitly a post-MVP decision.
 const MaxConcurrentParties = 2
 
-// ErrPartyCapReached means the occurrence already carries the maximum number of
-// concurrent passenger parties.
-var ErrPartyCapReached = errors.New("match: occurrence already has the maximum concurrent parties")
+// maxStops bounds the itinerary the insertion search will consider. The party
+// cap limits distinct parties, not stops, so a malformed itinerary could
+// otherwise turn into a quadratic fan-out of OSRM calls.
+const maxStops = 8
+
+var (
+	// ErrPartyCapReached means the occurrence already carries the maximum number
+	// of passenger parties.
+	ErrPartyCapReached = errors.New("match: occurrence already has the maximum passenger parties")
+	// ErrItineraryTooComplex means the itinerary has more stops than the
+	// insertion search is willing to route.
+	ErrItineraryTooComplex = errors.New("match: itinerary has too many stops to evaluate")
+	// ErrNoViableInsertion means every valid ordering was unroutable.
+	ErrNoViableInsertion = errors.New("match: no routable way to fit this passenger in")
+)
 
 // StopKind distinguishes a pickup from a dropoff.
 type StopKind string
@@ -65,6 +77,9 @@ func BestInsertion(ctx context.Context, router Router, itin Itinerary, pickup, d
 	if parties(itin) >= MaxConcurrentParties {
 		return Insertion{}, ErrPartyCapReached
 	}
+	if len(itin.Stops) > maxStops {
+		return Insertion{}, fmt.Errorf("%w: %d stops", ErrItineraryTooComplex, len(itin.Stops))
+	}
 
 	baseline, err := router.Route(ctx, itin.waypoints())
 	if err != nil {
@@ -86,7 +101,14 @@ func BestInsertion(ctx context.Context, router Router, itin Itinerary, pickup, d
 			trial := Itinerary{Origin: itin.Origin, Destination: itin.Destination, Stops: candidate}
 
 			routed, err := router.Route(ctx, trial.waypoints())
+			if errors.Is(err, geo.ErrNoRoute) {
+				// This particular ordering has no path; another may. Giving up
+				// here would silently drop a driver who could take the ride.
+				continue
+			}
 			if err != nil {
+				// Anything else is the routing service failing, which must not be
+				// mistaken for "this driver cannot take them".
 				return Insertion{}, fmt.Errorf("match: routing a candidate itinerary: %w", err)
 			}
 
@@ -103,7 +125,7 @@ func BestInsertion(ctx context.Context, router Router, itin Itinerary, pickup, d
 	}
 
 	if best == nil {
-		return Insertion{}, errors.New("match: no valid insertion found")
+		return Insertion{}, ErrNoViableInsertion
 	}
 	// A negative detour is not meaningful; clamp so callers and stored values
 	// stay non-negative (the schema enforces this too).
@@ -131,7 +153,14 @@ func (it Itinerary) waypoints() []geo.Point {
 	return append(out, it.Destination)
 }
 
-// parties counts the distinct passenger parties already on an itinerary.
+// parties counts the distinct passenger parties on an itinerary.
+//
+// This counts parties per occurrence rather than parties concurrently aboard.
+// The stricter reading is deliberate for the MVP: it keeps the cap a single
+// integer instead of a sweep over pickup/dropoff events, and it can only refuse
+// rides that a concurrency-aware cap would allow — never admit ones it would
+// not. Revisit alongside raising the cap itself (MATCHING.md lists that as a
+// post-MVP decision).
 func parties(it Itinerary) int {
 	seen := make(map[string]struct{}, len(it.Stops))
 	for _, s := range it.Stops {

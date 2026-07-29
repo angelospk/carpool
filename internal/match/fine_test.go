@@ -3,6 +3,7 @@ package match_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -247,4 +248,103 @@ func TestBestInsertionBoundsTheNumberOfRoutingCalls(t *testing.T) {
 	if router.calls > 20 {
 		t.Fatalf("made %d routing calls; the insertion search should stay far smaller", router.calls)
 	}
+}
+
+// --- regression tests for issues found in adversarial review ---
+
+// One unroutable ordering must not abandon the search: a different ordering may
+// route perfectly well, and giving up would silently drop a valid driver.
+func TestBestInsertionSkipsAnUnroutableOrderingAndUsesAnother(t *testing.T) {
+	existing := geo.Point{Lon: 25.90, Lat: 40.85}
+	pickup := geo.Point{Lon: 25.95, Lat: 40.85}
+	dropoff := geo.Point{Lon: 25.98, Lat: 40.85}
+
+	// Refuse exactly the orderings that put the new party ahead of the existing
+	// stop; every other ordering routes normally.
+	router := &pickyRouter{refuseBefore: existing, newStops: []geo.Point{pickup, dropoff}}
+
+	itin := match.Itinerary{
+		Origin:      routeStart,
+		Destination: routeEnd,
+		Stops: []match.Stop{
+			{Point: existing, Kind: match.StopPickup, PartyID: "a"},
+			{Point: geo.Point{Lon: 25.99, Lat: 40.85}, Kind: match.StopDropoff, PartyID: "a"},
+		},
+	}
+
+	got, err := match.BestInsertion(context.Background(), router, itin, pickup, dropoff)
+	if err != nil {
+		t.Fatalf("BestInsertion gave up instead of trying another ordering: %v", err)
+	}
+	if len(got.Waypoints) == 0 {
+		t.Fatal("no itinerary returned")
+	}
+}
+
+// A routing outage is not the same as an unroutable ordering, and must not be
+// mistaken for "this driver cannot take them".
+func TestBestInsertionStillFailsWhenTheRouterIsBroken(t *testing.T) {
+	router := &straightLineRouter{err: errors.New("connection refused")}
+
+	_, err := match.BestInsertion(context.Background(), router, emptyItinerary(),
+		geo.Point{Lon: 25.85, Lat: 40.85}, geo.Point{Lon: 25.95, Lat: 40.85})
+
+	if err == nil {
+		t.Fatal("a routing outage must surface, not be treated as no-route")
+	}
+	if errors.Is(err, geo.ErrNoRoute) {
+		t.Fatal("an infrastructure failure was reported as an unroutable candidate")
+	}
+}
+
+// A malformed itinerary must not turn into an unbounded pile of OSRM calls.
+func TestBestInsertionRefusesAnAbsurdlyLongItinerary(t *testing.T) {
+	router := &straightLineRouter{}
+	itin := match.Itinerary{Origin: routeStart, Destination: routeEnd}
+	for i := range 500 {
+		itin.Stops = append(itin.Stops, match.Stop{
+			Point:   geo.Point{Lon: 25.85, Lat: 40.85},
+			Kind:    match.StopPickup,
+			PartyID: "a", // one party, so the cap does not catch it
+		})
+		_ = i
+	}
+
+	_, err := match.BestInsertion(context.Background(), router, itin,
+		geo.Point{Lon: 25.9, Lat: 40.85}, geo.Point{Lon: 25.95, Lat: 40.85})
+
+	if err == nil {
+		t.Fatal("expected a refusal rather than a quadratic fan-out of routing calls")
+	}
+	if router.calls > 50 {
+		t.Fatalf("made %d routing calls before refusing", router.calls)
+	}
+}
+
+// pickyRouter returns NoRoute for any ordering where a new stop precedes the
+// given point, and routes everything else.
+type pickyRouter struct {
+	refuseBefore geo.Point
+	newStops     []geo.Point
+	straightLineRouter
+}
+
+func (r *pickyRouter) Route(ctx context.Context, waypoints []geo.Point) (geo.Route, error) {
+	idxOf := func(p geo.Point) int {
+		for i, w := range waypoints {
+			if w == p {
+				return i
+			}
+		}
+		return -1
+	}
+	anchor := idxOf(r.refuseBefore)
+	if anchor >= 0 {
+		for _, s := range r.newStops {
+			if i := idxOf(s); i >= 0 && i < anchor {
+				return geo.Route{}, fmt.Errorf("%w: no path", geo.ErrNoRoute)
+			}
+		}
+	}
+	return r.straightLineRouter.Route(ctx, waypoints)
 }

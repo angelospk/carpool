@@ -131,8 +131,14 @@ func insertSchedule(ctx context.Context, tx pgx.Tx, templateID uuid.UUID, s doma
 	return nil
 }
 
+// scheduleQuerier is satisfied by both a pool and a transaction, so the
+// materializer can read a schedule inside the transaction that locked it.
+type scheduleQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // GetSchedule loads the schedule attached to a template.
-func GetSchedule(ctx context.Context, pool *pgxpool.Pool, templateID uuid.UUID) (domain.Schedule, error) {
+func GetSchedule(ctx context.Context, q scheduleQuerier, templateID uuid.UUID) (domain.Schedule, error) {
 	var (
 		kind       string
 		oneoff     *string
@@ -145,7 +151,7 @@ func GetSchedule(ctx context.Context, pool *pgxpool.Pool, templateID uuid.UUID) 
 		until      *string
 		exceptions []string
 	)
-	err := pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		SELECT kind, oneoff_date::text, weekdays,
 		       EXTRACT(HOUR FROM depart_earliest)::int, EXTRACT(MINUTE FROM depart_earliest)::int,
 		       EXTRACT(HOUR FROM depart_latest)::int,   EXTRACT(MINUTE FROM depart_latest)::int,
