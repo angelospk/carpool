@@ -217,3 +217,43 @@ test('persists a refresh attempt id before asking, and reuses it after a lost re
   // Once the rotation lands, the id is spent and must not be reused.
   expect((await getTokens())?.refreshAttemptId).toBeUndefined();
 });
+
+// The id has to survive uuid.Parse on the server. A fallback that is merely
+// unique would be rejected with a 400 — and, being persisted for reuse, would
+// wedge every later refresh with the same rejected value.
+test('generates a valid uuid even without crypto.randomUUID', async () => {
+  await setTokens({ accessToken: 'access-1', refreshToken: 'refresh-1' });
+  const realCrypto = globalThis.crypto;
+  Object.defineProperty(globalThis, 'crypto', { value: undefined, configurable: true });
+
+  try {
+    global.fetch = jest.fn((url: string) =>
+      url.endsWith('/v1/auth/refresh')
+        ? Promise.reject(new TypeError('offline'))
+        : json(401, { error: { code: 'expired', message: '' } }),
+    ) as unknown as typeof fetch;
+    await request('/v1/me').catch(() => undefined);
+  } finally {
+    Object.defineProperty(globalThis, 'crypto', { value: realCrypto, configurable: true });
+  }
+
+  expect((await getTokens())?.refreshAttemptId).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+});
+
+// A rejected attempt id must not be kept, or it wedges every later refresh.
+test('a 400 discards the attempt id instead of retrying it forever', async () => {
+  await setTokens({ accessToken: 'access-1', refreshToken: 'refresh-1', refreshAttemptId: 'stale' });
+
+  global.fetch = jest.fn((url: string) =>
+    url.endsWith('/v1/auth/refresh')
+      ? json(400, { error: { code: 'invalid_request', message: '' } })
+      : json(401, { error: { code: 'expired', message: '' } }),
+  ) as unknown as typeof fetch;
+  await request('/v1/me').catch(() => undefined);
+
+  const stored = await getTokens();
+  expect(stored?.refreshToken).toBe('refresh-1');
+  expect(stored?.refreshAttemptId).toBeUndefined();
+});

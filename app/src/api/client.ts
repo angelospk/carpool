@@ -63,14 +63,26 @@ export function setSessionEndedHandler(fn: (() => void) | null) {
 /**
  * A fresh rotation attempt id.
  *
- * Expo's runtime provides `crypto.randomUUID`; the fallback only has to be
- * unique, not unguessable — the id is a request nonce, and on its own it grants
- * nothing without the refresh token it accompanies.
+ * The server parses this as a uuid, so the fallback must be a well-formed v4 and
+ * not merely unique — an id the server rejects would be stored for reuse and
+ * would then wedge every later refresh with the same 400. Randomness quality is
+ * secondary: the id is a request nonce that grants nothing without the refresh
+ * token it accompanies.
  */
 function newAttemptId(): string {
   const c = globalThis.crypto;
   if (c && typeof c.randomUUID === 'function') return c.randomUUID();
-  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+
+  const bytes = new Uint8Array(16);
+  if (c && typeof c.getRandomValues === 'function') {
+    c.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 1
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 async function refreshTokens(): Promise<boolean> {
@@ -108,6 +120,13 @@ async function refreshTokens(): Promise<boolean> {
   if (res.status === 401 || res.status === 403) {
     await clearTokens();
     onSessionEnded?.();
+    return false;
+  }
+  if (res.status === 400) {
+    // The server would not take this attempt id. Keeping it would repeat the
+    // same rejected request forever, so drop it and let the next refresh mint a
+    // new one. The token itself is untouched: a 400 says nothing about it.
+    await setTokens({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken }, startedAt);
     return false;
   }
   if (!res.ok) return false;
