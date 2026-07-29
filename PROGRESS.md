@@ -5,32 +5,30 @@ Running status log so any future session can resume cold. Updated every work ses
 ## Current state
 
 **Last updated:** 2026-07-29.
-**Blocked on:** Docker is not installed (see "Environment notes"). Everything that
-does not need it has been pushed forward; DB work currently runs against a native
-PostgreSQL 17 + PostGIS 3.6 instead.
+**Not blocked.** Docker is installed and the dev stack runs. The whole suite is
+green against the spec'd `postgis/postgis:16-3.4`.
 
 ## How to run things
 
 ```bash
-# unit tests only
-make check
-
-# with integration tests (real PostGIS)
-export CARPOOL_TEST_DSN="postgres://carpool@localhost:5433/postgres?sslmode=disable"
-make check
+docker compose -f docker-compose.dev.yml up -d      # postgis + osrm
+export CARPOOL_TEST_DSN="postgres://carpool:carpool@localhost:5433/postgres?sslmode=disable"
+make check                                          # vet + staticcheck + tests (~8s)
 ```
 
 Integration tests skip themselves when `CARPOOL_TEST_DSN` is unset. Each test
 creates and drops its own database, so they are safe to run in parallel and
 against any server.
 
-Starting the interim native stack (until Docker exists):
+The dev database runs with `fsync=off`. That is a deliberate development-only
+trade: each integration test creates and drops its own database, and fsync
+dominated the runtime (~240s before, ~8s after). The production compose must
+never carry those settings.
+
+Rebuilding the OSRM extract:
 
 ```bash
-export PATH="/home/linuxbrew/.linuxbrew/opt/postgresql@17/bin:$PATH"
-PGDIR=/tmp/.../scratchpad/pgdata   # any directory
-pg_ctl -D "$PGDIR" -o "-p 5433" -l "$PGDIR/pg.log" start
-osrm-routed --algorithm mld --port 5000 osrm-data/evros-buffered.osrm
+scripts/build-osrm.sh osrm-data/evros-buffered.osm.pbf
 ```
 
 ## Environment notes (this machine — mini PC)
@@ -42,52 +40,48 @@ osrm-routed --algorithm mld --port 5000 osrm-data/evros-buffered.osrm
   binary explicitly.
 - Homebrew (rootless) provides `goose`, `osmium`, `osrm-backend`,
   `postgresql@16`, `postgresql@17`.
-- **Docker is still not installed** and `sudo` needs a password. Harold chose to
-  install it; the command is in the session. Until then:
-  - **PostGIS**: brew's PostGIS 3.6 ships modules for PG 17/18 only, *not* PG 16,
-    so the interim test target is **PG 17 + PostGIS 3.6** on port 5433, not the
-    spec'd PG 16 + PostGIS 3.4. Nothing used so far is version-sensitive
-    (`ST_DWithin`, `ST_LineLocatePoint`, `ST_ClosestPoint`, GIST on geography),
-    but the suite must be re-run against `postgis/postgis:16-3.4` before M7.
-  - **OSRM**: running natively from brew rather than as a container. Same binary
-    and algorithm (MLD, car profile), so routing results are unaffected.
-- `docker-compose.dev.yml` is written and ready; it has never been executed.
+- Docker 29.1.3 + compose v2.40 installed. `docker-compose.dev.yml` runs
+  `postgis/postgis:16-3.4` on host port 5433 and OSRM on 5000.
+- The OSRM image ships neither wget nor curl, so its healthcheck uses bash's
+  `/dev/tcp`.
+- Earlier sessions used a rootless PG 17 + PostGIS 3.6 as an interim target
+  before Docker existed. That is no longer needed; everything has since been
+  re-verified on PG 16 + PostGIS 3.4.
 
 ## Milestones
 
-- [ ] **M0 Skeleton** — mostly done.
-  - [x] Go module, `internal/...` layout per ARCHITECTURE.md
-  - [x] `make check` (vet + staticcheck + test), all green
-  - [x] env-only config loader; injectable `Clock`
-  - [x] chi router, `/v1/livez` + `/v1/readyz` + `/v1/health`, JSON error envelope
-  - [x] goose migration runner, embedded, advisory-locked, concurrency-tested
-  - [x] integration harness (`internal/store/testdb`), DSN from env
-  - [x] `docker-compose.dev.yml`, `.env.example`
-  - [ ] `cmd/api/main.go` with graceful shutdown
-- [ ] **M1 Schema + auth** — schema and tokens done, flow outstanding.
-  - [x] full DATA-MODEL.md schema as one migration, applies and rolls back clean
-  - [x] access JWTs (HS256 pinned) + opaque, hashed, rotatable refresh tokens
-  - [x] Evros region GeoJSON fixture (OSM relation 939217, ODbL)
-  - [ ] OTP request/verify flow, SMS behind an interface, dev console OTP
-  - [ ] `/me`, region seeding from the fixture, rate limiting
-- [ ] **M2 Routes & occurrences** — pure logic done, persistence outstanding.
-  - [x] DST-safe wall-time resolver (skipped/repeated local times)
-  - [x] schedule → occurrence planner (half-open calendar horizon, exceptions,
-        effective range, one-off, deterministic ordering)
-  - [x] OSRM client (`/route`, `/nearest`) with NoRoute/NoSegment sentinels
-  - [ ] route template + schedule CRUD, materializer persistence, regenerate-on-edit
-- [ ] **M3 Matching** — stage 1 done.
-  - [x] stage-1 gross SQL: direction-aware, shared-distance floor, block-aware
-  - [x] geometry cases: same-direction accepted; reverse, crossing, sub-floor
-        overlap, out-of-radius, full, non-scheduled, wrong-window, muted rejected
-  - [x] EXPLAIN test asserting the geography GIST index is used
-  - [x] suggested-contribution formula (integer cents)
-  - [ ] stage-2 OSRM insertion detour, 2-party cap, ranking
-- [ ] **M4 Ask/booking lifecycle** — not started.
+- [x] **M0 Skeleton** — module layout, `make check`, config, injectable clock,
+      chi router with `/livez`+`/readyz`+`/health` and the JSON error envelope,
+      embedded advisory-locked goose runner, integration harness, dev compose,
+      `cmd/api` with graceful shutdown.
+- [x] **M1 Schema + auth** — full DATA-MODEL.md schema; phone OTP (hashed,
+      single-use, attempt- and rate-limited, SMS behind an interface with a
+      console dev sender); access JWTs with HS256 pinned; refresh tokens with
+      rotation, replay detection and per-device families; `/me` read+update;
+      public region listing; region seeding from the checked-in Evros fixture.
+- [x] **M2 Routes & occurrences** — DST-safe wall-time resolver; schedule
+      planner; OSRM client; route template + schedule store; occurrence
+      materializer reconciling against a rolling calendar horizon under a
+      per-template advisory lock, freezing anything booked, asked-about or past.
+- [x] **M3 Matching** — stage-1 gross SQL (direction-aware, distance floor,
+      block-aware) with an EXPLAIN index assertion and the full geometry table;
+      stage-2 OSRM insertion detour with the 2-party cap; ranking with a total
+      tie-break; suggested-contribution formula.
+- [ ] **M4 Ask/booking lifecycle** — mostly done.
+  - [x] outbox: transactional enqueue, leased dispatcher, exponential backoff,
+        dead-lettering, permanent-failure classification, concurrent dispatchers
+  - [x] accept transaction: canonical lock order, optimistic itinerary-version
+        re-check with OSRM kept outside the transaction, seat reservation,
+        version bump, passenger notification enqueued in the same transaction
+  - [x] decline and the ask-expiry sweeper, both requeuing the next candidate
+  - [ ] candidate selection (gross+fine → create the next ask) wired end to end
+  - [ ] Expo push client behind an interface, with a fake for tests
+  - [ ] HTTP endpoints: `POST /asks/{id}/accept` | `/decline`, `POST /requests`
+  - [ ] e2e: request → ask → accept → booking, and ask-expiry → next candidate
 - [ ] **M5 Trips & social** — not started.
 - [ ] **M6 Expo app** — not started.
-- [ ] **M7 Deploy readiness** — RAM measured, rest not started.
-  - [x] **OSRM memory measured** — see the table in RISKS.md risk 3.
+- [ ] **M7 Deploy readiness** — RAM measured; prod compose, backups and the
+      restore drill not started.
 
 ## Deviations from spec
 
@@ -135,10 +129,11 @@ for a pilot).
 
 ## Next steps
 
-1. `cmd/api/main.go` + graceful shutdown, closing out M0.
-2. M1 OTP flow and region seeding from the checked-in fixture.
-3. M2 persistence: template/schedule CRUD and the materializer reconciliation
-   transaction.
-4. M3 stage 2: OSRM insertion detour and ranking.
-5. Once Docker exists: re-run the whole suite against `postgis/postgis:16-3.4`
-   and verify the e2e scenario under `docker compose -f docker-compose.dev.yml up`.
+1. Finish M4: candidate selection (run gross → fine → create ask for the top
+   candidate), the Expo push client behind an interface, the accept/decline and
+   request HTTP endpoints, and the end-to-end scenario test.
+2. M5: trip endpoints, confirm/complete, ratings, chat (REST + ws hub),
+   report/block.
+3. M6: the Expo app per MOBILE.md, pointed at this machine.
+4. M7: production compose (without the dev fsync settings), `.env.example`
+   review, backup + restore drill, and the final measured RSS table.
