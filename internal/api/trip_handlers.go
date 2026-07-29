@@ -122,7 +122,12 @@ func (d Deps) handleConfirmTrip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := store.ConfirmTrip(r.Context(), d.Pool, occurrenceID, userID, role); err != nil {
+	err := store.ConfirmTrip(r.Context(), d.Pool, occurrenceID, userID, role, d.now())
+	if errors.Is(err, store.ErrNotDeparted) {
+		writeError(w, http.StatusConflict, "not_departed", "you can confirm once the trip has set off")
+		return
+	}
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not confirm the trip")
 		return
 	}
@@ -138,16 +143,29 @@ func (d Deps) handleRateTrip(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Stars int     `json:"stars"`
 		Tag   *string `json:"tag"`
+		// RateeID names which passenger is being rated. A driver carrying
+		// several must say; a passenger may omit it.
+		RateeID *string `json:"ratee_id"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
+	}
+
+	var rateeID *uuid.UUID
+	if body.RateeID != nil {
+		id, err := uuid.Parse(*body.RateeID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "ratee_id must be a uuid")
+			return
+		}
+		rateeID = &id
 	}
 	if body.Stars < 1 || body.Stars > 5 {
 		writeError(w, http.StatusBadRequest, "invalid_request", "stars must be between 1 and 5")
 		return
 	}
 
-	err := store.RateTrip(r.Context(), d.Pool, occurrenceID, userID, role, body.Stars, body.Tag)
+	err := store.RateTrip(r.Context(), d.Pool, occurrenceID, userID, role, rateeID, body.Stars, body.Tag)
 	switch {
 	case errors.Is(err, store.ErrNotCompleted):
 		writeError(w, http.StatusConflict, "not_completed", "you can rate once the ride is completed")
@@ -183,6 +201,12 @@ func (d Deps) handleListMessages(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		afterID = &id
+	}
+
+	if (afterTime == nil) != (afterID == nil) {
+		writeError(w, http.StatusBadRequest, "invalid_request",
+			"after_time and after_id must be given together")
+		return
 	}
 
 	messages, err := store.ListMessages(r.Context(), d.Pool, occurrenceID, afterTime, afterID, 50)
@@ -225,12 +249,13 @@ func (d Deps) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if d.Hub != nil {
 		d.Hub.Publish(occurrenceID, map[string]any{
 			"type": "message", "id": m.ID, "sender_id": m.SenderID,
-			"body": m.Body, "created_at": m.CreatedAt,
+			"sender_name": m.SenderName, "body": m.Body, "created_at": m.CreatedAt,
 		})
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"id": m.ID, "sender_id": m.SenderID, "body": m.Body, "created_at": m.CreatedAt,
+		"id": m.ID, "sender_id": m.SenderID, "sender_name": m.SenderName,
+		"body": m.Body, "created_at": m.CreatedAt,
 	})
 }
 

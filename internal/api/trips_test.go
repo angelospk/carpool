@@ -68,6 +68,13 @@ func (h *harness) bookedTrip(t *testing.T) (driverToken, passengerToken string, 
 	return driverToken, passengerToken, occurrenceID
 }
 
+// departed moves the fixture trip into the past, since a ride can only be
+// confirmed once it was due to leave.
+func (h *harness) departed() {
+	h.mustExec(`UPDATE trip_occurrences SET depart_earliest = now() - interval '2 hours',
+	                                        depart_latest   = now() - interval '90 minutes'`)
+}
+
 func TestUpcomingTripsShowsTheTripToBothSides(t *testing.T) {
 	h := newHarness(t)
 	driver, passenger, occurrenceID := h.bookedTrip(t)
@@ -142,6 +149,7 @@ func TestTripDetailRevealsThePlateToTheMatchedPassenger(t *testing.T) {
 func TestConfirmMarksOnlyTheCallersSide(t *testing.T) {
 	h := newHarness(t)
 	driver, _, occurrenceID := h.bookedTrip(t)
+	h.departed()
 
 	rec := h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, driver)
 
@@ -162,6 +170,7 @@ func TestConfirmMarksOnlyTheCallersSide(t *testing.T) {
 func TestConfirmIsIdempotent(t *testing.T) {
 	h := newHarness(t)
 	driver, _, occurrenceID := h.bookedTrip(t)
+	h.departed()
 
 	for range 2 {
 		if rec := h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, driver); rec.Code != http.StatusNoContent {
@@ -174,6 +183,7 @@ func TestConfirmIsIdempotent(t *testing.T) {
 func TestBookingCompletesWhenBothSidesConfirm(t *testing.T) {
 	h := newHarness(t)
 	driver, passenger, occurrenceID := h.bookedTrip(t)
+	h.departed()
 
 	h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, driver)
 	h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, passenger)
@@ -200,6 +210,7 @@ func TestRatingRequiresACompletedRide(t *testing.T) {
 func TestRatingIsStoredAgainstTheOtherParty(t *testing.T) {
 	h := newHarness(t)
 	driver, passenger, occurrenceID := h.bookedTrip(t)
+	h.departed()
 	h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, driver)
 	h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, passenger)
 
@@ -224,6 +235,7 @@ func TestRatingIsStoredAgainstTheOtherParty(t *testing.T) {
 func TestRatingCannotBeSubmittedTwice(t *testing.T) {
 	h := newHarness(t)
 	driver, passenger, occurrenceID := h.bookedTrip(t)
+	h.departed()
 	h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, driver)
 	h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, passenger)
 	h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/rate", map[string]any{"stars": 5}, passenger)
@@ -239,6 +251,7 @@ func TestRatingCannotBeSubmittedTwice(t *testing.T) {
 func TestRatingRejectsAnOutOfRangeScore(t *testing.T) {
 	h := newHarness(t)
 	driver, passenger, occurrenceID := h.bookedTrip(t)
+	h.departed()
 	h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, driver)
 	h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, passenger)
 
@@ -349,4 +362,123 @@ func TestYouCannotBlockYourself(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
+}
+
+// --- regression tests for issues found in adversarial review ---
+
+// Confirming must not be possible before the trip has actually departed,
+// otherwise a pair could complete and rate a ride next week.
+func TestConfirmIsRejectedBeforeTheTripHasDeparted(t *testing.T) {
+	h := newHarness(t)
+	driver, _, occurrenceID := h.bookedTrip(t)
+	// The fixture trip departs 2026-07-30; the harness clock is 2026-07-29.
+	h.mustExec(`UPDATE trip_occurrences SET depart_earliest = now() + interval '2 days',
+	                                        depart_latest   = now() + interval '2 days'`)
+
+	rec := h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, driver)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 for a trip that has not departed", rec.Code)
+	}
+	var confirmed bool
+	h.mustQuery(`SELECT driver_confirmed FROM bookings`, &confirmed)
+	if confirmed {
+		t.Error("a future trip was confirmed anyway")
+	}
+}
+
+// A driver carrying two passengers must be able to rate each of them, not just
+// whichever booking happens to be oldest.
+func TestDriverCanRateEachPassengerSeparately(t *testing.T) {
+	h := newHarness(t)
+	driver, passenger, occurrenceID := h.bookedTrip(t)
+	second := h.addSecondPassenger(t, occurrenceID)
+	h.departed()
+	h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, driver)
+	h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, passenger)
+	h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, second)
+
+	for i, target := range []string{"+306900000032", "+306900000033"} {
+		var targetID uuid.UUID
+		h.mustQuery(`SELECT id FROM users WHERE phone = $1`, &targetID, target)
+
+		rec := h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/rate",
+			map[string]any{"stars": 4, "ratee_id": targetID.String()}, driver)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("rating passenger %d: status = %d, body %s", i, rec.Code, rec.Body.String())
+		}
+	}
+
+	var ratings int
+	h.mustQuery(`SELECT count(*) FROM ratings`, &ratings)
+	if ratings != 2 {
+		t.Fatalf("stored %d ratings, want one per passenger", ratings)
+	}
+}
+
+// A cursor with a time but no id must not silently skip every message sharing
+// that timestamp.
+func TestChatRejectsAHalfSpecifiedCursor(t *testing.T) {
+	h := newHarness(t)
+	_, passenger, occurrenceID := h.bookedTrip(t)
+	path := "/v1/trips/" + occurrenceID.String() + "/messages"
+
+	rec := h.do(http.MethodGet, path+"?after_time=2026-07-29T12:00:00Z", nil, passenger)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a cursor missing after_id", rec.Code)
+	}
+}
+
+// A posted message must look the same live as it does on refetch.
+func TestPostedMessageCarriesTheSenderName(t *testing.T) {
+	h := newHarness(t)
+	_, passenger, occurrenceID := h.bookedTrip(t)
+
+	rec := h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/messages",
+		map[string]any{"body": "γεια"}, passenger)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var body struct {
+		SenderName string `json:"sender_name"`
+	}
+	h.decode(rec, &body)
+	if body.SenderName != "Επιβάτης" {
+		t.Fatalf("sender_name = %q, want the poster's name", body.SenderName)
+	}
+}
+
+// addSecondPassenger books another rider onto the same trip and returns their
+// access token.
+func (h *harness) addSecondPassenger(t *testing.T, occurrenceID uuid.UUID) string {
+	t.Helper()
+	token, _ := h.signUp("+306900000033", "Δεύτερος")
+
+	var passengerID uuid.UUID
+	h.mustQuery(`SELECT id FROM users WHERE phone = '+306900000033'`, &passengerID)
+
+	var requestID, askID uuid.UUID
+	if err := h.pool.QueryRow(context.Background(), `
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end, kind, status)
+		VALUES ($1, ST_SetSRID(ST_MakePoint(25.83,40.85),4326), ST_SetSRID(ST_MakePoint(25.97,40.85),4326),
+			'2026-07-30T04:00:00Z','2026-07-30T06:00:00Z','open','matched')
+		RETURNING id`, passengerID).Scan(&requestID); err != nil {
+		t.Fatalf("seeding second request: %v", err)
+	}
+	if err := h.pool.QueryRow(context.Background(), `
+		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
+			suggested_price_eur, itinerary_version, status, expires_at)
+		VALUES ($1,$2,5,2, ST_SetSRID(ST_MakePoint(25.83,40.85),4326),
+			ST_SetSRID(ST_MakePoint(25.97,40.85),4326), 2.50, 0, 'accepted', now()+interval '1 hour')
+		RETURNING id`, requestID, occurrenceID).Scan(&askID); err != nil {
+		t.Fatalf("seeding second ask: %v", err)
+	}
+	h.mustExec(`INSERT INTO bookings (occurrence_id, request_id, passenger_id, ask_id, seats, price_eur,
+	                                  pickup_point, dropoff_point)
+	            VALUES ($1,$2,$3,$4,1,2.50, ST_SetSRID(ST_MakePoint(25.83,40.85),4326),
+	                    ST_SetSRID(ST_MakePoint(25.97,40.85),4326))`,
+		occurrenceID, requestID, passengerID, askID)
+	return token
 }

@@ -37,8 +37,9 @@ func PostMessage(ctx context.Context, pool *pgxpool.Pool, occurrenceID, senderID
 	err := pool.QueryRow(ctx, `
 		INSERT INTO trip_messages (occurrence_id, sender_id, body)
 		VALUES ($1, $2, $3)
-		RETURNING id, sender_id, body, created_at`,
-		occurrenceID, senderID, body).Scan(&m.ID, &m.SenderID, &m.Body, &m.CreatedAt)
+		RETURNING id, sender_id, body, created_at,
+		          (SELECT name FROM users WHERE id = $2)`,
+		occurrenceID, senderID, body).Scan(&m.ID, &m.SenderID, &m.Body, &m.CreatedAt, &m.SenderName)
 	if err != nil {
 		return Message{}, fmt.Errorf("store: posting message: %w", err)
 	}
@@ -55,6 +56,12 @@ func ListMessages(ctx context.Context, pool *pgxpool.Pool, occurrenceID uuid.UUI
 ) ([]Message, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
+	}
+	// The cursor is a pair. Half of it is not a smaller cursor, it is a broken
+	// one: (created_at, id) > (T, NULL) is unknown for every row at exactly T,
+	// so those messages would be skipped forever.
+	if (afterTime == nil) != (afterID == nil) {
+		return nil, fmt.Errorf("store: a message cursor needs both after_time and after_id, or neither")
 	}
 
 	rows, err := pool.Query(ctx, `

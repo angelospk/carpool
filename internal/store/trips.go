@@ -157,6 +157,9 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		if err := rows.Scan(&p.UserID, &p.Name, &p.PhotoURL, &p.Rating, &p.PriceEUR, &p.Seats); err != nil {
 			return TripDetail{}, fmt.Errorf("store: scanning passenger: %w", err)
 		}
+		if p.UserID == userID && p.PriceEUR != nil {
+			d.PriceEUR = *p.PriceEUR
+		}
 		d.Passengers = append(d.Passengers, p)
 	}
 	return d, rows.Err()
@@ -193,14 +196,18 @@ func ParticipantRole(ctx context.Context, pool *pgxpool.Pool, occurrenceID, user
 //
 // It is idempotent: confirming twice is the same as confirming once, which
 // matters because the app retries on a flaky connection.
-func ConfirmTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.UUID, role TripRole) error {
+func ConfirmTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.UUID, role TripRole, now time.Time) error {
 	var sql string
 	switch role {
 	case RoleDriver:
-		// The driver confirms every passenger at once. $2 is unused here but
-		// kept so both branches take the same argument list.
+		// The driver confirms every passenger at once. The driver identity is
+		// re-checked in SQL rather than trusted from the role argument, so a
+		// mis-derived role upstream cannot confirm other people's bookings.
 		sql = `UPDATE bookings SET driver_confirmed = true, updated_at = now()
-		       WHERE occurrence_id = $1 AND status = 'confirmed' AND $2::uuid IS NOT NULL`
+		       WHERE occurrence_id = $1 AND status = 'confirmed'
+		         AND $2 = (SELECT t.driver_id FROM trip_occurrences o
+		                   JOIN route_templates t ON t.id = o.template_id
+		                   WHERE o.id = $1)`
 	case RolePassenger:
 		sql = `UPDATE bookings SET passenger_confirmed = true, updated_at = now()
 		       WHERE occurrence_id = $1 AND passenger_id = $2 AND status = 'confirmed'`
@@ -213,6 +220,22 @@ func ConfirmTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID u
 		return fmt.Errorf("store: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// A ride can only be confirmed after it was due to leave. Without this a
+	// pair could confirm and then rate a trip scheduled for next week.
+	var departed bool
+	err = tx.QueryRow(ctx,
+		`SELECT depart_earliest <= $2 FROM trip_occurrences WHERE id = $1 FOR UPDATE`,
+		occurrenceID, now).Scan(&departed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotParticipant
+	}
+	if err != nil {
+		return fmt.Errorf("store: loading occurrence: %w", err)
+	}
+	if !departed {
+		return ErrNotDeparted
+	}
 
 	if _, err := tx.Exec(ctx, sql, occurrenceID, userID); err != nil {
 		return fmt.Errorf("store: recording confirmation: %w", err)
@@ -245,33 +268,43 @@ var (
 	ErrNotCompleted = errors.New("store: the ride is not completed yet")
 	// ErrAlreadyRated means this rater already rated this booking.
 	ErrAlreadyRated = errors.New("store: already rated")
+	// ErrNotDeparted means the trip has not left yet.
+	ErrNotDeparted = errors.New("store: the trip has not departed yet")
 )
 
 // RateTrip stores a rating from one participant about the other.
-func RateTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, raterID uuid.UUID, role TripRole, stars int, tag *string) error {
+func RateTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, raterID uuid.UUID,
+	role TripRole, rateeID *uuid.UUID, stars int, tag *string,
+) error {
 	// The counterparty depends on which side is rating: a passenger rates the
 	// driver, the driver rates that passenger.
-	var bookingID, rateeID uuid.UUID
+	var bookingID, target uuid.UUID
 	var query string
 	switch role {
 	case RolePassenger:
+		// A passenger has exactly one counterparty: the driver.
 		query = `SELECT b.id, t.driver_id
 		         FROM bookings b
 		         JOIN trip_occurrences o ON o.id = b.occurrence_id
 		         JOIN route_templates t  ON t.id = o.template_id
-		         WHERE b.occurrence_id = $1 AND b.passenger_id = $2 AND b.status = 'completed'`
+		         WHERE b.occurrence_id = $1 AND b.passenger_id = $2 AND b.status = 'completed'
+		           AND ($3::uuid IS NULL OR $3 = t.driver_id)`
 	case RoleDriver:
+		// A driver may be carrying several passengers, so the rating has to name
+		// which one. Picking the oldest booking would make everyone after the
+		// first unratable.
 		query = `SELECT b.id, b.passenger_id
 		         FROM bookings b
 		         WHERE b.occurrence_id = $1 AND b.status = 'completed'
 		           AND $2 = (SELECT t.driver_id FROM trip_occurrences o
 		                     JOIN route_templates t ON t.id = o.template_id WHERE o.id = $1)
-		         ORDER BY b.created_at LIMIT 1`
+		           AND ($3::uuid IS NULL OR b.passenger_id = $3)
+		         ORDER BY b.created_at, b.id LIMIT 1`
 	default:
 		return ErrNotParticipant
 	}
 
-	err := pool.QueryRow(ctx, query, occurrenceID, raterID).Scan(&bookingID, &rateeID)
+	err := pool.QueryRow(ctx, query, occurrenceID, raterID, rateeID).Scan(&bookingID, &target)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotCompleted
 	}
@@ -281,7 +314,7 @@ func RateTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, raterID uui
 
 	_, err = pool.Exec(ctx, `
 		INSERT INTO ratings (booking_id, rater_id, ratee_id, stars, tag)
-		VALUES ($1, $2, $3, $4, $5)`, bookingID, raterID, rateeID, stars, tag)
+		VALUES ($1, $2, $3, $4, $5)`, bookingID, raterID, target, stars, tag)
 	if isUniqueViolation(err) {
 		return ErrAlreadyRated
 	}
