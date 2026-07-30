@@ -68,26 +68,29 @@ type tx interface {
 //
 // A duplicate idempotency key is ignored rather than being an error: the same
 // business event asking for the same effect twice is a no-op, not a failure.
-func Enqueue(ctx context.Context, t tx, m Message) error {
-	return EnqueueAt(ctx, t, m, time.Time{})
+func Enqueue(ctx context.Context, t tx, m Message, now time.Time) error {
+	return EnqueueAt(ctx, t, m, now)
 }
 
 // EnqueueAt is Enqueue with an explicit due time.
 //
 // The dispatcher compares run_after against its injected clock, so run_after
 // must come from that same clock. Letting the database's now() set it mixes two
-// clock domains: under a fake or skewed clock a due message becomes invisible.
-// A zero runAfter falls back to the database default.
+// clock domains, and the two only agree by accident: with the clock held at
+// noon for a test, a message enqueued at the database's real 19:44 is due in
+// the future and is never delivered. That is a silently undelivered push in
+// production the moment the API host and the database disagree about the time.
+//
+// A zero time is therefore refused rather than defaulted.
 func EnqueueAt(ctx context.Context, t tx, m Message, runAfter time.Time) error {
-	var due *time.Time
-	if !runAfter.IsZero() {
-		due = &runAfter
+	if runAfter.IsZero() {
+		return fmt.Errorf("outbox: %s has no run_after; pass the caller's clock", m.IdempotencyKey)
 	}
 	_, err := t.Exec(ctx, `
 		INSERT INTO outbox (kind, payload, idempotency_key, run_after)
-		VALUES ($1, $2, $3, COALESCE($4, now()))
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (idempotency_key) DO NOTHING`,
-		m.Kind, m.Payload, m.IdempotencyKey, due)
+		m.Kind, m.Payload, m.IdempotencyKey, runAfter)
 	if err != nil {
 		return fmt.Errorf("outbox: enqueuing %s: %w", m.IdempotencyKey, err)
 	}

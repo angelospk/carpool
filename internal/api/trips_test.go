@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -70,9 +71,14 @@ func (h *harness) bookedTrip(t *testing.T) (driverToken, passengerToken string, 
 
 // departed moves the fixture trip into the past, since a ride can only be
 // confirmed once it was due to leave.
+// departed moves the trip into the past — by the harness clock, not the
+// database's. The handler decides "has it set off" against the injected clock,
+// so using now() here compared two different times: the tests passed or failed
+// on the time of day the suite happened to run.
 func (h *harness) departed() {
-	h.mustExec(`UPDATE trip_occurrences SET depart_earliest = now() - interval '2 hours',
-	                                        depart_latest   = now() - interval '90 minutes'`)
+	now := h.clock.Now()
+	h.mustExec(`UPDATE trip_occurrences SET depart_earliest = $1, depart_latest = $2`,
+		now.Add(-2*time.Hour), now.Add(-90*time.Minute))
 }
 
 func TestUpcomingTripsShowsTheTripToBothSides(t *testing.T) {

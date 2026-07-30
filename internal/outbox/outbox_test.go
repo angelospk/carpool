@@ -53,6 +53,12 @@ func (r *recorder) count() int {
 	return len(r.messages)
 }
 
+// testNow is the instant every fake clock in this file is set to. Enqueue takes
+// it explicitly so that a message is due by the same clock the dispatcher reads
+// — the two disagreed silently before, and only the time of day decided whether
+// the tests noticed.
+var testNow = time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)
+
 func enqueue(t *testing.T, pool *pgxpool.Pool, key string) {
 	t.Helper()
 	tx, err := pool.Begin(context.Background())
@@ -65,7 +71,7 @@ func enqueue(t *testing.T, pool *pgxpool.Pool, key string) {
 		Kind:           "push",
 		IdempotencyKey: key,
 		Payload:        []byte(`{"hello":"world"}`),
-	}); err != nil {
+	}, testNow); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	if err := tx.Commit(context.Background()); err != nil {
@@ -123,7 +129,7 @@ func TestARolledBackTransactionEnqueuesNothing(t *testing.T) {
 	}
 	if err := outbox.Enqueue(ctx, tx, outbox.Message{
 		Kind: "push", IdempotencyKey: "ask:1", Payload: []byte(`{}`),
-	}); err != nil {
+	}, testNow); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	if err := tx.Rollback(ctx); err != nil {
@@ -493,5 +499,52 @@ func TestEnqueueUsesTheInjectedClockNotTheDatabaseClock(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("dispatched %d; a message due by the injected clock was not visible", n)
+	}
+}
+
+// A guard against the mistake that has now appeared three times in this
+// codebase: a decision made against the injected clock, on a row timestamped by
+// the database. Holding the clock far from real time makes the two disagree by
+// years, so the bug cannot hide behind the time of day the suite happens to run.
+func TestAMessageIsDueByTheCallersClockNotTheDatabases(t *testing.T) {
+	pool, _ := newOutbox(t)
+	ctx := context.Background()
+
+	past := time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC)
+	c := clock.NewFake(past)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	// Without this, a failure inside the transaction leaks it: the connection
+	// sits idle-in-transaction holding the key, and the *next* run of this test
+	// blocks on the conflict instead of reporting anything.
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := outbox.Enqueue(ctx, tx, outbox.Message{
+		Kind: "push", IdempotencyKey: "clock:1", Payload: []byte(`{}`),
+	}, c.Now()); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	var runAfter time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT run_after FROM outbox WHERE idempotency_key = 'clock:1'`).Scan(&runAfter); err != nil {
+		t.Fatalf("reading run_after: %v", err)
+	}
+	if !runAfter.UTC().Equal(past) {
+		t.Fatalf("run_after = %s, want the caller's clock %s", runAfter.UTC(), past)
+	}
+
+	rec := &recorder{}
+	if _, err := outbox.NewDispatcher(pool, c, rec).DispatchOnce(ctx); err != nil {
+		t.Fatalf("DispatchOnce: %v", err)
+	}
+	if got := len(rec.messages); got != 1 {
+		t.Fatalf("delivered %d, want 1: the message was not due by its own clock", got)
 	}
 }

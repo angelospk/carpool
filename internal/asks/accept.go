@@ -262,7 +262,7 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		Kind:           "push",
 		IdempotencyKey: "booking_confirmed:" + bookingID.String(),
 		Payload:        payload,
-	}); err != nil {
+	}, s.clock.Now()); err != nil {
 		return uuid.Nil, err
 	}
 
@@ -438,5 +438,5 @@ func (s *Service) requeue(ctx context.Context, tx pgx.Tx, requestID uuid.UUID, r
 		Kind:           "ask_next",
 		IdempotencyKey: key,
 		Payload:        payload,
-	})
+	}, s.clock.Now())
 }

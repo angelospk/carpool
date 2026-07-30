@@ -397,7 +397,7 @@ func (s *Service) createAsk(
 		Kind:           "push",
 		IdempotencyKey: "ask:" + askID.String(),
 		Payload:        payload,
-	}); err != nil {
+	}, s.clock.Now()); err != nil {
 		return uuid.Nil, err
 	}
 
