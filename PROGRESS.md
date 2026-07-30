@@ -244,6 +244,28 @@ go build -o bin/tolls ./cmd/tolls
 
 Limits are written up in RISKS.md items 8 and 9.
 
+## The clock lesson, three times over
+
+Mixing SQL `now()` with the injected clock has now caused a bug three times, and
+the third one shipped for two days before a test run happened to land on the
+wrong side of noon:
+
+- `outbox.Enqueue` defaulted `run_after` to the database's clock while the
+  dispatcher judged due-ness by the injected one. A test holding the clock at
+  noon passed all morning and failed all evening. In production the same gap
+  opens whenever the API host and the database disagree about the time, and the
+  symptom is a push that is silently never sent.
+- The API test helper `departed()` had the mirror image: it moved a trip into the
+  past by `now()` while the handler judged departure by the injected clock.
+- `scripts/e2e.sh` derived the weekday from the local calendar and the request
+  window from the UTC one, so between local midnight and UTC midnight it
+  published a route for Saturday and asked for a ride on Friday.
+
+The rule the codebase now holds to: **a value a decision is made against comes
+from the clock that decision uses.** `now()` is fine for `updated_at` audit
+columns, which nothing compares. A guard test holds the clock six years from
+real time so the two can never agree by coincidence again.
+
 ## Known limitations
 
 - A websocket subscription is authorized once, at connect. A passenger whose
