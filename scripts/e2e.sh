@@ -36,7 +36,12 @@ psql "$DSN" -q -c "INSERT INTO driver_profiles (user_id, car_model, car_plate, d
                    ON CONFLICT (user_id) DO UPDATE SET detour_budget_min = 20"
 
 step "3. publish a recurring route, snapped by real OSRM"
-DOW=$(date -d tomorrow +%u)
+# Everything here is anchored to one Athens calendar date. The schedule is
+# published in Athens wall time and the request window is sent as instants, so
+# deriving the weekday locally and the window in UTC put them on different days
+# whenever the script ran between local midnight and UTC midnight.
+DAY=$(TZ=Europe/Athens date -d tomorrow +%Y-%m-%d)
+DOW=$(TZ=Europe/Athens date -d "$DAY" +%u)
 curl -s -X POST "$API/routes" -H "Authorization: Bearer $DRIVER" -H 'Content-Type: application/json' -d "{
   \"origin_lon\":25.8743,\"origin_lat\":40.8476,
   \"destination_lon\":26.1720,\"destination_lat\":40.8960,
@@ -48,8 +53,10 @@ step "4. occurrences materialized over the rolling horizon"
 psql "$DSN" -tAc "SELECT '   ' || count(*) || ' occurrences' FROM trip_occurrences WHERE status='scheduled'"
 
 step "5. passenger posts a request; the backend asks the best driver"
-WS=$(date -u -d 'tomorrow 04:00' +%Y-%m-%dT%H:%M:%SZ)
-WE=$(date -u -d 'tomorrow 06:30' +%Y-%m-%dT%H:%M:%SZ)
+# The same Athens day, 06:00 to 10:00 Athens time, which brackets the 07:30
+# departure whatever the offset happens to be that month.
+WS=$(date -u -d "TZ=\"Europe/Athens\" $DAY 06:00" +%Y-%m-%dT%H:%M:%SZ)
+WE=$(date -u -d "TZ=\"Europe/Athens\" $DAY 10:00" +%Y-%m-%dT%H:%M:%SZ)
 REQ=$(curl -s -X POST "$API/requests" -H "Authorization: Bearer $PASSENGER" -H 'Content-Type: application/json' -d "{
   \"origin_lon\":25.9200,\"origin_lat\":40.8600,
   \"destination_lon\":26.1400,\"destination_lat\":40.8900,
