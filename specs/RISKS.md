@@ -202,7 +202,17 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
    quarter — those want a human. Re-run it when tariffs change, then run
    `go test ./internal/tolls/`, which replays 22 real routes.
 
-10. **One outbox row fans out to every device a user owns, under one lease.**
+10. **`tolls.Segment` projects a point onto the route however far away it is.**
+    A pickup fifty kilometres off the geometry lands silently at the nearest
+    point on it, and the passenger is billed for whatever barriers that implies.
+    Every caller today hands it points the matcher has already accepted — the
+    requester passed gross and fine matching, and booked riders are on this
+    occurrence — so there is nothing to reject. Adding a distance limit means
+    inventing a threshold no measurement supports, which is how the toll matcher
+    got its first wrong answer. Revisit if `Segment` is ever called with points
+    the matcher has not vetted.
+
+11. **One outbox row fans out to every device a user owns, under one lease.**
     A push message sends to each live token in turn. Every send is capped at 20
     seconds (`push.NewExpo`) and the lease is two minutes, so a user with seven
     or more live devices can be handed to a second dispatcher while the first is
@@ -217,7 +227,7 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
     when a real user has more than a handful of devices — which cannot happen
     before the app registers push tokens at all.
 
-11. **Three narrower delivery limits, all recorded rather than built:**
+12. **Three narrower delivery limits, all recorded rather than built:**
     - A dead token is retired by `WHERE token = $1`, so a token re-registered
       between the failed send and the update would be disabled on stale news.
       Unreachable today: the app does not register tokens yet.

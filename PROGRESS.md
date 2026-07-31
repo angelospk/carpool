@@ -233,8 +233,27 @@ a context deadline is real elapsed time, so the "fix" compared two clock domains
 cooperative, enforced nothing. Withdrawn; the limit is written up as RISKS 10
 instead. A fix that restates the bug is worse than the gap it fills.
 
-RISKS 10 and 11 record what was deliberately not built and why each is
+RISKS 11 and 12 record what was deliberately not built and why each is
 unreachable today.
+
+## The plaza that was two plazas (2026-07-31)
+
+CodeRabbit, run over the whole tolls change, found the defect the Codex rounds
+had missed because they never looked at the data: twelve plazas carried their
+two carriageways in *different* groups. The harvester bucketed by
+`round(lat, 3)`, and records fifteen metres apart fell either side of a bucket
+boundary. `group` exists precisely to stop a route being charged for the barrier
+on the other carriageway, and for a seventh of the dataset it was doing nothing
+— the heading gate was carrying that defence alone.
+
+Regrouped by distance, in the harvester and in the shipped file, with prices and
+bearings untouched. The 22 real routes still total to the same cent, which is
+the evidence the fix is safe rather than merely different, and a dataset test
+now asserts the invariant so a refresh cannot quietly undo it.
+
+Worth noting what this says about review: three rounds of high-effort adversarial
+review of the *code* found real bugs and never once questioned the *data* the
+code was reasoning over.
 
 ## Deliberately not built
 
