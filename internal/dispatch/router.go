@@ -64,7 +64,7 @@ func (r *Router) handlePush(ctx context.Context, m outbox.Message) error {
 	}
 
 	recipient, title, body := p.notification()
-	if recipient == nil {
+	if recipient == nil || *recipient == uuid.Nil {
 		return fmt.Errorf("%w: push payload names no recipient", outbox.ErrPermanent)
 	}
 
@@ -89,25 +89,43 @@ func (r *Router) handlePush(ctx context.Context, m outbox.Message) error {
 		data["booking_id"] = p.BookingID.String()
 	}
 
-	var failures error
+	// One message fans out to every device the user has, and the devices fail
+	// independently. The two kinds of failure are kept apart because joining
+	// them would let one device's permanent rejection carry ErrPermanent into
+	// the aggregate, and the dispatcher would dead-letter the message — losing
+	// the notification for a device that had merely timed out.
+	var transient, permanent error
 	for _, token := range tokens {
 		err := r.push.Send(ctx, push.Notification{
 			Token: token, Title: title, Body: body, Data: data,
 		})
-		if errors.Is(err, push.ErrDeviceNotRegistered) {
+		switch {
+		case err == nil:
+		case errors.Is(err, push.ErrDeviceNotRegistered):
 			// Prune the dead token, but do not fail the message: the user's
 			// other devices may have received it.
 			if _, dbErr := r.pool.Exec(ctx,
 				`UPDATE push_tokens SET disabled_at = now() WHERE token = $1`, token); dbErr != nil {
 				slog.Error("disabling dead push token", "error", dbErr)
 			}
-			continue
-		}
-		if err != nil {
-			failures = errors.Join(failures, err)
+		case errors.Is(err, outbox.ErrPermanent):
+			permanent = errors.Join(permanent, err)
+		default:
+			transient = errors.Join(transient, err)
 		}
 	}
-	return failures
+
+	// A device that can still be reached outranks one that cannot. Retrying
+	// costs the reachable devices a duplicate, which the app drops on the
+	// idempotency key; dead-lettering costs them the notification outright.
+	if transient != nil {
+		if permanent != nil {
+			slog.Warn("giving up on a device but retrying the message",
+				"key", m.IdempotencyKey, "error", permanent)
+		}
+		return transient
+	}
+	return permanent
 }
 
 // notification picks the recipient and copy for an event.
@@ -150,8 +168,12 @@ func (r *Router) handleAskNext(ctx context.Context, m outbox.Message) error {
 	if err := json.Unmarshal(m.Payload, &p); err != nil {
 		return fmt.Errorf("%w: undecodable ask_next payload: %v", outbox.ErrPermanent, err)
 	}
+	if p.RequestID == uuid.Nil {
+		return fmt.Errorf("%w: ask_next payload names no request", outbox.ErrPermanent)
+	}
 	if r.askNext == nil {
-		return errors.New("outbox: no ask_next handler configured")
+		// Wiring, not weather. Six retries will not conjure a handler.
+		return fmt.Errorf("%w: no ask_next handler configured", outbox.ErrPermanent)
 	}
 	return r.askNext(ctx, p.RequestID)
 }
