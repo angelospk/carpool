@@ -46,6 +46,11 @@ type Shares struct {
 func Split(gates []Gate, riders []Rider) (Shares, error) {
 	seen := map[string]bool{}
 	for _, r := range riders {
+		// The driver rides under the empty id, so a rider carrying it would be
+		// merged into the driver rather than split against them.
+		if r.ID == "" {
+			return Shares{}, fmt.Errorf("tolls: a rider has no id; the empty id is the driver's")
+		}
 		if r.ToMetres < r.FromMetres {
 			return Shares{}, fmt.Errorf("tolls: rider %s alights before boarding", r.ID)
 		}

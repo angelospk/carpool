@@ -48,7 +48,7 @@ func TestABrushPastThePlazaDoesNotLicenceADistantCrossing(t *testing.T) {
 
 	for _, c := range set.Match(route).Crossings {
 		if c.Station.ShortEL == "Μέστης" {
-			t.Fatalf("charged Μέστης for a crossing %.0f m from the barrier", c.HeadingOff)
+			t.Fatalf("charged Μέστης for a crossing heading %.0f° off its direction", c.HeadingOff)
 		}
 	}
 }

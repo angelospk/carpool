@@ -29,7 +29,7 @@ func main() {
 		precision = flag.Int("precision", 5, "polyline precision")
 		osrmURL   = flag.String("osrm", envOr("OSRM_URL", "http://localhost:5000"), "OSRM base URL")
 		class     = flag.String("class", "car", "vehicle class: car or motorcycle")
-		riders    = flag.String("rider", "", "repeatable: name:pickupLat,pickupLon:dropLat,dropLon")
+		riders    = flag.String("rider", "", "semicolon-separated: name:pickupLat,pickupLon:dropLat,dropLon[;...]")
 	)
 	flag.Parse()
 

@@ -279,10 +279,19 @@ func (s *Service) tollShare(ctx context.Context, occurrenceID uuid.UUID, req req
 		return 0, nil
 	}
 
-	riders, err := s.ridersAboard(ctx, occurrenceID, route, req)
+	from, to, err := tolls.Segment(route, req.Origin, req.Destination)
+	if err != nil {
+		// This passenger's own stops do not lie along the route in order. The
+		// gross match already refuses such candidates (RISKS 8), and if one ever
+		// arrives here the ask is worth more than its toll component.
+		return 0, nil
+	}
+
+	riders, err := s.ridersAboard(ctx, occurrenceID, route)
 	if err != nil {
 		return 0, err
 	}
+	riders = append(riders, tolls.Rider{ID: req.ID.String(), FromMetres: from, ToMetres: to})
 
 	shares, err := tolls.Split(gates, riders)
 	if err != nil {
@@ -291,10 +300,10 @@ func (s *Service) tollShare(ctx context.Context, occurrenceID uuid.UUID, req req
 	return shares.Riders[req.ID.String()], nil
 }
 
-// ridersAboard is everyone whose share of a barrier has to be counted: the
-// passengers already booked, plus the one being priced.
+// ridersAboard is everyone already booked onto this occurrence, placed along
+// the route. The passenger being priced is added by the caller.
 func (s *Service) ridersAboard(
-	ctx context.Context, occurrenceID uuid.UUID, route []geo.Point, req request,
+	ctx context.Context, occurrenceID uuid.UUID, route []geo.Point,
 ) ([]tolls.Rider, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, ST_X(pickup_point), ST_Y(pickup_point),
@@ -322,12 +331,7 @@ func (s *Service) ridersAboard(
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("asks: reading riders: %w", err)
 	}
-
-	from, to, err := tolls.Segment(route, req.Origin, req.Destination)
-	if err != nil {
-		return nil, err
-	}
-	return append(riders, tolls.Rider{ID: req.ID.String(), FromMetres: from, ToMetres: to}), nil
+	return riders, nil
 }
 
 // errAskExists signals that a pending ask already existed for this request.

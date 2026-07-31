@@ -96,6 +96,12 @@ func (d *Dataset) Match(route []geo.Point) Result {
 		}
 		res.Crossings = append(res.Crossings, c)
 	}
+	// Replacing a crossing can seat a later one at an earlier index, so the
+	// route order callers rely on is restored rather than assumed.
+	sort.Slice(res.Crossings, func(i, j int) bool {
+		return res.Crossings[i].MetresAlong < res.Crossings[j].MetresAlong
+	})
+
 	res.Ambiguous = ambiguous
 	return res
 }

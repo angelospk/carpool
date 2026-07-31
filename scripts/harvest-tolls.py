@@ -78,13 +78,14 @@ R = 6371008.8
 def rad(d): return d*math.pi/180
 
 def seg_dist_m(lat, lon, a, b):
+    """Distance to the segment, and how far along it (0..1) the closest point is."""
     mx = 111320*math.cos(rad(lat)); my = 110540.0
     ax, ay = (a[1]-lon)*mx, (a[0]-lat)*my
     bx, by = (b[1]-lon)*mx, (b[0]-lat)*my
     dx, dy = bx-ax, by-ay
-    if dx == 0 and dy == 0: return math.hypot(ax, ay)
+    if dx == 0 and dy == 0: return math.hypot(ax, ay), 0.0
     t = max(0, min(1, (-ax*dx - ay*dy)/(dx*dx+dy*dy)))
-    return math.hypot(ax+t*dx, ay+t*dy)
+    return math.hypot(ax+t*dx, ay+t*dy), t
 
 def cumulative(pts):
     out=[0.0]
@@ -112,11 +113,13 @@ CHORD = 60.0
 
 def travel_bearing(pts, cum, station):
     """Heading of travel where the route passes closest to the station."""
-    best, bi = 1e18, 0
+    best, bi, bt = 1e18, 0, 0.0
     for i in range(len(pts)-1):
-        d = seg_dist_m(station[0], station[1], pts[i], pts[i+1])
-        if d < best: best, bi = d, i
-    at = cum[bi]
+        d, t = seg_dist_m(station[0], station[1], pts[i], pts[i+1])
+        if d < best: best, bi, bt = d, i, t
+    # Centred on the projected point. Motorway geometry runs kilometres between
+    # vertices, so the segment's start vertex can be a different road entirely.
+    at = cum[bi] + bt*(cum[bi+1]-cum[bi])
     return bearing(point_at(pts, cum, at-CHORD), point_at(pts, cum, at+CHORD)), best
 
 
@@ -204,16 +207,39 @@ def harvest(verbose=True):
     return stations
 
 
+PLAZA_M = 200.0  # two records closer than this are one plaza, wider than any real pair
+
+
+def plaza_groups(raw):
+    """One group per plaza, clustered by distance.
+
+    Rounding the coordinates into a bucket instead put twelve plazas' two
+    carriageways in different groups: records fifteen metres apart landed either
+    side of a bucket boundary, and the pairing that stops a route being charged
+    for the barrier on the other carriageway was silently off for them.
+    """
+    groups, centres = {}, []
+    for s in raw:
+        for gid, (clat, clon) in enumerate(centres):
+            d = math.hypot((s["lat"]-clat)*110540,
+                           (s["lon"]-clon)*111320*math.cos(rad(clat)))
+            if d <= PLAZA_M:
+                groups[s["id"]] = gid
+                break
+        else:
+            groups[s["id"]] = len(centres)
+            centres.append((s["lat"], s["lon"]))
+    return groups
+
+
 def build(raw, harvested_at):
     # Co-located records are the two carriageways of one plaza. Grouping them is
     # what stops a route being charged for the barrier on the other side.
-    groups = {}
-    for s in raw:
-        groups.setdefault((round(s["lat"], 3), round(s["lon"], 3)), len(groups))
+    groups = plaza_groups(raw)
 
     stations = [{
         "id": s["id"],
-        "group": groups[(round(s["lat"], 3), round(s["lon"], 3))],
+        "group": groups[s["id"]],
         "name_el": s["name_el"], "name_en": s["name_en"], "short_el": s["short_el"],
         "lat": round(s["lat"], 7), "lon": round(s["lon"], 7),
         "bearings": dedupe_bearings(s["bearings"]),

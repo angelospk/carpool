@@ -21,3 +21,4 @@ dist/
 # Expo
 app/.expo/
 app/node_modules/
+__pycache__/

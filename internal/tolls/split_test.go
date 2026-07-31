@@ -231,3 +231,16 @@ func TestAnExtraPassengerNeverIncreasesAnyoneElsesShare(t *testing.T) {
 		t.Fatalf("driver paid %d then %d", before.Driver, after.Driver)
 	}
 }
+
+func TestARiderWithNoIdIsRefused(t *testing.T) {
+	gates := []tolls.Gate{{MetresAlong: 1000, Cents: 300}}
+
+	// The driver rides under the empty id. A rider carrying the same one is not
+	// split against the driver, it is merged into them: the barrier divides by a
+	// head count that has counted one person twice.
+	_, err := tolls.Split(gates, []tolls.Rider{{ID: "", FromMetres: 0, ToMetres: 5000}})
+
+	if err == nil {
+		t.Fatal("Split accepted a rider with no id; that rider is the driver as far as the split is concerned")
+	}
+}
