@@ -15,14 +15,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"carpool/internal/clock"
 	"carpool/internal/outbox"
 	"carpool/internal/push"
 )
 
 // Router dispatches an outbox message to the right effect based on its kind.
 type Router struct {
-	pool *pgxpool.Pool
-	push push.Sender
+	pool  *pgxpool.Pool
+	clock clock.Clock
+	push  push.Sender
 	// AskNext is called for 'ask_next' messages to approach the next driver.
 	// It is a function rather than an interface to avoid an import cycle with
 	// the asks package.
@@ -30,8 +32,16 @@ type Router struct {
 }
 
 // NewRouter returns a handler covering every message kind the system enqueues.
-func NewRouter(pool *pgxpool.Pool, sender push.Sender, askNext func(context.Context, uuid.UUID) error) *Router {
-	return &Router{pool: pool, push: sender, askNext: askNext}
+//
+// A nil askNext is a wiring fault, and it is refused here rather than at
+// delivery time: a router that discovers it at delivery time can only either
+// dead-letter the ask — destroying it, when a restart would have fixed the
+// worker — or retry a message no retry can help.
+func NewRouter(pool *pgxpool.Pool, c clock.Clock, sender push.Sender, askNext func(context.Context, uuid.UUID) error) *Router {
+	if askNext == nil {
+		panic("dispatch: NewRouter needs an ask_next handler")
+	}
+	return &Router{pool: pool, clock: c, push: sender, askNext: askNext}
 }
 
 // Handle performs the effect a message describes.
@@ -105,8 +115,12 @@ func (r *Router) handlePush(ctx context.Context, m outbox.Message) error {
 			// Prune the dead token, but do not fail the message: the user's
 			// other devices may have received it.
 			if _, dbErr := r.pool.Exec(ctx,
-				`UPDATE push_tokens SET disabled_at = now() WHERE token = $1`, token); dbErr != nil {
-				slog.Error("disabling dead push token", "error", dbErr)
+				`UPDATE push_tokens SET disabled_at = $2 WHERE token = $1`,
+				token, r.clock.Now()); dbErr != nil {
+				// Not merely a logging matter: reporting success would mark the
+				// message delivered while the dead token stays live, and every
+				// later notification for this user would burn on it.
+				transient = errors.Join(transient, fmt.Errorf("dispatch: retiring a dead push token: %w", dbErr))
 			}
 		case errors.Is(err, outbox.ErrPermanent):
 			permanent = errors.Join(permanent, err)
@@ -170,10 +184,6 @@ func (r *Router) handleAskNext(ctx context.Context, m outbox.Message) error {
 	}
 	if p.RequestID == uuid.Nil {
 		return fmt.Errorf("%w: ask_next payload names no request", outbox.ErrPermanent)
-	}
-	if r.askNext == nil {
-		// Wiring, not weather. Six retries will not conjure a handler.
-		return fmt.Errorf("%w: no ask_next handler configured", outbox.ErrPermanent)
 	}
 	return r.askNext(ctx, p.RequestID)
 }

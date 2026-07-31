@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"carpool/internal/clock"
 	"carpool/internal/dispatch"
 	"carpool/internal/outbox"
 	"carpool/internal/push"
@@ -44,6 +46,12 @@ func (s *sender) tokens() []string {
 	}
 	return out
 }
+
+// clk is fixed so a timestamp the router writes can be told apart from one the
+// database wrote.
+var clk = clock.NewFake(time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC))
+
+func noAsk(context.Context, uuid.UUID) error { return nil }
 
 func newRouter(t *testing.T) (*pgxpool.Pool, *sender, uuid.UUID) {
 	t.Helper()
@@ -115,7 +123,7 @@ func TestAPushReachesOnlyTheRecipientsLiveDevices(t *testing.T) {
 	addToken(t, pool, driverID, "retired", true)
 	addToken(t, pool, otherID, "someone-else", false)
 
-	r := dispatch.NewRouter(pool, snd, func(context.Context, uuid.UUID) error { return nil })
+	r := dispatch.NewRouter(pool, clk, snd, noAsk)
 	if err := r.Handle(context.Background(), askMessage(t, driverID)); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
@@ -146,7 +154,7 @@ func TestAPermanentFailureOnOneDeviceDoesNotCancelTheRetryForAnother(t *testing.
 	snd.errs["broken"] = fmt.Errorf("%w: expo rejected the message", outbox.ErrPermanent)
 	snd.errs["slow"] = errors.New("expo timed out")
 
-	r := dispatch.NewRouter(pool, snd, nil)
+	r := dispatch.NewRouter(pool, clk, snd, noAsk)
 	err := r.Handle(context.Background(), askMessage(t, driverID))
 
 	if err == nil {
@@ -167,7 +175,7 @@ func TestADeadDeviceIsRetiredWithoutFailingTheMessage(t *testing.T) {
 	addToken(t, pool, driverID, "live", false)
 	snd.errs["uninstalled"] = fmt.Errorf("%w: %w", outbox.ErrPermanent, push.ErrDeviceNotRegistered)
 
-	r := dispatch.NewRouter(pool, snd, nil)
+	r := dispatch.NewRouter(pool, clk, snd, noAsk)
 	if err := r.Handle(context.Background(), askMessage(t, driverID)); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
@@ -186,7 +194,7 @@ func TestADeadDeviceIsRetiredWithoutFailingTheMessage(t *testing.T) {
 func TestAMessageWithNoLiveDeviceIsNotAFailure(t *testing.T) {
 	pool, snd, driverID := newRouter(t)
 
-	r := dispatch.NewRouter(pool, snd, nil)
+	r := dispatch.NewRouter(pool, clk, snd, noAsk)
 	if err := r.Handle(context.Background(), askMessage(t, driverID)); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
@@ -214,7 +222,7 @@ func TestAnUndeliverableMessageIsRejectedRatherThanRetried(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			called := false
-			r := dispatch.NewRouter(pool, snd, func(context.Context, uuid.UUID) error {
+			r := dispatch.NewRouter(pool, clk, snd, func(context.Context, uuid.UUID) error {
 				called = true
 				return nil
 			})
@@ -229,20 +237,18 @@ func TestAnUndeliverableMessageIsRejectedRatherThanRetried(t *testing.T) {
 	}
 }
 
-func TestAMisconfiguredAskHandlerIsNotWorthRetrying(t *testing.T) {
+func TestARouterWithNoAskHandlerIsRefusedAtConstruction(t *testing.T) {
 	pool, snd, _ := newRouter(t)
 
-	r := dispatch.NewRouter(pool, snd, nil)
-	payload, err := json.Marshal(map[string]any{"request_id": uuid.New()})
-	if err != nil {
-		t.Fatalf("marshalling payload: %v", err)
-	}
-	err = r.Handle(context.Background(),
-		outbox.Message{Kind: "ask_next", Payload: payload, IdempotencyKey: "next:1"})
-
-	if !errors.Is(err, outbox.ErrPermanent) {
-		t.Fatalf("Handle returned %v, want a permanent failure: a nil handler will not appear on retry", err)
-	}
+	defer func() {
+		// Dead-lettering these messages instead would destroy them: a miswired
+		// or half-deployed worker is fixed by a restart, and the ask it dropped
+		// is not recoverable. The wiring fault belongs at startup.
+		if recover() == nil {
+			t.Fatal("NewRouter accepted a nil ask handler; every ask_next message it claims is lost")
+		}
+	}()
+	dispatch.NewRouter(pool, clk, snd, nil)
 }
 
 func TestAValidAskNextReachesTheHandlerOnce(t *testing.T) {
@@ -250,7 +256,7 @@ func TestAValidAskNextReachesTheHandlerOnce(t *testing.T) {
 	want := uuid.New()
 
 	var got []uuid.UUID
-	r := dispatch.NewRouter(pool, snd, func(_ context.Context, id uuid.UUID) error {
+	r := dispatch.NewRouter(pool, clk, snd, func(_ context.Context, id uuid.UUID) error {
 		got = append(got, id)
 		return errors.New("no driver left to ask")
 	})
@@ -267,4 +273,57 @@ func TestAValidAskNextReachesTheHandlerOnce(t *testing.T) {
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("handler saw %v, want exactly one call for %v", got, want)
 	}
+}
+
+func TestARetiredDeviceIsStampedByTheRoutersClock(t *testing.T) {
+	pool, snd, driverID := newRouter(t)
+	addToken(t, pool, driverID, "uninstalled", false)
+	snd.errs["uninstalled"] = fmt.Errorf("%w: %w", outbox.ErrPermanent, push.ErrDeviceNotRegistered)
+
+	r := dispatch.NewRouter(pool, clk, snd, noAsk)
+	if err := r.Handle(context.Background(), askMessage(t, driverID)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	var at time.Time
+	err := pool.QueryRow(context.Background(),
+		`SELECT disabled_at FROM push_tokens WHERE token = 'uninstalled'`).Scan(&at)
+	if err != nil {
+		t.Fatalf("reading token: %v", err)
+	}
+	if !at.Equal(clk.Now()) {
+		t.Fatalf("the token was retired at %v, want the router's clock %v: the database clock is a "+
+			"second time source nobody injected", at, clk.Now())
+	}
+}
+
+func TestAFailureToRetireADeadDeviceFailsTheMessage(t *testing.T) {
+	pool, snd, driverID := newRouter(t)
+	addToken(t, pool, driverID, "uninstalled", false)
+	snd.errs["uninstalled"] = fmt.Errorf("%w: %w", outbox.ErrPermanent, push.ErrDeviceNotRegistered)
+
+	_, err := pool.Exec(context.Background(), `
+		CREATE FUNCTION refuse_write() RETURNS trigger AS $$
+		BEGIN RAISE EXCEPTION 'retirement refused'; END;
+		$$ LANGUAGE plpgsql;
+		CREATE TRIGGER refuse_retire BEFORE UPDATE ON push_tokens
+		FOR EACH ROW EXECUTE FUNCTION refuse_write()`)
+	if err != nil {
+		t.Fatalf("installing the trigger: %v", err)
+	}
+
+	err = r(pool, snd).Handle(context.Background(), askMessage(t, driverID))
+
+	// Reporting success here marks the message delivered while the dead token
+	// stays live, so every later notification burns on it forever.
+	if err == nil {
+		t.Fatal("Handle reported success although the dead device is still live")
+	}
+	if errors.Is(err, outbox.ErrPermanent) {
+		t.Fatalf("Handle returned %v; a database that refused the write may accept it on retry", err)
+	}
+}
+
+func r(pool *pgxpool.Pool, snd *sender) *dispatch.Router {
+	return dispatch.NewRouter(pool, clk, snd, noAsk)
 }

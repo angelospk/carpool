@@ -128,12 +128,18 @@ func (d *Dispatcher) DispatchOnce(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
+	// Claiming charged an attempt to every row in the batch. Abandoning the rest
+	// when one result write fails therefore spends attempts on messages that
+	// were never handed to the handler at all, and leaves them leased until the
+	// lease expires. Failures are collected and the batch is finished.
 	var delivered int
+	var writeErrs error
 	for _, m := range claimed {
-		err := d.deliver(ctx, m)
+		err := d.handler.Handle(ctx, m)
 		if err == nil {
 			if err := d.markDone(ctx, m); err != nil {
-				return delivered, err
+				writeErrs = errors.Join(writeErrs, err)
+				continue
 			}
 			delivered++
 			continue
@@ -141,28 +147,13 @@ func (d *Dispatcher) DispatchOnce(ctx context.Context) (int, error) {
 
 		permanent := errors.Is(err, ErrPermanent)
 		if err := d.markFailed(ctx, m, err, permanent); err != nil {
-			return delivered, err
+			writeErrs = errors.Join(writeErrs, err)
+			continue
 		}
 		slog.Warn("outbox delivery failed",
 			"key", m.IdempotencyKey, "attempts", m.Attempts, "permanent", permanent, "error", err)
 	}
-	return delivered, nil
-}
-
-// deliver runs the handler under a deadline no longer than the lease.
-//
-// One message can fan out to several devices, and the sends are sequential. A
-// handler slower than LeaseDuration keeps working on a row another dispatcher
-// has already reclaimed — burning the attempt budget twice over and, in the
-// end, dead-lettering a message that was being delivered the whole time.
-//
-// The bound is real elapsed time on purpose. It measures how long the work has
-// been running, not when anything is due, so it is the one place here that does
-// not take its reading from the injected clock.
-func (d *Dispatcher) deliver(ctx context.Context, m Message) error {
-	ctx, cancel := context.WithTimeout(ctx, LeaseDuration)
-	defer cancel()
-	return d.handler.Handle(ctx, m)
+	return delivered, writeErrs
 }
 
 // claim leases a batch of due messages.

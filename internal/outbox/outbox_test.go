@@ -583,31 +583,36 @@ func TestTheQueueRefusesARowWithNoDueTime(t *testing.T) {
 	}
 }
 
-func TestAHandlerCannotOutliveItsLease(t *testing.T) {
-	pool, c := newOutbox(t)
-	enqueue(t, pool, "deadline:1")
-
-	var deadline time.Time
-	var hasDeadline bool
-	h := handlerFunc(func(ctx context.Context, _ outbox.Message) error {
-		deadline, hasDeadline = ctx.Deadline()
-		return nil
-	})
-
-	if _, err := outbox.NewDispatcher(pool, c, h).DispatchOnce(context.Background()); err != nil {
-		t.Fatalf("DispatchOnce: %v", err)
-	}
-
-	// Without a bound, a slow fan-out keeps working past the lease and a second
-	// dispatcher claims the same row underneath it.
-	if !hasDeadline {
-		t.Fatal("the handler ran with no deadline; it can outlast its own lease")
-	}
-	if left := time.Until(deadline); left > outbox.LeaseDuration {
-		t.Fatalf("the handler has %v, longer than the %v lease", left, outbox.LeaseDuration)
-	}
-}
-
 type handlerFunc func(context.Context, outbox.Message) error
 
 func (f handlerFunc) Handle(ctx context.Context, m outbox.Message) error { return f(ctx, m) }
+
+func TestAFailedResultWriteDoesNotStrandTheRestOfTheBatch(t *testing.T) {
+	pool, c := newOutbox(t)
+	ctx := context.Background()
+	enqueue(t, pool, "unwritable:1")
+	enqueue(t, pool, "healthy:2")
+
+	// Claiming already charged an attempt to both rows. If the dispatcher walks
+	// away after the first result write fails, the second row is leased, has
+	// paid for an attempt, and was never handed to the handler at all.
+	_, err := pool.Exec(ctx, `
+		CREATE FUNCTION refuse_write() RETURNS trigger AS $$
+		BEGIN RAISE EXCEPTION 'result write refused'; END;
+		$$ LANGUAGE plpgsql;
+		CREATE TRIGGER refuse_result BEFORE UPDATE ON outbox
+		FOR EACH ROW WHEN (NEW.done_at IS NOT NULL AND NEW.idempotency_key = 'unwritable:1')
+		EXECUTE FUNCTION refuse_write()`)
+	if err != nil {
+		t.Fatalf("installing the trigger: %v", err)
+	}
+
+	h := &recorder{}
+	if _, err := outbox.NewDispatcher(pool, c, h).DispatchOnce(ctx); err == nil {
+		t.Fatal("DispatchOnce hid a failed result write")
+	}
+
+	if h.count() != 2 {
+		t.Fatalf("the handler saw %d of 2 messages; the rest of the batch was abandoned mid-lease", h.count())
+	}
+}

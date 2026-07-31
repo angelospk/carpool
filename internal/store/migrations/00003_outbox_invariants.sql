@@ -15,5 +15,7 @@ ALTER TABLE outbox ADD CONSTRAINT outbox_key_not_blank CHECK (idempotency_key <>
 
 -- +goose Down
 
+-- The default is deliberately not restored. Rolling this migration back must
+-- not reinstate a column default that hands the due time to the wrong clock;
+-- the code that reads run_after has no rollback.
 ALTER TABLE outbox DROP CONSTRAINT outbox_key_not_blank;
-ALTER TABLE outbox ALTER COLUMN run_after SET DEFAULT now();

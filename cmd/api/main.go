@@ -97,7 +97,7 @@ func run() error {
 	// Background workers. They share the process context, so SIGTERM unwinds
 	// them alongside the HTTP server.
 	var workers sync.WaitGroup
-	dispatcher := outbox.NewDispatcher(pool, clk, dispatch.NewRouter(pool, push.NewExpo("", nil),
+	dispatcher := outbox.NewDispatcher(pool, clk, dispatch.NewRouter(pool, clk, push.NewExpo("", nil),
 		func(ctx context.Context, requestID uuid.UUID) error {
 			_, err := askSvc.AskNext(ctx, requestID)
 			if errors.Is(err, asks.ErrNoCandidates) {
