@@ -204,6 +204,38 @@ contract — the error envelope and auth contract were frozen in M0 instead); a
 dead-letter management UI (schema, metrics and a manual replay command suffice
 for a pilot).
 
+## The queue, reviewed to a standstill (2026-07-31)
+
+`internal/dispatch` had no tests at all — the one package where an unexercised
+branch means a notification silently never arrives. It has them now, and writing
+them cost three rounds of adversarial review with Codex, the second of which
+rejected my own fix from the first.
+
+What was actually broken:
+
+- A push fans out to every device a user owns. Joining the send errors meant one
+  device's permanent rejection carried `ErrPermanent` into the aggregate, so the
+  dispatcher dead-lettered the message and a device that had merely timed out
+  never got it.
+- `run_after` still carried `DEFAULT now()`. The bug fixed in 2644142 was the Go
+  side of exactly that; the schema kept the trap open one layer down.
+- A blank idempotency key collided with every other blank one, and
+  `ON CONFLICT DO NOTHING` reported success while dropping the effect.
+- A failed result write abandoned the rest of the claimed batch, though claiming
+  had already charged every row an attempt.
+- A dead push token that could not be retired was logged and forgotten, leaving
+  the message marked delivered and the token live forever.
+
+And what I got wrong in the middle of fixing it: I bounded the handler with a
+`context` deadline of one lease. The lease is taken from the injected clock and
+a context deadline is real elapsed time, so the "fix" compared two clock domains
+— the fault this project has now been bitten by four times — and, being
+cooperative, enforced nothing. Withdrawn; the limit is written up as RISKS 10
+instead. A fix that restates the bug is worse than the gap it fills.
+
+RISKS 10 and 11 record what was deliberately not built and why each is
+unreachable today.
+
 ## Deliberately not built
 
 Parked with a reason, not forgotten:

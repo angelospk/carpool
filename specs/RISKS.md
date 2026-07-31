@@ -202,6 +202,40 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
    quarter — those want a human. Re-run it when tariffs change, then run
    `go test ./internal/tolls/`, which replays 22 real routes.
 
+10. **One outbox row fans out to every device a user owns, under one lease.**
+    A push message sends to each live token in turn. Every send is capped at 20
+    seconds (`push.NewExpo`) and the lease is two minutes, so a user with seven
+    or more live devices can be handed to a second dispatcher while the first is
+    still sending. The consequences are bounded — the app deduplicates on the
+    idempotency key — but the attempt budget is charged twice and the message
+    can be dead-lettered while it is being delivered.
+
+    An earlier attempt to bound this with a handler deadline was withdrawn: the
+    lease is taken from the injected clock, a `context` deadline is real elapsed
+    time, and comparing the two reintroduces exactly the clock-domain fault the
+    project banned. Closing it properly means one outbox row per token. Revisit
+    when a real user has more than a handful of devices — which cannot happen
+    before the app registers push tokens at all.
+
+11. **Three narrower delivery limits, all recorded rather than built:**
+    - A dead token is retired by `WHERE token = $1`, so a token re-registered
+      between the failed send and the update would be disabled on stale news.
+      Unreachable today: the app does not register tokens yet.
+    - A device-fatal failure that is *not* `DeviceNotRegistered` would leave the
+      token live and dead-letter every message for that user. Also unreachable:
+      the only per-device permanent verdict Expo's client returns is
+      `DeviceNotRegistered`; `MessageTooBig`, `InvalidCredentials` and HTTP 400
+      are faults of the message or the account, not the device.
+    - Two different effects sharing one non-blank idempotency key would see the
+      second silently dropped by `ON CONFLICT DO NOTHING`. Keys are built from
+      the event and its ids, so a collision means a bug in the producer; the
+      queue does not check that the existing row describes the same effect.
+
+    Payloads are also unversioned. A rename or a semantic change to a push
+    payload would strand rows queued by the previous deployment. The pilot has
+    one API process and a queue that drains in seconds, so a deploy is
+    effectively a drain; if that ever stops being true, version the payloads.
+
 ## Deferred tech (parked, with triggers to revisit)
 
 | Deferred | Revisit when |
