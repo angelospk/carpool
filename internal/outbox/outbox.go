@@ -86,6 +86,12 @@ func EnqueueAt(ctx context.Context, t tx, m Message, runAfter time.Time) error {
 	if runAfter.IsZero() {
 		return fmt.Errorf("outbox: %s has no run_after; pass the caller's clock", m.IdempotencyKey)
 	}
+	// Deduplication is the whole contract of the key. A blank one matches every
+	// other blank one, and ON CONFLICT DO NOTHING would drop the second effect
+	// while reporting success.
+	if m.IdempotencyKey == "" {
+		return fmt.Errorf("outbox: a %s message has no idempotency key", m.Kind)
+	}
 	_, err := t.Exec(ctx, `
 		INSERT INTO outbox (kind, payload, idempotency_key, run_after)
 		VALUES ($1, $2, $3, $4)
@@ -124,7 +130,7 @@ func (d *Dispatcher) DispatchOnce(ctx context.Context) (int, error) {
 
 	var delivered int
 	for _, m := range claimed {
-		err := d.handler.Handle(ctx, m)
+		err := d.deliver(ctx, m)
 		if err == nil {
 			if err := d.markDone(ctx, m); err != nil {
 				return delivered, err
@@ -141,6 +147,22 @@ func (d *Dispatcher) DispatchOnce(ctx context.Context) (int, error) {
 			"key", m.IdempotencyKey, "attempts", m.Attempts, "permanent", permanent, "error", err)
 	}
 	return delivered, nil
+}
+
+// deliver runs the handler under a deadline no longer than the lease.
+//
+// One message can fan out to several devices, and the sends are sequential. A
+// handler slower than LeaseDuration keeps working on a row another dispatcher
+// has already reclaimed — burning the attempt budget twice over and, in the
+// end, dead-lettering a message that was being delivered the whole time.
+//
+// The bound is real elapsed time on purpose. It measures how long the work has
+// been running, not when anything is due, so it is the one place here that does
+// not take its reading from the injected clock.
+func (d *Dispatcher) deliver(ctx context.Context, m Message) error {
+	ctx, cancel := context.WithTimeout(ctx, LeaseDuration)
+	defer cancel()
+	return d.handler.Handle(ctx, m)
 }
 
 // claim leases a batch of due messages.

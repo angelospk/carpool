@@ -364,10 +364,6 @@ func TestAnExpiredLeaseIsReclaimed(t *testing.T) {
 	}
 }
 
-type handlerFunc func(context.Context, outbox.Message) error
-
-func (f handlerFunc) Handle(ctx context.Context, m outbox.Message) error { return f(ctx, m) }
-
 // --- regression tests for issues found in adversarial review ---
 
 // A worker whose lease expired must not be able to write a result: another
@@ -548,3 +544,70 @@ func TestAMessageIsDueByTheCallersClockNotTheDatabases(t *testing.T) {
 		t.Fatalf("delivered %d, want 1: the message was not due by its own clock", got)
 	}
 }
+
+func TestAMessageWithNoIdempotencyKeyIsRefused(t *testing.T) {
+	pool, _ := newOutbox(t)
+	ctx := context.Background()
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	err = outbox.Enqueue(ctx, tx, outbox.Message{
+		Kind:    "push",
+		Payload: []byte(`{"hello":"world"}`),
+	}, testNow)
+
+	// The key is what the queue deduplicates on and what the app deduplicates
+	// on. A blank one collides with every other blank one, so the second effect
+	// asking for it is silently dropped by ON CONFLICT DO NOTHING.
+	if err == nil {
+		t.Fatal("Enqueue accepted a message with no idempotency key; the next blank-keyed message vanishes")
+	}
+}
+
+func TestTheQueueRefusesARowWithNoDueTime(t *testing.T) {
+	pool, _ := newOutbox(t)
+
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO outbox (kind, payload, idempotency_key)
+		VALUES ('push', '{}', 'no-due-time')`)
+
+	// A column default would fill this in from the database clock, which the
+	// dispatcher never reads. Producers must state the due time in the clock
+	// the dispatcher judges it by.
+	if err == nil {
+		t.Fatal("the queue accepted a row with no run_after; the database clock filled it in")
+	}
+}
+
+func TestAHandlerCannotOutliveItsLease(t *testing.T) {
+	pool, c := newOutbox(t)
+	enqueue(t, pool, "deadline:1")
+
+	var deadline time.Time
+	var hasDeadline bool
+	h := handlerFunc(func(ctx context.Context, _ outbox.Message) error {
+		deadline, hasDeadline = ctx.Deadline()
+		return nil
+	})
+
+	if _, err := outbox.NewDispatcher(pool, c, h).DispatchOnce(context.Background()); err != nil {
+		t.Fatalf("DispatchOnce: %v", err)
+	}
+
+	// Without a bound, a slow fan-out keeps working past the lease and a second
+	// dispatcher claims the same row underneath it.
+	if !hasDeadline {
+		t.Fatal("the handler ran with no deadline; it can outlast its own lease")
+	}
+	if left := time.Until(deadline); left > outbox.LeaseDuration {
+		t.Fatalf("the handler has %v, longer than the %v lease", left, outbox.LeaseDuration)
+	}
+}
+
+type handlerFunc func(context.Context, outbox.Message) error
+
+func (f handlerFunc) Handle(ctx context.Context, m outbox.Message) error { return f(ctx, m) }
