@@ -23,10 +23,14 @@ import (
 // drifts by an hour across a DST transition.
 const HorizonDays = 21
 
-// materializeLockNamespace namespaces the per-template advisory lock. The
+// TemplateLockNamespace namespaces the per-template advisory lock. The
 // two-argument advisory lock form takes a pair of int4s, so the namespace is
 // int32 and the template uuid is hashed into the second slot.
-const materializeLockNamespace int32 = 0x6361_7270 // "carp"
+//
+// It is exported because anything that reserves seats on a template's
+// occurrences has to serialise against materialization, or it counts weeks that
+// change underneath it.
+const TemplateLockNamespace int32 = 0x6361_7270 // "carp"
 
 // Materializer expands route schedules into concrete trip occurrences.
 type Materializer struct {
@@ -93,7 +97,7 @@ func (m *Materializer) reconcile(ctx context.Context, templateID uuid.UUID) erro
 	// Serialise against any other materializer working on this template before
 	// reading anything it might be changing.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2))`,
-		materializeLockNamespace, templateID.String()); err != nil {
+		TemplateLockNamespace, templateID.String()); err != nil {
 		return fmt.Errorf("jobs: taking template lock: %w", err)
 	}
 
