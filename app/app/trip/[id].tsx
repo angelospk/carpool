@@ -18,6 +18,7 @@ import {
   SeatPips,
 } from '../../src/components/ui';
 import { RouteGlyph, decodeRoute } from '../../src/components/RouteGlyph';
+import { RepeatCard } from '../../src/components/RepeatCard';
 import { colors, radius, space, type } from '../../src/design/tokens';
 import { athensDay, athensTime } from '../../src/design/format';
 
@@ -142,6 +143,8 @@ export default function TripScreen() {
                     ) : null}
                   </View>
                 </Card>
+
+                <RepeatCard trip={trip.data} />
 
                 {notice ? (
                   <Text testID="trip-notice" style={styles.notice}>

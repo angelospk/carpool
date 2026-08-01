@@ -105,6 +105,9 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		"origin_label":      trip.OriginLabel,
 		"destination_label": trip.DestLabel,
 		"route_polyline":    trip.RoutePolyline,
+		"template_id":       trip.TemplateID,
+		"weekday":           trip.Weekday,
+		"booking_id":        trip.BookingID,
 		"driver": map[string]any{
 			"id": trip.Driver.UserID, "name": trip.Driver.Name,
 			"photo_url": trip.Driver.PhotoURL, "rating": trip.Driver.Rating,

@@ -83,12 +83,31 @@
     "plate": "Plate",
     "rate": "Rate",
     "rated": "Thank you!",
-    "send": "Send"
+    "send": "Send",
+    "repeatTitle": "Repeats every {{day}}",
+    "repeatHint": "Holds your seat until {{until}}",
+    "repeatPending": "Waiting for the driver",
+    "repeatPendingDriver": "{{name}} asks to ride every {{day}}",
+    "repeatActive": "{{count}} weeks booked",
+    "repeatDeclined": "The driver did not take it up",
+    "repeatApprove": "Accept",
+    "repeatDecline": "No",
+    "repeatEnd": "End",
+    "repeatWeekFull": "No seat on {{dates}}"
   },
   "user": {
     "block": "Block",
     "blocked": "User blocked",
     "report": "Report",
     "reported": "Report sent"
+  },
+  "weekdays": {
+    "1": "Monday",
+    "2": "Tuesday",
+    "3": "Wednesday",
+    "4": "Thursday",
+    "5": "Friday",
+    "6": "Saturday",
+    "7": "Sunday"
   }
 }

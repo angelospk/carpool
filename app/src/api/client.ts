@@ -12,6 +12,9 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** Whatever else the error envelope carried, such as the dates a
+        standing arrangement could not reserve. */
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -190,7 +193,7 @@ export async function request<T>(path: string, options: Options = {}): Promise<T
 
   if (!res.ok) {
     const err = body?.error;
-    throw new ApiError(res.status, err?.code ?? 'unknown', err?.message ?? res.statusText);
+    throw new ApiError(res.status, err?.code ?? 'unknown', err?.message ?? res.statusText, err);
   }
   return body as T;
 }

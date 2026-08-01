@@ -97,6 +97,13 @@ type TripDetail struct {
 	Passengers []TripParticipant
 	// RoutePolyline is the stored geometry encoded for the app's map.
 	RoutePolyline string
+	// TemplateID and Weekday let the app tell whether a standing arrangement
+	// already covers this weekday of this route.
+	TemplateID uuid.UUID
+	Weekday    int
+	// BookingID is the caller's own booking, and the thing a repeat is founded
+	// on. It is empty for the driver, who has no booking of their own.
+	BookingID *uuid.UUID
 }
 
 // ErrNotParticipant means the caller has no place on this trip. It is reported
@@ -120,6 +127,10 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 	err = pool.QueryRow(ctx, `
 		SELECT o.depart_earliest, o.depart_latest, o.status, o.route_km, o.seats_free,
 		       t.origin_label, t.destination_label,
+		       o.template_id, EXTRACT(ISODOW FROM o.service_date)::int,
+		       (SELECT b.id FROM bookings b
+		        WHERE b.occurrence_id = o.id AND b.passenger_id = $2
+		          AND b.status IN ('confirmed','completed')),
 		       ST_AsEncodedPolyline(o.route_geom, 6),
 		       u.id, u.name, u.photo_url,
 		       (SELECT round(avg(stars)::numeric, 2) FROM ratings WHERE ratee_id = u.id),
@@ -128,9 +139,9 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		JOIN route_templates t  ON t.id = o.template_id
 		JOIN driver_profiles dp ON dp.user_id = t.driver_id
 		JOIN users u            ON u.id = t.driver_id
-		WHERE o.id = $1`, occurrenceID).Scan(
+		WHERE o.id = $1`, occurrenceID, userID).Scan(
 		&d.DepartEarliest, &d.DepartLatest, &d.Status, &d.RouteKm, &d.SeatsFree,
-		&d.OriginLabel, &d.DestLabel, &d.RoutePolyline,
+		&d.OriginLabel, &d.DestLabel, &d.TemplateID, &d.Weekday, &d.BookingID, &d.RoutePolyline,
 		&d.Driver.UserID, &d.Driver.Name, &d.Driver.PhotoURL, &d.Driver.Rating,
 		&d.Driver.CarModel, &d.Driver.CarColor, &d.Driver.CarPlate)
 	if errors.Is(err, pgx.ErrNoRows) {

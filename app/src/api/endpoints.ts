@@ -42,6 +42,27 @@ export type TripDetail = TripSummary & {
   route_polyline: string;
   driver: Participant;
   passengers: Participant[];
+  template_id: string;
+  /** ISO weekday of the Athens service date: Monday is 1. */
+  weekday: number;
+  /** The caller's own booking, absent for the driver. */
+  booking_id: string | null;
+};
+
+export type Arrangement = {
+  id: string;
+  template_id: string;
+  weekday: number;
+  seats: number;
+  price_eur: number;
+  status: 'pending' | 'active' | 'declined' | 'cancelled' | 'expired';
+  until_date: string;
+  driver_id: string;
+  passenger_id: string;
+  passenger_name: string;
+  origin_label: string;
+  destination_label: string;
+  weeks_booked: number;
 };
 
 export type Message = {
@@ -124,6 +145,16 @@ export const api = {
   messages: (id: string) => request<{ messages: Message[] }>(`/v1/trips/${id}/messages`),
   postMessage: (id: string, body: string) =>
     request<Message>(`/v1/trips/${id}/messages`, { method: 'POST', body: { body } }),
+
+  arrangements: () => request<{ arrangements: Arrangement[] }>('/v1/arrangements'),
+  repeatBooking: (bookingId: string) =>
+    request<{ arrangement_id: string }>(`/v1/bookings/${bookingId}/repeat`, { method: 'POST' }),
+  approveArrangement: (id: string) =>
+    request<void>(`/v1/arrangements/${id}/approve`, { method: 'POST' }),
+  declineArrangement: (id: string) =>
+    request<void>(`/v1/arrangements/${id}/decline`, { method: 'POST' }),
+  cancelArrangement: (id: string) =>
+    request<void>(`/v1/arrangements/${id}`, { method: 'DELETE' }),
 
   blockUser: (id: string) => request<void>(`/v1/users/${id}/block`, { method: 'POST' }),
   reportUser: (id: string, reason: string) =>
