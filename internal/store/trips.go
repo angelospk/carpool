@@ -334,3 +334,54 @@ func RateTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, raterID uui
 	}
 	return nil
 }
+
+// PastTrip is a ride that has already happened, as the passenger sees it in
+// their history. It carries the booking id because that is what a repeat is
+// founded on: the stops, the seats and the price were settled there.
+type PastTrip struct {
+	Trip
+	BookingID  uuid.UUID
+	DriverName string
+}
+
+// PastTrips lists a passenger's completed rides, newest first.
+//
+// Only the passenger side: a driver repeating their own trip is what the
+// schedule is for, and a route template already says "every Tuesday".
+func PastTrips(
+	ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, now time.Time, limit int,
+) ([]PastTrip, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT o.id, o.depart_earliest, o.depart_latest, o.status, o.route_km,
+		       t.origin_label, t.destination_label, b.price_eur, o.seats_free,
+		       b.id, u.name
+		FROM bookings b
+		JOIN trip_occurrences o ON o.id = b.occurrence_id
+		JOIN route_templates t  ON t.id = o.template_id
+		JOIN users u            ON u.id = t.driver_id
+		WHERE b.passenger_id = $1
+		  AND b.status IN ('confirmed','completed')
+		  AND o.depart_latest < $2
+		ORDER BY o.depart_earliest DESC
+		LIMIT $3`, userID, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: loading past trips: %w", err)
+	}
+	defer rows.Close()
+
+	var out []PastTrip
+	for rows.Next() {
+		var p PastTrip
+		p.Role = RolePassenger
+		if err := rows.Scan(&p.OccurrenceID, &p.DepartEarliest, &p.DepartLatest, &p.Status,
+			&p.RouteKm, &p.OriginLabel, &p.DestLabel, &p.PriceEUR, &p.SeatsFree,
+			&p.BookingID, &p.DriverName); err != nil {
+			return nil, fmt.Errorf("store: scanning a past trip: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}

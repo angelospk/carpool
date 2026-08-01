@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 
 import { api, type TripSummary } from '../../src/api/endpoints';
+import { PastTrips } from '../../src/components/PastTrips';
 import { useSession } from '../../src/state/session';
 import {
   AsyncState,
@@ -23,6 +24,12 @@ export default function HomeScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const me = useSession((s) => s.me);
+
+  // Shares react-query's cache key with PastTrips, so asking here costs no
+  // extra request. It is asked at all because an empty upcoming list must not
+  // hide the history — someone with nothing booked is exactly who wants to
+  // repeat a ride.
+  const past = useQuery({ queryKey: ['trips', 'past'], queryFn: () => api.pastTrips() });
 
   const trips = useQuery({
     queryKey: ['trips', 'upcoming'],
@@ -48,7 +55,7 @@ export default function HomeScreen() {
         loading={trips.isLoading}
         error={trips.error}
         onRetry={() => void trips.refetch()}
-        empty={!all.length}
+        empty={!all.length && !(past.data?.trips.length ?? 0)}
         emptyLabel={t('home.empty')}
       >
         <FlatList
@@ -67,6 +74,7 @@ export default function HomeScreen() {
               </View>
             ) : null
           }
+          ListFooterComponent={<PastTrips />}
           renderItem={({ item, index }) => (
             <>
               {startsNewDay(item.depart_earliest, rest[index - 1]?.depart_earliest) ? (

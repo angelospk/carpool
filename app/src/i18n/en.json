@@ -38,7 +38,11 @@
     "empty": "You have no upcoming trips.",
     "greeting": "Good morning",
     "title": "Your trips",
-    "upcoming": "Upcoming trips"
+    "upcoming": "Upcoming trips",
+    "past": "Earlier rides",
+    "again": "Again",
+    "againAsked": "The driver has been asked",
+    "againNone": "No next trip with a free seat"
   },
   "profile": {
     "car": "Your car",

@@ -49,6 +49,11 @@ export type TripDetail = TripSummary & {
   booking_id: string | null;
 };
 
+export type PastTrip = TripSummary & {
+  booking_id: string;
+  driver_name: string;
+};
+
 export type Arrangement = {
   id: string;
   template_id: string;
@@ -145,6 +150,13 @@ export const api = {
   messages: (id: string) => request<{ messages: Message[] }>(`/v1/trips/${id}/messages`),
   postMessage: (id: string, body: string) =>
     request<Message>(`/v1/trips/${id}/messages`, { method: 'POST', body: { body } }),
+
+  pastTrips: () => request<{ trips: PastTrip[] }>('/v1/trips/past'),
+  again: (bookingId: string) =>
+    request<{ request_id: string; ask_id?: string; asking: boolean }>(
+      `/v1/bookings/${bookingId}/again`,
+      { method: 'POST' },
+    ),
 
   arrangements: () => request<{ arrangements: Arrangement[] }>('/v1/arrangements'),
   repeatBooking: (bookingId: string) =>

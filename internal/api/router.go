@@ -99,6 +99,7 @@ func NewRouter(deps Deps) http.Handler {
 			if deps.Asks != nil {
 				r.Post("/requests", deps.handleCreateRequest)
 				r.Delete("/requests/{id}", deps.handleCancelRequest)
+				r.Post("/bookings/{id}/again", deps.handleAgain)
 				r.Post("/asks/{id}/accept", deps.handleAcceptAsk)
 				r.Post("/asks/{id}/decline", deps.handleDeclineAsk)
 			}
@@ -116,6 +117,7 @@ func NewRouter(deps Deps) http.Handler {
 			}
 
 			r.Get("/trips/upcoming", deps.handleUpcomingTrips)
+			r.Get("/trips/past", deps.handlePastTrips)
 			r.Route("/trips/{id}", func(r chi.Router) {
 				r.Get("/", deps.handleGetTrip)
 				r.Post("/confirm", deps.handleConfirmTrip)

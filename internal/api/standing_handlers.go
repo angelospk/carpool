@@ -6,7 +6,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"carpool/internal/asks"
 	"carpool/internal/standing"
+	"carpool/internal/store"
 )
 
 // standingErrorStatus maps an arrangement error to its HTTP shape. A week that
@@ -157,4 +159,67 @@ func (d Deps) handleListArrangements(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"arrangements": out})
+}
+
+// handlePastTrips lists the rides the caller has already taken, which is where
+// a repeat starts from.
+func (d Deps) handlePastTrips(w http.ResponseWriter, r *http.Request) {
+	userID, ok := callerID(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
+		return
+	}
+
+	trips, err := store.PastTrips(r.Context(), d.Pool, userID, d.now(), 20)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not load your rides")
+		return
+	}
+	out := make([]map[string]any, 0, len(trips))
+	for _, t := range trips {
+		out = append(out, map[string]any{
+			"id":                t.OccurrenceID,
+			"booking_id":        t.BookingID,
+			"role":              "passenger",
+			"depart_earliest":   t.DepartEarliest,
+			"depart_latest":     t.DepartLatest,
+			"status":            t.Status,
+			"route_km":          t.RouteKm,
+			"origin_label":      t.OriginLabel,
+			"destination_label": t.DestLabel,
+			"price_eur":         t.PriceEUR,
+			"seats_free":        t.SeatsFree,
+			"driver_name":       t.DriverName,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"trips": out})
+}
+
+// handleAgain asks the same driver for the same ride, on their next running.
+func (d Deps) handleAgain(w http.ResponseWriter, r *http.Request) {
+	userID, bookingID, ok := d.standingParams(w, r)
+	if !ok {
+		return
+	}
+
+	requestID, askID, err := d.Asks.Again(r.Context(), bookingID, userID)
+	switch {
+	case errors.Is(err, asks.ErrNothingToRepeat):
+		writeError(w, http.StatusConflict, "nothing_to_repeat",
+			"that route has no next trip with a free seat")
+		return
+	case errors.Is(err, asks.ErrNotYours):
+		writeError(w, http.StatusForbidden, "not_yours", "that ride is not yours")
+		return
+	case errors.Is(err, asks.ErrNoCandidates):
+		// The request stands; that particular day simply did not work out.
+		writeJSON(w, http.StatusOK, map[string]any{"request_id": requestID, "asking": false})
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "could not repeat that ride")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"request_id": requestID, "ask_id": askID, "asking": true,
+	})
 }

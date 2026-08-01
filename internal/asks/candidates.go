@@ -61,6 +61,12 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 		if _, seen := already[c.OccurrenceID]; seen {
 			continue
 		}
+		// A targeted request names the trip it wants. Everything else the
+		// matcher found is a different driver, and offering one of those would
+		// answer a question the passenger did not ask.
+		if req.Target != nil && c.OccurrenceID != *req.Target {
+			continue
+		}
 		byID[c.OccurrenceID.String()] = c
 		scored = append(scored, match.Scored{
 			ID: c.OccurrenceID.String(),
@@ -112,6 +118,9 @@ type request struct {
 	Seats       int
 	Status      string
 	RequestKm   float64
+	// Target names the one occurrence a repeat is aimed at. Nil for an ordinary
+	// request, which is free to go to whichever driver ranks best.
+	Target *uuid.UUID
 }
 
 func (s *Service) loadRequest(ctx context.Context, id uuid.UUID) (request, error) {
@@ -119,12 +128,12 @@ func (s *Service) loadRequest(ctx context.Context, id uuid.UUID) (request, error
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, passenger_id,
 		       ST_X(origin), ST_Y(origin), ST_X(destination), ST_Y(destination),
-		       window_start, window_end, seats, status,
+		       window_start, window_end, seats, status, target_occurrence_id,
 		       ST_Distance(origin::geography, destination::geography) / 1000
 		FROM ride_requests WHERE id = $1`, id).Scan(
 		&r.ID, &r.PassengerID,
 		&r.Origin.Lon, &r.Origin.Lat, &r.Destination.Lon, &r.Destination.Lat,
-		&r.WindowStart, &r.WindowEnd, &r.Seats, &r.Status, &r.RequestKm)
+		&r.WindowStart, &r.WindowEnd, &r.Seats, &r.Status, &r.Target, &r.RequestKm)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return request{}, ErrNoCandidates
 	}
