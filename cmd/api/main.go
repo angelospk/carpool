@@ -26,6 +26,7 @@ import (
 	"carpool/internal/jobs"
 	"carpool/internal/outbox"
 	"carpool/internal/push"
+	"carpool/internal/standing"
 	"carpool/internal/store"
 	"carpool/internal/ws"
 )
@@ -127,6 +128,7 @@ func run() error {
 		OTP:      auth.NewOTPService(pool, clk, sms),
 		Sessions: auth.NewSessionService(pool, clk, issuer),
 		Asks:     askSvc,
+		Standing: standing.NewService(pool, clk),
 
 		Router:          router,
 		Materializer:    materializer,

@@ -15,6 +15,7 @@ import (
 	"carpool/internal/clock"
 	"carpool/internal/geo"
 	"carpool/internal/jobs"
+	"carpool/internal/standing"
 	"carpool/internal/ws"
 )
 
@@ -34,6 +35,9 @@ type Deps struct {
 	OTP      *auth.OTPService
 	Sessions *auth.SessionService
 	Asks     *asks.Service
+	// Standing records the agreements two people already made, so the matcher
+	// stops handing their seat to a stranger.
+	Standing *standing.Service
 
 	// Router snaps published routes to the road network.
 	Router *geo.OSRM
@@ -95,6 +99,12 @@ func NewRouter(deps Deps) http.Handler {
 			if deps.Asks != nil {
 				r.Post("/requests", deps.handleCreateRequest)
 				r.Delete("/requests/{id}", deps.handleCancelRequest)
+				r.Post("/bookings/{id}/repeat", deps.handleRepeatBooking)
+				r.Delete("/bookings/{id}", deps.handleSkipWeek)
+				r.Get("/arrangements", deps.handleListArrangements)
+				r.Post("/arrangements/{id}/approve", deps.handleApproveArrangement)
+				r.Post("/arrangements/{id}/decline", deps.handleDeclineArrangement)
+				r.Delete("/arrangements/{id}", deps.handleCancelArrangement)
 				r.Post("/asks/{id}/accept", deps.handleAcceptAsk)
 				r.Post("/asks/{id}/decline", deps.handleDeclineAsk)
 			}

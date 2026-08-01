@@ -304,3 +304,227 @@ func (s *Service) notify(
 		IdempotencyKey: event + ":" + arrangementID.String(),
 	}, now)
 }
+
+// Decline ends a pending arrangement without touching a single week.
+//
+// It is not a permanent no: the row goes terminal, which frees the slot the
+// partial unique index holds, so the passenger may ask again later.
+func (s *Service) Decline(ctx context.Context, arrangementID, driverID uuid.UUID) error {
+	return s.settle(ctx, arrangementID, driverID, "declined")
+}
+
+// Cancel ends an arrangement and releases every week it still holds. Either
+// side may do it — a driver whose Tuesdays changed and a passenger who found
+// another way to work are the same event to the seats.
+func (s *Service) Cancel(ctx context.Context, arrangementID, userID uuid.UUID) error {
+	return s.settle(ctx, arrangementID, userID, "cancelled")
+}
+
+// settle moves an arrangement to a terminal state and, for a cancellation,
+// gives back the seats of every week that has not happened yet.
+func (s *Service) settle(ctx context.Context, arrangementID, userID uuid.UUID, to string) error {
+	now := s.clock.Now()
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("standing: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var templateID, passengerID, driverID uuid.UUID
+	var status string
+	err = tx.QueryRow(ctx, `
+		SELECT a.template_id, a.passenger_id, t.driver_id, a.status
+		FROM standing_arrangements a
+		JOIN route_templates t ON t.id = a.template_id
+		WHERE a.id = $1 FOR UPDATE OF a`, arrangementID).
+		Scan(&templateID, &passengerID, &driverID, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotRepeatable
+	}
+	if err != nil {
+		return fmt.Errorf("standing: loading the arrangement: %w", err)
+	}
+
+	// Declining is the driver's alone; ending an agreement belongs to both.
+	if to == "declined" && userID != driverID {
+		return ErrNotYours
+	}
+	if userID != driverID && userID != passengerID {
+		return ErrNotYours
+	}
+	if status == to {
+		return nil // already settled; saying so twice is one act
+	}
+	if status != "pending" && status != "active" {
+		return ErrNotRepeatable
+	}
+
+	if to == "cancelled" {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2))`,
+			jobs.TemplateLockNamespace, templateID.String()); err != nil {
+			return fmt.Errorf("standing: taking the template lock: %w", err)
+		}
+		// Only the weeks still ahead, and only the ones still holding a seat.
+		// The rides already taken are history, and giving their seats back would
+		// invent capacity on a trip that has happened.
+		if err := s.releaseFutureWeeks(ctx, tx, arrangementID, userID == driverID, now); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE standing_arrangements SET status = $2, updated_at = now() WHERE id = $1`,
+		arrangementID, to); err != nil {
+		return fmt.Errorf("standing: settling the arrangement: %w", err)
+	}
+
+	// Whoever did not act is the one who needs telling.
+	recipient := passengerID
+	if userID == passengerID {
+		recipient = driverID
+	}
+	if err := s.notify(ctx, tx, "arrangement_"+to, recipient, arrangementID, now); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("standing: commit: %w", err)
+	}
+	return nil
+}
+
+// releaseFutureWeeks cancels the arrangement's remaining bookings and returns
+// their seats, one occurrence at a time and in id order so two cancellations
+// racing each other cannot deadlock.
+func (s *Service) releaseFutureWeeks(
+	ctx context.Context, tx pgx.Tx, arrangementID uuid.UUID, byDriver bool, now time.Time,
+) error {
+	status := "cancelled_by_passenger"
+	if byDriver {
+		status = "cancelled_by_driver"
+	}
+	// The seat is returned from the same statement that spends the booking's
+	// confirmed status, so a repeat can never give it back twice.
+	_, err := tx.Exec(ctx, `
+		WITH released AS (
+			UPDATE bookings b
+			SET status = $2, updated_at = now()
+			FROM trip_occurrences o
+			WHERE b.arrangement_id = $1
+			  AND o.id = b.occurrence_id
+			  AND b.status = 'confirmed'
+			  AND o.depart_earliest > $3
+			RETURNING b.occurrence_id, b.seats
+		)
+		UPDATE trip_occurrences o
+		SET seats_free = o.seats_free + r.seats, updated_at = now()
+		FROM released r WHERE o.id = r.occurrence_id`, arrangementID, status, now)
+	if err != nil {
+		return fmt.Errorf("standing: releasing the weeks ahead: %w", err)
+	}
+	return nil
+}
+
+// SkipWeek gives back one week of an arrangement without ending it. One missed
+// Tuesday is a missed Tuesday; the agreement stands.
+func (s *Service) SkipWeek(ctx context.Context, bookingID, userID uuid.UUID) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("standing: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var passengerID, driverID uuid.UUID
+	var arrangementID *uuid.UUID
+	var status string
+	err = tx.QueryRow(ctx, `
+		SELECT b.passenger_id, t.driver_id, b.arrangement_id, b.status
+		FROM bookings b
+		JOIN trip_occurrences o ON o.id = b.occurrence_id
+		JOIN route_templates  t ON t.id = o.template_id
+		WHERE b.id = $1 FOR UPDATE OF b`, bookingID).
+		Scan(&passengerID, &driverID, &arrangementID, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotRepeatable
+	}
+	if err != nil {
+		return fmt.Errorf("standing: loading the week: %w", err)
+	}
+	if userID != passengerID && userID != driverID {
+		return ErrNotYours
+	}
+	if arrangementID == nil {
+		// A booking that came from an ask is cancelled through the ask flow,
+		// which is a different set of rules and does not exist yet.
+		return ErrNotRepeatable
+	}
+	if status != "confirmed" {
+		return nil // already skipped
+	}
+
+	to := "cancelled_by_passenger"
+	if userID == driverID {
+		to = "cancelled_by_driver"
+	}
+	if _, err := tx.Exec(ctx, `
+		WITH released AS (
+			UPDATE bookings SET status = $2, updated_at = now()
+			WHERE id = $1 AND status = 'confirmed'
+			RETURNING occurrence_id, seats
+		)
+		UPDATE trip_occurrences o
+		SET seats_free = o.seats_free + r.seats, updated_at = now()
+		FROM released r WHERE o.id = r.occurrence_id`, bookingID, to); err != nil {
+		return fmt.Errorf("standing: skipping the week: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("standing: commit: %w", err)
+	}
+	return nil
+}
+
+// Arrangement is the view both sides need to render the switch honestly: what
+// was agreed, where it stands, and how many weeks it actually holds.
+type Arrangement struct {
+	ID, TemplateID        uuid.UUID
+	DriverID, PassengerID uuid.UUID
+	PassengerName         string
+	OriginLabel           string
+	DestinationLabel      string
+	Weekday, Seats        int
+	PriceEUR              float64
+	Status                string
+	Until                 time.Time
+	WeeksBooked           int
+}
+
+// ForUser returns every arrangement the user is part of, on either side.
+func (s *Service) ForUser(ctx context.Context, userID uuid.UUID) ([]Arrangement, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT a.id, a.template_id, t.driver_id, a.passenger_id, u.name,
+		       t.origin_label, t.destination_label,
+		       a.weekday, a.seats, a.price_eur, a.status, a.until_date,
+		       (SELECT count(*) FROM bookings b
+		        WHERE b.arrangement_id = a.id AND b.status = 'confirmed')
+		FROM standing_arrangements a
+		JOIN route_templates t ON t.id = a.template_id
+		JOIN users u ON u.id = a.passenger_id
+		WHERE a.passenger_id = $1 OR t.driver_id = $1
+		ORDER BY a.created_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("standing: listing arrangements: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Arrangement
+	for rows.Next() {
+		var a Arrangement
+		if err := rows.Scan(&a.ID, &a.TemplateID, &a.DriverID, &a.PassengerID, &a.PassengerName,
+			&a.OriginLabel, &a.DestinationLabel, &a.Weekday, &a.Seats, &a.PriceEUR,
+			&a.Status, &a.Until, &a.WeeksBooked); err != nil {
+			return nil, fmt.Errorf("standing: scanning an arrangement: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}

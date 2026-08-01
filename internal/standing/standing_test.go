@@ -300,3 +300,148 @@ func TestApprovingTwiceBooksOnce(t *testing.T) {
 		}
 	}
 }
+
+func TestDecliningLeavesEveryWeekAlone(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
+	if err != nil {
+		t.Fatalf("Repeat: %v", err)
+	}
+	if err := w.svc.Decline(ctx, id, w.driverID); err != nil {
+		t.Fatalf("Decline: %v", err)
+	}
+
+	if got := w.status(t, id); got != "declined" {
+		t.Errorf("status = %q, want declined", got)
+	}
+	if free := w.seatsFree(t, w.tuesdays[1]); free != 3 {
+		t.Errorf("a declined arrangement took a seat anyway (%d free)", free)
+	}
+	// A declined Tuesday is not a permanent no. Asking again must be possible.
+	again, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
+	if err != nil {
+		t.Fatalf("repeating after a decline: %v", err)
+	}
+	if again == id {
+		t.Error("the declined arrangement was handed back instead of a fresh request")
+	}
+}
+
+func TestSkippingOneWeekLeavesTheArrangementStanding(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
+	if err != nil {
+		t.Fatalf("Repeat: %v", err)
+	}
+	if err := w.svc.Approve(ctx, id, w.driverID); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+
+	var bookingID uuid.UUID
+	if err := w.pool.QueryRow(ctx, `
+		SELECT b.id FROM bookings b JOIN trip_occurrences o ON o.id = b.occurrence_id
+		WHERE b.arrangement_id = $1 AND o.id = $2`, id, w.tuesdays[1]).Scan(&bookingID); err != nil {
+		t.Fatalf("finding the week: %v", err)
+	}
+
+	if err := w.svc.SkipWeek(ctx, bookingID, w.passengerID); err != nil {
+		t.Fatalf("SkipWeek: %v", err)
+	}
+
+	if free := w.seatsFree(t, w.tuesdays[1]); free != 3 {
+		t.Errorf("the skipped week still holds a seat (%d free)", free)
+	}
+	if free := w.seatsFree(t, w.tuesdays[2]); free != 2 {
+		t.Errorf("skipping one week released another (%d free)", free)
+	}
+	// One missed Tuesday is a missed Tuesday, not the end of the agreement.
+	if got := w.status(t, id); got != "active" {
+		t.Errorf("status = %q, want the arrangement still active", got)
+	}
+}
+
+func TestSkippingTheSameWeekTwiceReleasesOneSeat(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
+	if err != nil {
+		t.Fatalf("Repeat: %v", err)
+	}
+	if err := w.svc.Approve(ctx, id, w.driverID); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	var bookingID uuid.UUID
+	if err := w.pool.QueryRow(ctx,
+		`SELECT b.id FROM bookings b WHERE b.arrangement_id = $1 AND b.occurrence_id = $2`,
+		id, w.tuesdays[1]).Scan(&bookingID); err != nil {
+		t.Fatalf("finding the week: %v", err)
+	}
+
+	if err := w.svc.SkipWeek(ctx, bookingID, w.passengerID); err != nil {
+		t.Fatalf("first SkipWeek: %v", err)
+	}
+	if err := w.svc.SkipWeek(ctx, bookingID, w.passengerID); err != nil {
+		t.Fatalf("second SkipWeek: %v", err)
+	}
+
+	if free := w.seatsFree(t, w.tuesdays[1]); free != 3 {
+		t.Fatalf("a repeated skip freed the seat twice (%d free of 3)", free)
+	}
+}
+
+func TestCancellingTheArrangementReleasesEveryWeekAhead(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
+	if err != nil {
+		t.Fatalf("Repeat: %v", err)
+	}
+	if err := w.svc.Approve(ctx, id, w.driverID); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+
+	// Either side may end it; here the driver does.
+	if err := w.svc.Cancel(ctx, id, w.driverID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	if got := w.status(t, id); got != "cancelled" {
+		t.Errorf("status = %q, want cancelled", got)
+	}
+	for _, occ := range w.tuesdays[1:] {
+		if free := w.seatsFree(t, occ); free != 3 {
+			t.Errorf("occurrence %v still holds a seat (%d free) after the arrangement ended", occ, free)
+		}
+	}
+	// The ride they already took is history, not a reservation to release.
+	if free := w.seatsFree(t, w.tuesdays[0]); free != 2 {
+		t.Errorf("cancelling the arrangement gave back the seat of the ride they had already taken (%d free)", free)
+	}
+}
+
+func TestAStrangerCannotEndSomeoneElsesArrangement(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
+	if err != nil {
+		t.Fatalf("Repeat: %v", err)
+	}
+	var strangerID uuid.UUID
+	if err := w.pool.QueryRow(ctx, `
+		INSERT INTO users (phone, name, home_region_id)
+		SELECT '+306900000009', 'Ξένος', home_region_id FROM users WHERE id = $1
+		RETURNING id`, w.passengerID).Scan(&strangerID); err != nil {
+		t.Fatalf("seeding a stranger: %v", err)
+	}
+
+	if err := w.svc.Cancel(ctx, id, strangerID); !errors.Is(err, standing.ErrNotYours) {
+		t.Fatalf("a stranger cancelled the arrangement: %v", err)
+	}
+}
