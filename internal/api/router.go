@@ -99,14 +99,20 @@ func NewRouter(deps Deps) http.Handler {
 			if deps.Asks != nil {
 				r.Post("/requests", deps.handleCreateRequest)
 				r.Delete("/requests/{id}", deps.handleCancelRequest)
+				r.Post("/asks/{id}/accept", deps.handleAcceptAsk)
+				r.Post("/asks/{id}/decline", deps.handleDeclineAsk)
+			}
+
+			// Guarded on its own collaborator: these handlers dereference
+			// deps.Standing, and hanging them off the asks check would panic in
+			// any wiring that has one and not the other.
+			if deps.Standing != nil {
 				r.Post("/bookings/{id}/repeat", deps.handleRepeatBooking)
 				r.Delete("/bookings/{id}", deps.handleSkipWeek)
 				r.Get("/arrangements", deps.handleListArrangements)
 				r.Post("/arrangements/{id}/approve", deps.handleApproveArrangement)
 				r.Post("/arrangements/{id}/decline", deps.handleDeclineArrangement)
 				r.Delete("/arrangements/{id}", deps.handleCancelArrangement)
-				r.Post("/asks/{id}/accept", deps.handleAcceptAsk)
-				r.Post("/asks/{id}/decline", deps.handleDeclineAsk)
 			}
 
 			r.Get("/trips/upcoming", deps.handleUpcomingTrips)

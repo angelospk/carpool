@@ -445,3 +445,62 @@ func TestAStrangerCannotEndSomeoneElsesArrangement(t *testing.T) {
 		t.Fatalf("a stranger cancelled the arrangement: %v", err)
 	}
 }
+
+// Declining is an answer to a question, and once the weeks are booked the
+// question has been answered. Ending an active arrangement is a cancellation,
+// which releases the seats; a decline would leave them held by an arrangement
+// that says it was refused.
+func TestAnActiveArrangementCannotBeDeclined(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
+	if err != nil {
+		t.Fatalf("Repeat: %v", err)
+	}
+	if err := w.svc.Approve(ctx, id, w.driverID); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+
+	if err := w.svc.Decline(ctx, id, w.driverID); !errors.Is(err, standing.ErrNotRepeatable) {
+		t.Fatalf("Decline on an active arrangement returned %v; the booked weeks would keep their seats", err)
+	}
+}
+
+// A trip that has already left cannot give a seat back. Doing so would invent
+// capacity on a journey that has happened.
+func TestAWeekThatHasAlreadyRunCannotBeSkipped(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
+	if err != nil {
+		t.Fatalf("Repeat: %v", err)
+	}
+	if err := w.svc.Approve(ctx, id, w.driverID); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	var bookingID uuid.UUID
+	if err := w.pool.QueryRow(ctx,
+		`SELECT id FROM bookings WHERE arrangement_id = $1 AND occurrence_id = $2`,
+		id, w.tuesdays[1]).Scan(&bookingID); err != nil {
+		t.Fatalf("finding the week: %v", err)
+	}
+	// That Tuesday comes and goes.
+	if _, err := w.pool.Exec(ctx, `
+		UPDATE trip_occurrences
+		SET depart_earliest = $2::timestamptz - interval '2 hours',
+		    depart_latest   = $2::timestamptz - interval '1 hour'
+		WHERE id = $1`, w.tuesdays[1], testNow); err != nil {
+		t.Fatalf("moving the trip into the past: %v", err)
+	}
+
+	err = w.svc.SkipWeek(ctx, bookingID, w.passengerID)
+
+	if !errors.Is(err, standing.ErrNotRepeatable) {
+		t.Fatalf("SkipWeek on a departed trip returned %v", err)
+	}
+	if free := w.seatsFree(t, w.tuesdays[1]); free != 2 {
+		t.Errorf("a seat came back on a trip that has already run (%d free)", free)
+	}
+}

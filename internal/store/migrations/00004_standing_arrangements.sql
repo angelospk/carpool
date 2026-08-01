@@ -79,11 +79,13 @@ CREATE INDEX bookings_arrangement ON bookings (arrangement_id)
 
 -- +goose Down
 
-DROP INDEX bookings_arrangement;
-ALTER TABLE bookings DROP CONSTRAINT bookings_one_provenance;
-ALTER TABLE bookings DROP COLUMN arrangement_id;
--- The NOT NULLs are restorable only because every remaining booking came from
--- an ask; dropping the column above removed the rows that did not.
-ALTER TABLE bookings ALTER COLUMN request_id SET NOT NULL;
-ALTER TABLE bookings ALTER COLUMN ask_id     SET NOT NULL;
-DROP TABLE standing_arrangements;
+-- Irreversible, and it says so rather than failing halfway through. Restoring
+-- NOT NULL on ask_id demands that no booking came from an arrangement, so a
+-- working down migration would have to delete real bookings — seats people are
+-- holding — to make the schema fit. That is a decision for a person, not for a
+-- rollback.
+-- +goose StatementBegin
+DO $$ BEGIN
+    RAISE EXCEPTION 'migration 00004 is irreversible: rolling it back would mean deleting the bookings that came from standing arrangements';
+END $$;
+-- +goose StatementEnd

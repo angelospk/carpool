@@ -350,6 +350,13 @@ func (s *Service) settle(ctx context.Context, arrangementID, userID uuid.UUID, t
 	if to == "declined" && userID != driverID {
 		return ErrNotYours
 	}
+	// A decline answers a question, and once the weeks are booked the question
+	// has been answered. Ending an active arrangement is a cancellation, which
+	// gives the seats back; a decline would leave them held by a row that says
+	// it was refused.
+	if to == "declined" && status != "pending" {
+		return ErrNotRepeatable
+	}
 	if userID != driverID && userID != passengerID {
 		return ErrNotYours
 	}
@@ -428,6 +435,8 @@ func (s *Service) releaseFutureWeeks(
 // SkipWeek gives back one week of an arrangement without ending it. One missed
 // Tuesday is a missed Tuesday; the agreement stands.
 func (s *Service) SkipWeek(ctx context.Context, bookingID, userID uuid.UUID) error {
+	now := s.clock.Now()
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("standing: begin: %w", err)
@@ -437,13 +446,14 @@ func (s *Service) SkipWeek(ctx context.Context, bookingID, userID uuid.UUID) err
 	var passengerID, driverID uuid.UUID
 	var arrangementID *uuid.UUID
 	var status string
+	var departs time.Time
 	err = tx.QueryRow(ctx, `
-		SELECT b.passenger_id, t.driver_id, b.arrangement_id, b.status
+		SELECT b.passenger_id, t.driver_id, b.arrangement_id, b.status, o.depart_earliest
 		FROM bookings b
 		JOIN trip_occurrences o ON o.id = b.occurrence_id
 		JOIN route_templates  t ON t.id = o.template_id
 		WHERE b.id = $1 FOR UPDATE OF b`, bookingID).
-		Scan(&passengerID, &driverID, &arrangementID, &status)
+		Scan(&passengerID, &driverID, &arrangementID, &status, &departs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotRepeatable
 	}
@@ -460,6 +470,11 @@ func (s *Service) SkipWeek(ctx context.Context, bookingID, userID uuid.UUID) err
 	}
 	if status != "confirmed" {
 		return nil // already skipped
+	}
+	// A trip that has left cannot give a seat back: that would invent capacity
+	// on a journey which has already happened.
+	if !departs.After(now) {
+		return ErrNotRepeatable
 	}
 
 	to := "cancelled_by_passenger"
