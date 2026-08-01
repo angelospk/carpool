@@ -1,14 +1,35 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useMutation } from '@tanstack/react-query';
 
+import { api } from '../../src/api/endpoints';
 import { useSession } from '../../src/state/session';
 import { Avatar, Button, Card, Row, Screen, SectionHeader } from '../../src/components/ui';
-import { colors, space, type } from '../../src/design/tokens';
+import { colors, radius, space, type } from '../../src/design/tokens';
 
 export default function ProfileScreen() {
   const { t } = useTranslation();
   const me = useSession((s) => s.me);
+  const setMe = useSession((s) => s.setMe);
   const signOut = useSession((s) => s.signOut);
+  const [social, setSocial] = useState<string | null>(null);
+  const [socialError, setSocialError] = useState(false);
+
+  // The server holds the allowlist; this is the same rule stated early so the
+  // answer is immediate rather than a round trip away.
+  const looksRight = (url: string) =>
+    url === '' || /^https:\/\/(www\.|m\.|web\.)?(facebook|instagram)\.com\/.+/.test(url);
+
+  const saveSocial = useMutation({
+    mutationFn: (url: string) => api.updateMe({ social_url: url }),
+    onSuccess: (updated) => {
+      setMe(updated);
+      setSocial(null);
+      setSocialError(false);
+    },
+    onError: () => setSocialError(true),
+  });
 
   return (
     <Screen>
@@ -35,6 +56,41 @@ export default function ProfileScreen() {
           <Row label={t('profile.language')} value="Ελληνικά" />
         </Card>
 
+        <SectionHeader title={t('profile.social')} />
+        <Card>
+          <TextInput
+            testID="social-input"
+            style={styles.input}
+            value={social ?? me?.social_url ?? ''}
+            onChangeText={(v) => {
+              setSocial(v);
+              setSocialError(false);
+            }}
+            placeholder="https://facebook.com/…"
+            placeholderTextColor={colors.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+          />
+          <Text style={styles.hint}>
+            {socialError ? t('profile.socialInvalid') : t('profile.socialHint')}
+          </Text>
+          {social !== null && social !== (me?.social_url ?? '') ? (
+            <Button
+              testID="social-save"
+              label={t('common.save')}
+              disabled={saveSocial.isPending}
+              onPress={() => {
+                if (!looksRight(social)) {
+                  setSocialError(true);
+                  return;
+                }
+                saveSocial.mutate(social);
+              }}
+            />
+          ) : null}
+        </Card>
+
         <Button
           testID="sign-out"
           label={t('profile.signOut')}
@@ -53,4 +109,13 @@ const styles = StyleSheet.create({
   name: { ...type.title, color: colors.ink },
   phone: { ...type.caption, color: colors.muted },
   divider: { height: 1, backgroundColor: colors.line },
+  input: {
+    ...type.body,
+    color: colors.ink,
+    backgroundColor: colors.sunken,
+    borderRadius: radius.inner,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+  },
+  hint: { ...type.caption, color: colors.muted, marginTop: space.xs, marginBottom: space.sm },
 });

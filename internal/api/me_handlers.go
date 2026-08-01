@@ -39,6 +39,7 @@ func (d Deps) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name      *string `json:"name"`
 		PhotoURL  *string `json:"photo_url"`
+		SocialURL *string `json:"social_url"`
 		Gender    *string `json:"gender"`
 		WomenOnly *bool   `json:"women_only"`
 		RegionID  *string `json:"home_region_id"`
@@ -50,6 +51,7 @@ func (d Deps) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	up := store.UserUpdate{
 		Name:      body.Name,
 		PhotoURL:  body.PhotoURL,
+		SocialURL: body.SocialURL,
 		Gender:    body.Gender,
 		WomenOnly: body.WomenOnly,
 	}
@@ -103,5 +105,6 @@ func userResponse(u store.User) map[string]any {
 		"home_region_id": u.HomeRegionID,
 		"women_only":     u.WomenOnly,
 		"status":         u.Status,
+		"social_url":     u.SocialURL,
 	}
 }

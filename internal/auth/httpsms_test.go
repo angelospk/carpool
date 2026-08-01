@@ -147,8 +147,8 @@ func TestAFailureDoesNotQuoteTheCode(t *testing.T) {
 
 func TestAMisconfiguredSenderIsRefusedAtStartup(t *testing.T) {
 	cases := map[string]auth.HTTPSMSConfig{
-		"no url":            {Template: `{"to":"{{phone}}"}`},
-		"no template":       {URL: "https://gateway.example/send"},
+		"no url":      {Template: `{"to":"{{phone}}"}`},
+		"no template": {URL: "https://gateway.example/send"},
 		"a template naming neither the phone nor the message": {
 			URL: "https://gateway.example/send", Template: `{"hello":"world"}`,
 		},

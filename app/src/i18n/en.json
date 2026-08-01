@@ -30,7 +30,8 @@
     "off": "Off",
     "offline": "No connection",
     "on": "On",
-    "retry": "Try again"
+    "retry": "Try again",
+    "save": "Save"
   },
   "home": {
     "asDriver": "Driving",
@@ -52,7 +53,10 @@
     "settings": "Settings",
     "signOut": "Sign out",
     "title": "Your profile",
-    "womenOnly": "Women only"
+    "womenOnly": "Women only",
+    "social": "Facebook or Instagram profile",
+    "socialHint": "Optional. Only people you travel with can see it.",
+    "socialInvalid": "Give a facebook.com or instagram.com link"
   },
   "publish": {
     "departWindow": "Departure time",
@@ -97,7 +101,8 @@
     "repeatApprove": "Accept",
     "repeatDecline": "No",
     "repeatEnd": "End",
-    "repeatWeekFull": "No seat on {{dates}}"
+    "repeatWeekFull": "No seat on {{dates}}",
+    "socialSelfDeclared": "Self-declared — we have not verified it"
   },
   "user": {
     "block": "Block",

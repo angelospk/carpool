@@ -219,3 +219,42 @@ func TestAPassengerHasOneLiveArrangementPerWeekday(t *testing.T) {
 		t.Fatal("a second live arrangement was accepted for the same Tuesday")
 	}
 }
+
+// The link is a place to look someone up, not a redirect the app will follow
+// anywhere. Anything outside the handful of hosts people actually mean is
+// refused at the column, so no handler can forget the check.
+func TestAProfileLinkOnlyPointsWhereItSaysItDoes(t *testing.T) {
+	f := seed(t)
+	ctx := context.Background()
+
+	accepted := []string{
+		"https://facebook.com/giannis.k",
+		"https://www.facebook.com/profile.php?id=1234567890",
+		"https://m.facebook.com/groups/123/posts/456",
+		"https://instagram.com/giannis.k",
+	}
+	for _, link := range accepted {
+		t.Run("accepts "+link, func(t *testing.T) {
+			if _, err := f.pool.Exec(ctx,
+				`UPDATE users SET social_url = $2 WHERE id = $1`, f.passengerID, link); err != nil {
+				t.Fatalf("a real profile link was refused: %v", err)
+			}
+		})
+	}
+
+	refused := map[string]string{
+		"plain http":                             "http://facebook.com/giannis.k",
+		"somewhere else":                         "https://faceb00k.com.evil.example/giannis",
+		"a host merely ending in the right name": "https://evilfacebook.com/giannis",
+		"javascript":                             "javascript:alert(1)",
+		"free text":                              "ο Γιάννης στο facebook",
+	}
+	for name, link := range refused {
+		t.Run("refuses "+name, func(t *testing.T) {
+			if _, err := f.pool.Exec(ctx,
+				`UPDATE users SET social_url = $2 WHERE id = $1`, f.passengerID, link); err == nil {
+				t.Fatalf("the database accepted %q as a profile link", link)
+			}
+		})
+	}
+}

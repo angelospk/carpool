@@ -30,7 +30,8 @@
     "off": "Ανενεργό",
     "offline": "Δεν υπάρχει σύνδεση",
     "on": "Ενεργό",
-    "retry": "Δοκίμασε ξανά"
+    "retry": "Δοκίμασε ξανά",
+    "save": "Αποθήκευση"
   },
   "home": {
     "asDriver": "Οδηγός",
@@ -52,7 +53,10 @@
     "settings": "Ρυθμίσεις",
     "signOut": "Αποσύνδεση",
     "title": "Το προφίλ σου",
-    "womenOnly": "Μόνο γυναίκες"
+    "womenOnly": "Μόνο γυναίκες",
+    "social": "Προφίλ σε Facebook ή Instagram",
+    "socialHint": "Προαιρετικό. Το βλέπουν μόνο όσοι ταξιδεύουν μαζί σου.",
+    "socialInvalid": "Δώσε σύνδεσμο facebook.com ή instagram.com"
   },
   "publish": {
     "departWindow": "Ώρα αναχώρησης",
@@ -97,7 +101,8 @@
     "repeatApprove": "Δέχομαι",
     "repeatDecline": "Όχι",
     "repeatEnd": "Τερματισμός",
-    "repeatWeekFull": "Δεν υπάρχει θέση στις {{dates}}"
+    "repeatWeekFull": "Δεν υπάρχει θέση στις {{dates}}",
+    "socialSelfDeclared": "Δηλωμένο από τον ίδιο — δεν το έχουμε επαληθεύσει"
   },
   "user": {
     "block": "Αποκλεισμός",

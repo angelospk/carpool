@@ -24,6 +24,7 @@ type User struct {
 	HomeRegionID uuid.UUID
 	WomenOnly    bool
 	Status       string
+	SocialURL    *string
 }
 
 // Region is a service area.
@@ -57,9 +58,10 @@ func EnsureUser(ctx context.Context, pool *pgxpool.Pool, phone, name string, reg
 func GetUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (User, error) {
 	var u User
 	err := pool.QueryRow(ctx, `
-		SELECT id, phone, name, photo_url, gender, home_region_id, women_only, status
+		SELECT id, phone, name, photo_url, gender, home_region_id, women_only, status, social_url
 		FROM users WHERE id = $1`, id).Scan(
-		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status)
+		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
+		&u.SocialURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -72,8 +74,12 @@ func GetUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (User, error
 // UserUpdate carries the fields a user may change on their own profile. A nil
 // field is left untouched.
 type UserUpdate struct {
-	Name      *string
-	PhotoURL  *string
+	Name     *string
+	PhotoURL *string
+	// SocialURL follows the same nil-means-untouched rule as the rest, with one
+	// addition: an empty string clears it. A link you can add and never remove
+	// is not a link you would add.
+	SocialURL *string
 	Gender    *string
 	WomenOnly *bool
 	RegionID  *uuid.UUID
@@ -89,11 +95,13 @@ func UpdateUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, up UserUp
 			gender         = COALESCE($4, gender),
 			women_only     = COALESCE($5, women_only),
 			home_region_id = COALESCE($6, home_region_id),
+			social_url     = CASE WHEN $7::text IS NULL THEN social_url ELSE NULLIF($7, '') END,
 			updated_at     = now()
 		WHERE id = $1
-		RETURNING id, phone, name, photo_url, gender, home_region_id, women_only, status`,
-		id, up.Name, up.PhotoURL, up.Gender, up.WomenOnly, up.RegionID).Scan(
-		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status)
+		RETURNING id, phone, name, photo_url, gender, home_region_id, women_only, status, social_url`,
+		id, up.Name, up.PhotoURL, up.Gender, up.WomenOnly, up.RegionID, up.SocialURL).Scan(
+		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
+		&u.SocialURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}

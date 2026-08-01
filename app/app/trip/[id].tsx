@@ -19,6 +19,7 @@ import {
 } from '../../src/components/ui';
 import { RouteGlyph, decodeRoute } from '../../src/components/RouteGlyph';
 import { RepeatCard } from '../../src/components/RepeatCard';
+import { SocialLink } from '../../src/components/SocialLink';
 import { colors, radius, space, type } from '../../src/design/tokens';
 import { athensDay, athensTime } from '../../src/design/format';
 
@@ -134,6 +135,7 @@ export default function TripScreen() {
                         {trip.data.driver.car_model}
                         {trip.data.driver.car_color ? ` · ${trip.data.driver.car_color}` : ''}
                       </Text>
+                      <SocialLink url={trip.data.driver.social_url} />
                     </View>
                     {/* The plate only exists in this payload once a booking is made. */}
                     {trip.data.driver.car_plate ? (

@@ -11,6 +11,7 @@ export type Me = {
   photo_url: string | null;
   home_region_id: string;
   women_only: boolean;
+  social_url: string | null;
 };
 
 export type TripSummary = {
@@ -31,6 +32,8 @@ export type Participant = {
   name: string;
   photo_url: string | null;
   rating: number | null;
+  /** Where they say they can also be found. Self-declared, never verified. */
+  social_url: string | null;
   car_model?: string | null;
   car_color?: string | null;
   car_plate?: string | null;
@@ -95,7 +98,7 @@ export const api = {
     request<void>('/v1/auth/logout', { method: 'POST', body: { refresh_token: refreshToken } }),
 
   me: () => request<Me>('/v1/me'),
-  updateMe: (patch: Partial<Pick<Me, 'name' | 'photo_url' | 'women_only'>>) =>
+  updateMe: (patch: Partial<Pick<Me, 'name' | 'photo_url' | 'women_only' | 'social_url'>>) =>
     request<Me>('/v1/me', { method: 'PATCH', body: patch }),
 
   registerPushToken: (token: string, platform: 'ios' | 'android') =>
