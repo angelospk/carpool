@@ -31,6 +31,13 @@ type Config struct {
 	// trigger re-snapping.
 	OSRMDataVersion string
 
+	// SMS describes the gateway one-time codes are sent through. Empty means
+	// none is configured, which is only tolerable under DevMode.
+	SMSURL      string
+	SMSToken    string
+	SMSSender   string
+	SMSTemplate string
+
 	// DevMode enables developer conveniences that must never be reachable in
 	// production — most importantly printing the OTP to the console instead of
 	// sending an SMS. It defaults to false so production is the safe default.
@@ -44,6 +51,15 @@ func Load(lookup LookupFunc) (Config, error) {
 		OSRMURL:  optional(lookup, "OSRM_URL", "http://localhost:5000"),
 		HTTPAddr: optional(lookup, "HTTP_ADDR", ":8080"),
 		DevMode:  optional(lookup, "DEV_MODE", "false") == "true",
+
+		SMSURL:    optional(lookup, "SMS_URL", ""),
+		SMSToken:  optional(lookup, "SMS_TOKEN", ""),
+		SMSSender: optional(lookup, "SMS_SENDER", ""),
+		// The default body suits the majority of gateways, which take a JSON
+		// POST of sender, recipient and text. One that names its fields
+		// differently is a change of environment variable, not of code.
+		SMSTemplate: optional(lookup, "SMS_TEMPLATE",
+			`{"sender":"{{sender}}","recipient":"{{phone}}","text":"{{message}}"}`),
 
 		RegionFixture:   optional(lookup, "REGION_FIXTURE", ""),
 		OSRMDataVersion: optional(lookup, "OSRM_DATA_VERSION", "unknown"),

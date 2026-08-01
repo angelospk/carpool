@@ -75,13 +75,26 @@ func run() error {
 	// The SMS provider is a deployment choice. Only DEV_MODE may select the
 	// console sender, which prints codes instead of sending them.
 	var sms auth.SMSSender
-	if cfg.DevMode {
+	switch {
+	case cfg.SMSURL != "":
+		gateway, err := auth.NewHTTPSMS(auth.HTTPSMSConfig{
+			URL:      cfg.SMSURL,
+			Token:    cfg.SMSToken,
+			Sender:   cfg.SMSSender,
+			Template: cfg.SMSTemplate,
+		})
+		if err != nil {
+			return fmt.Errorf("sms gateway: %w", err)
+		}
+		sms = gateway
+		slog.Info("sms gateway configured", "url", cfg.SMSURL, "sender", cfg.SMSSender)
+	case cfg.DevMode:
 		slog.Warn("DEV_MODE is enabled: OTP codes are printed to the console and not sent by SMS")
 		sms = auth.ConsoleSender{}
-	} else {
-		// No production SMS provider is wired yet; refusing to boot is safer
-		// than silently starting an instance whose sign-up cannot work.
-		return errors.New("no SMS provider is configured: set DEV_MODE=true for local development")
+	default:
+		// Refusing to boot is safer than silently starting an instance whose
+		// sign-up cannot work.
+		return errors.New("no SMS provider is configured: set SMS_URL, or DEV_MODE=true for local development")
 	}
 
 	clk := clock.Real{}
