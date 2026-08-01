@@ -35,7 +35,20 @@ go run ./cmd/api
 export CARPOOL_TEST_DSN="postgres://carpool:carpool@localhost:5433/postgres?sslmode=disable"
 make check
 
-# the end-to-end scenario against a running stack
+# `go test` caches passing results, so `make check` can print green from a run
+# made when the database was up. After starting the stack, or whenever the
+# result matters, clear the cache first.
+go clean -testcache && make check
+
+# the end-to-end scenario. It drives the real HTTP API, so it needs an API
+# process of its own: its own database, OTP codes on the console instead of by
+# SMS, the regions seeded, and the log where the script reads the codes from.
+psql "postgres://carpool:carpool@localhost:5433/postgres?sslmode=disable" \
+     -c "DROP DATABASE IF EXISTS smoke" -c "CREATE DATABASE smoke"
+DATABASE_URL="postgres://carpool:carpool@localhost:5433/smoke?sslmode=disable" \
+JWT_SECRET="e2e-secret-that-is-long-enough-32b" \
+DEV_MODE=true HTTP_ADDR=":8099" REGION_FIXTURE=fixtures/regions/evros.geojson \
+  go run ./cmd/api > /tmp/api-e2e.log 2>&1 &
 scripts/e2e.sh
 
 # the app
