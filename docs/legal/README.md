@@ -53,6 +53,28 @@ a pilot processing movement data and an optional gender field. It does mean the
 memo cites a law it did not read, so every other authority it names deserves the
 same check before anything is relied on.
 
+## Two of the memo's six questions have been answered from primary sources
+
+Not by a lawyer, and not a substitute for one. But `docs/research/sources.md`
+now records what the actual insurance policies and the actual gazette say, with
+the checked claims separated from the reported ones.
+
+The short version, because one of them changes the product:
+
+**Question 1 (cost sharing vs reward): there is no statute.** No Greek act
+authorises or licences carpooling, and ν. 4530/2018 is about taxis. The price
+ceiling in this app is a product decision, not compliance with a rule, and it is
+the thing that keeps the arrangement out of "paid transport".
+
+**Question 2 (insurance): the premise was wrong, and Terms §6 has changed.** Five
+insurers' general terms were read; none excludes a cost-sharing passenger. They
+exclude *use other than the declared use*, which is a right of recourse against
+the driver rather than a refusal to pay the injured party, and three of the five
+require a causal link to the accident. §6 previously told drivers to check
+whether carpooling "falls under an exclusion", which overstates it and frightens
+people away from a use their policy does not name. It now says what the policies
+actually say.
+
 ## What was asked for and did not come back
 
 The brief asked for a short legal memo on six questions. Only the two documents

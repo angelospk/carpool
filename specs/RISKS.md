@@ -263,6 +263,18 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
     "Pricing that nobody can tilt"; the trigger to build it is the first
     complaint that a price looked too high.
 
+    Both data sources for that fix have now been found and checked, in
+    `docs/research/sources.md`: EEA registration data carries a real consumption
+    field but only from 2021 registrations onward, and the fuel bulletins are
+    parseable PDFs rather than a feed. Neither is a blocker any more; the
+    remaining question is the old Greek fleet the EEA table does not cover.
+
+    Raised in priority by the insurance finding. The ceiling is not only a
+    fairness feature. A driver whose contribution stays at cost is a driver whose
+    car is still in private use, which is the whole of their answer if an insurer
+    ever argues otherwise. A driver-typed consumption of 14 is that argument
+    breaking.
+
 ## Deferred tech (parked, with triggers to revisit)
 
 | Deferred | Revisit when |
