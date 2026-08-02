@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"carpool/internal/store"
 	"carpool/internal/store/testdb"
@@ -130,5 +131,49 @@ func TestSeedRegionsUpdatesTheFuelPriceOnReseed(t *testing.T) {
 	}
 	if price != 1.950 {
 		t.Fatalf("fuel_price_eur = %v, want 1.950", price)
+	}
+}
+
+// One number per region, edited by hand, wrong for everybody at once when it
+// goes stale — and until now nothing recorded when it was last touched.
+//
+// The subtlety worth a test: a reseed that reasserts the same price has not
+// refreshed anything. Stamping it anyway would make a six-month-old figure look
+// current, which is worse than having no timestamp at all.
+func TestTheFuelPriceTimestampMovesOnlyWhenThePriceDoes(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.Fresh(t)
+	if err := store.Migrate(ctx, pool); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	stamp := func() time.Time {
+		t.Helper()
+		var at time.Time
+		if err := pool.QueryRow(ctx,
+			`SELECT fuel_price_updated_at FROM regions WHERE name = 'Έβρος'`).Scan(&at); err != nil {
+			t.Fatalf("reading the stamp: %v", err)
+		}
+		return at
+	}
+
+	if err := store.SeedRegionsFromFile(ctx, pool, fixturePath(t), 1.800); err != nil {
+		t.Fatalf("SeedRegions: %v", err)
+	}
+	first := stamp()
+
+	if err := store.SeedRegionsFromFile(ctx, pool, fixturePath(t), 1.800); err != nil {
+		t.Fatalf("reseeding the same price: %v", err)
+	}
+	if again := stamp(); !again.Equal(first) {
+		t.Errorf("reasserting the same price moved the stamp %v -> %v, so a stale figure now looks fresh",
+			first, again)
+	}
+
+	if err := store.SeedRegionsFromFile(ctx, pool, fixturePath(t), 1.905); err != nil {
+		t.Fatalf("reseeding a new price: %v", err)
+	}
+	if moved := stamp(); !moved.After(first) {
+		t.Errorf("the price changed but the stamp stayed at %v", moved)
 	}
 }

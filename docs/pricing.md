@@ -184,6 +184,25 @@ An unknown make returns an empty list rather than a 404, because the app's next
 move is to ask for the CO2 figure, not to tell the driver their car does not
 exist.
 
+### The receipt
+
+Every price is stored with a `pricing_basis` — a jsonb record of every input the
+formula used, plus the unrounded cost and the answer. It rides from the ask to
+the booking, and through a standing arrangement to each week it generates.
+
+It exists because a booking used to store only `price_eur`, and every input
+lives somewhere that changes: the driver swaps cars, the vehicle dataset is
+refreshed, the region's fuel price is edited, the route is re-snapped. "Why did
+I pay €3.50 in March" was unanswerable, and any answer given a year later would
+have been a reconstruction rather than a record.
+
+It carries a `v`. Bump `domain.BasisVersion` whenever the arithmetic changes,
+or a basis written before the change replays through the new formula, disagrees
+with the price beside it, and looks exactly like a bug.
+
+Rows that predate this carry a null basis. Filling them with today's inputs
+would turn a gap into a plausible fiction, so they stay null.
+
 ## Why not just ask, or search
 
 Two options that keep coming up, and why neither is here.
@@ -220,16 +239,13 @@ and the flat 7.0. They are deliberately not re-priced, because changing a
 number without changing what the driver told us would be inventing data.
 Re-assessing them is a person's job.
 
-**Fuel price is the mirror problem.** `regions.fuel_price_eur` is one number per
-region, updated by hand, and when it goes stale it is wrong for everybody at
-once. The source is the ministry's daily bulletins; `docs/research/sources.md`
-has the licence question that gates it, which is not settled and must be
-settled in writing before any derived dataset ships.
-
-**Historical prices need a snapshot, not a lookup.** Prices freeze into
-bookings, so a dataset refresh that moves a model's consumption must not change
-what an old booking meant. The figure and its source belong on the booking, not
-only on the profile.
+**Fuel price is still one number per region, updated by hand.** It now carries
+`fuel_price_updated_at`, stamped only when the figure actually moves, so a stale
+price is at least visible rather than silent. Automating it is gated on a
+licence question in `docs/research/sources.md` — though see the note there:
+ν. 4727/2020 makes public sector data open by default and requires exclusions to
+be specifically justified, so the position is stronger than a reading of the
+site's terms alone suggests.
 
 **Never print the word κόμιστρο.** In any language, in any surface a user can
 see, and not a synonym either. MOBILE.md already requires "προτεινόμενη

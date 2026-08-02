@@ -120,8 +120,9 @@ func (s *Service) Repeat(ctx context.Context, bookingID, passengerID uuid.UUID) 
 	err = tx.QueryRow(ctx, `
 		INSERT INTO standing_arrangements
 		(template_id, passenger_id, weekday, seats, pickup_point, dropoff_point,
-		 price_eur, until_date, source_booking_id)
-		SELECT $1, $2, $3, b.seats, b.pickup_point, b.dropoff_point, b.price_eur, $4::date, b.id
+		 price_eur, pricing_basis, until_date, source_booking_id)
+		SELECT $1, $2, $3, b.seats, b.pickup_point, b.dropoff_point, b.price_eur,
+		       b.pricing_basis, $4::date, b.id
 		FROM bookings b WHERE b.id = $5
 		ON CONFLICT (template_id, passenger_id, weekday)
 		WHERE status IN ('pending','active') DO NOTHING
@@ -263,8 +264,10 @@ func (s *Service) Approve(ctx context.Context, arrangementID, driverID uuid.UUID
 
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO bookings
-			(occurrence_id, passenger_id, arrangement_id, seats, price_eur, pickup_point, dropoff_point)
-			SELECT $1, a.passenger_id, a.id, a.seats, a.price_eur, a.pickup_point, a.dropoff_point
+			(occurrence_id, passenger_id, arrangement_id, seats, price_eur, pricing_basis,
+			 pickup_point, dropoff_point)
+			SELECT $1, a.passenger_id, a.id, a.seats, a.price_eur, a.pricing_basis,
+			       a.pickup_point, a.dropoff_point
 			FROM standing_arrangements a WHERE a.id = $2`, wk.id, arrangementID); err != nil {
 			return fmt.Errorf("standing: booking a week: %w", err)
 		}

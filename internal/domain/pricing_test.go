@@ -264,3 +264,73 @@ func TestATollSurvivesATripOfferingNoSeats(t *testing.T) {
 		t.Fatalf("SuggestedPriceCents = %d cents, want 275", got)
 	}
 }
+
+// The receipt has to contain enough to reproduce the price without consulting
+// anything that can change. Every input to the formula, plus the answer.
+func TestThePricingBasisRecordsEveryInputToTheFormula(t *testing.T) {
+	in := baseline()
+	in.TripKm = 100
+	in.OfferedSeats = 3
+	in.FuelConsumptionLPer100Km = 4.1
+	in.ConsumptionSource = "dataset"
+	in.TollShareCents = 275
+
+	cents, basis := SuggestedPrice(in)
+
+	if basis.SeatPriceCents != cents {
+		t.Errorf("basis says %d cents, the function returned %d", basis.SeatPriceCents, cents)
+	}
+	for what, got := range map[string]float64{
+		"trip_km":     basis.TripKm,
+		"consumption": basis.ConsumptionLPer100Km,
+		"fuel_price":  basis.FuelPriceEUR,
+		"wear_factor": basis.WearFactor,
+	} {
+		if got == 0 {
+			t.Errorf("the basis left %s empty, so the price cannot be reproduced from it", what)
+		}
+	}
+	if basis.OfferedSeats != 3 {
+		t.Errorf("basis offered_seats = %d, want 3", basis.OfferedSeats)
+	}
+	if basis.ConsumptionSource != "dataset" {
+		t.Errorf("basis consumption_source = %q, want dataset", basis.ConsumptionSource)
+	}
+	if basis.TollShareCents != 275 {
+		t.Errorf("basis toll_share_cents = %d, want 275", basis.TollShareCents)
+	}
+	if basis.Version == 0 {
+		t.Error("the basis carries no formula version, so a later change to the formula is invisible")
+	}
+}
+
+// The point of a receipt is that it still adds up later. Recomputing from the
+// recorded numbers alone must land on the recorded price.
+func TestAPriceCanBeRecomputedFromItsBasisAlone(t *testing.T) {
+	for _, seats := range []int{1, 2, 4} {
+		in := baseline()
+		in.TripKm = 137.5
+		in.OfferedSeats = seats
+		in.FuelConsumptionLPer100Km = 6.3
+		in.FuelPriceEUR = 1.734
+		in.TollShareCents = 120
+
+		want, basis := SuggestedPrice(in)
+
+		// Nothing here reads `in`: this is what a person with only the stored
+		// row would be able to do.
+		replay := PricingInputs{
+			TripKm:                   basis.TripKm,
+			FuelConsumptionLPer100Km: basis.ConsumptionLPer100Km,
+			FuelPriceEUR:             basis.FuelPriceEUR,
+			WearFactor:               basis.WearFactor,
+			OfferedSeats:             basis.OfferedSeats,
+			TollShareCents:           basis.TollShareCents,
+			Mode:                     PricingFormula,
+		}
+		if got := SuggestedPriceCents(replay); got != want {
+			t.Errorf("%d seats: replaying the basis gave %d cents, the booking says %d",
+				seats, got, want)
+		}
+	}
+}

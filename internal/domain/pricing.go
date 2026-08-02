@@ -34,6 +34,12 @@ type PricingInputs struct {
 
 	Mode PricingMode
 
+	// ConsumptionSource names where FuelConsumptionLPer100Km came from — a
+	// dataset match, the CO2 on the car's registration document, or a floor for
+	// its class. It changes nothing about the arithmetic and everything about
+	// how firm the answer is, so it travels with it. See internal/vehicles.
+	ConsumptionSource string
+
 	// TollShareCents is this passenger's share of the motorway barriers they
 	// will actually be in the car for, already divided among the people aboard
 	// at each one — see internal/tolls. Zero when the route passes none.
@@ -77,6 +83,66 @@ type PricingInputs struct {
 //
 // This is a suggestion shown to both sides, never an enforced fare.
 func SuggestedPriceCents(in PricingInputs) int {
+	cents, _ := SuggestedPrice(in)
+	return cents
+}
+
+// BasisVersion identifies the formula a recorded price was produced by.
+//
+// Bump it whenever the arithmetic changes. Without it, a basis from before a
+// change replays through the new formula and disagrees with the price sitting
+// next to it, and there is no way to tell that from a bug.
+const BasisVersion = 1
+
+// Basis is the receipt: every input the formula used, plus what it produced.
+//
+// It is stored as jsonb next to the price so that a booking stays explicable
+// after the driver changes car, the vehicle dataset is refreshed and the
+// region's fuel price is edited — all of which will happen, and none of which
+// should change what somebody paid in March.
+type Basis struct {
+	Version int `json:"v"`
+
+	ConsumptionLPer100Km float64 `json:"consumption_l_100km"`
+	ConsumptionSource    string  `json:"consumption_source,omitempty"`
+	FuelPriceEUR         float64 `json:"fuel_price_eur"`
+	TripKm               float64 `json:"trip_km"`
+	WearFactor           float64 `json:"wear_factor"`
+	OfferedSeats         int     `json:"offered_seats"`
+	FreeBelowKm          float64 `json:"free_below_km"`
+	TollShareCents       int     `json:"toll_share_cents"`
+	Mode                 string  `json:"mode"`
+
+	// CostEUR is the whole trip before it was divided or rounded. It is the
+	// number the no-profit argument is about, and reading it back should not
+	// require redoing the multiplication.
+	CostEUR float64 `json:"cost_eur"`
+	// SeatPriceCents is what was actually asked, tolls included.
+	SeatPriceCents int `json:"seat_price_cents"`
+}
+
+// SuggestedPrice computes the contribution and the receipt for it together, so
+// that the two cannot drift: there is one multiplication, and the record is
+// made of the same values that produced the answer.
+func SuggestedPrice(in PricingInputs) (int, Basis) {
+	basis := Basis{
+		Version:              BasisVersion,
+		ConsumptionLPer100Km: in.FuelConsumptionLPer100Km,
+		ConsumptionSource:    in.ConsumptionSource,
+		FuelPriceEUR:         in.FuelPriceEUR,
+		TripKm:               in.TripKm,
+		WearFactor:           in.WearFactor,
+		OfferedSeats:         in.OfferedSeats,
+		FreeBelowKm:          in.FreeBelowKm,
+		TollShareCents:       in.TollShareCents,
+		Mode:                 string(in.Mode),
+	}
+	cents := suggest(in, &basis)
+	basis.SeatPriceCents = cents
+	return cents, basis
+}
+
+func suggest(in PricingInputs, basis *Basis) int {
 	if in.Mode != PricingFormula {
 		return 0
 	}
@@ -97,6 +163,7 @@ func SuggestedPriceCents(in PricingInputs) int {
 	}
 
 	cost := in.FuelConsumptionLPer100Km / 100 * in.FuelPriceEUR * in.TripKm * in.WearFactor
+	basis.CostEUR = cost
 	shares := float64(in.OfferedSeats + 1) // every published seat, + the driver
 	perPax := cost / shares
 

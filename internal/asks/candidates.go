@@ -83,7 +83,7 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 	for _, cand := range match.Rank(scored) {
 		c := byID[cand.ID]
 
-		insertion, price, err := s.evaluate(ctx, c, req)
+		insertion, price, basis, err := s.evaluate(ctx, c, req)
 		if errors.Is(err, match.ErrPartyCapReached) || errors.Is(err, geo.ErrNoRoute) {
 			continue // this occurrence cannot take them; try the next
 		}
@@ -94,7 +94,7 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 			continue
 		}
 
-		askID, err := s.createAsk(ctx, req, c, insertion, price)
+		askID, err := s.createAsk(ctx, req, c, insertion, price, basis)
 		if errors.Is(err, errAskExists) {
 			continue // raced with another worker; move on
 		}
@@ -166,20 +166,20 @@ func (s *Service) alreadyAsked(ctx context.Context, requestID uuid.UUID) (map[uu
 
 // evaluate runs the fine stage for one candidate: snap the stops, find the best
 // insertion, and price it.
-func (s *Service) evaluate(ctx context.Context, c match.Candidate, req request) (match.Insertion, int, error) {
+func (s *Service) evaluate(ctx context.Context, c match.Candidate, req request) (match.Insertion, int, domain.Basis, error) {
 	itin, err := s.itinerary(ctx, c.OccurrenceID)
 	if err != nil {
-		return match.Insertion{}, 0, err
+		return match.Insertion{}, 0, domain.Basis{}, err
 	}
 
 	insertion, err := match.BestInsertion(ctx, s.router, itin, req.Origin, req.Destination)
 	if err != nil {
-		return match.Insertion{}, 0, err
+		return match.Insertion{}, 0, domain.Basis{}, err
 	}
 
 	pricing, err := s.pricingInputs(ctx, c.OccurrenceID, req.RequestKm)
 	if err != nil {
-		return match.Insertion{}, 0, err
+		return match.Insertion{}, 0, domain.Basis{}, err
 	}
 
 	// What this passenger owes for barriers is not proportional to anything —
@@ -187,10 +187,12 @@ func (s *Service) evaluate(ctx context.Context, c match.Candidate, req request) 
 	// after the last toll plaza owes nothing towards it.
 	share, err := s.tollShare(ctx, c.OccurrenceID, req)
 	if err != nil {
-		return match.Insertion{}, 0, err
+		return match.Insertion{}, 0, domain.Basis{}, err
 	}
 	pricing.TollShareCents = share
-	return insertion, domain.SuggestedPriceCents(pricing), nil
+
+	cents, basis := domain.SuggestedPrice(pricing)
+	return insertion, cents, basis, nil
 }
 
 // itinerary builds the driver's current plan: their endpoints plus the stops of
@@ -238,7 +240,7 @@ func (s *Service) pricingInputs(ctx context.Context, occurrenceID uuid.UUID, tri
 
 	var mode string
 	err := s.pool.QueryRow(ctx, `
-		SELECT d.fuel_consumption_l_100km, d.wear_factor, d.free_below_km,
+		SELECT d.fuel_consumption_l_100km, d.consumption_source, d.wear_factor, d.free_below_km,
 		       r.fuel_price_eur, o.pricing_mode, o.seats_total
 		FROM trip_occurrences o
 		JOIN route_templates t ON t.id = o.template_id
@@ -246,7 +248,7 @@ func (s *Service) pricingInputs(ctx context.Context, occurrenceID uuid.UUID, tri
 		JOIN users u          ON u.id = t.driver_id
 		JOIN regions r        ON r.id = u.home_region_id
 		WHERE o.id = $1`, occurrenceID).Scan(
-		&in.FuelConsumptionLPer100Km, &in.WearFactor, &in.FreeBelowKm,
+		&in.FuelConsumptionLPer100Km, &in.ConsumptionSource, &in.WearFactor, &in.FreeBelowKm,
 		&in.FuelPriceEUR, &mode, &in.OfferedSeats)
 	if err != nil {
 		return domain.PricingInputs{}, fmt.Errorf("asks: loading pricing inputs: %w", err)
@@ -347,8 +349,15 @@ var errAskExists = errors.New("asks: an ask already exists")
 // createAsk writes the ask and queues the driver's push, in one transaction.
 func (s *Service) createAsk(
 	ctx context.Context, req request, c match.Candidate,
-	insertion match.Insertion, priceCents int,
+	insertion match.Insertion, priceCents int, basis domain.Basis,
 ) (uuid.UUID, error) {
+	// Marshalled here rather than in the SQL so that a basis that cannot be
+	// encoded fails loudly instead of storing a null next to a real price.
+	encoded, err := json.Marshal(basis)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("asks: encoding the pricing basis: %w", err)
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("asks: begin: %w", err)
@@ -373,16 +382,16 @@ func (s *Service) createAsk(
 	var askID uuid.UUID
 	err = tx.QueryRow(ctx, `
 		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km,
-		                  pickup_point, dropoff_point, suggested_price_eur,
+		                  pickup_point, dropoff_point, suggested_price_eur, pricing_basis,
 		                  itinerary_version, expires_at)
 		VALUES ($1, $2, $3, $4,
 		        ST_SetSRID(ST_MakePoint($5, $6), 4326),
 		        ST_SetSRID(ST_MakePoint($7, $8), 4326),
-		        $9, $10, $11)
+		        $9, $10, $11, $12)
 		RETURNING id`,
 		req.ID, c.OccurrenceID, insertion.DetourMin, insertion.DetourKm,
 		pickup.Lon, pickup.Lat, dropoff.Lon, dropoff.Lat,
-		float64(priceCents)/100, c.ItineraryVersion, s.clock.Now().Add(DefaultTTL)).Scan(&askID)
+		float64(priceCents)/100, encoded, c.ItineraryVersion, s.clock.Now().Add(DefaultTTL)).Scan(&askID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return uuid.Nil, errAskExists

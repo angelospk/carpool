@@ -60,6 +60,13 @@ func SeedRegionsFromFile(ctx context.Context, pool *pgxpool.Pool, path string, f
 			ON CONFLICT (name) DO UPDATE
 			SET boundary       = EXCLUDED.boundary,
 			    fuel_price_eur = EXCLUDED.fuel_price_eur,
+			    -- Only when the figure actually moves. A reseed that reasserts
+			    -- the same price has not made it any fresher, and stamping it
+			    -- anyway would hide exactly the staleness the column exists to
+			    -- show.
+			    fuel_price_updated_at = CASE
+			        WHEN regions.fuel_price_eur IS DISTINCT FROM EXCLUDED.fuel_price_eur
+			        THEN now() ELSE regions.fuel_price_updated_at END,
 			    updated_at     = now()`,
 			f.Properties.Name, string(f.Geometry), fuelPriceEUR)
 		if err != nil {

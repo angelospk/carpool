@@ -2,6 +2,7 @@ package asks_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"carpool/internal/asks"
+	"carpool/internal/domain"
 	"carpool/internal/geo"
 )
 
@@ -442,3 +444,94 @@ func TestTheSuggestedPriceIsDividedByTheSeatsTheTripPublishes(t *testing.T) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// The receipt, checked where it actually matters: on a real booking, against a
+// real database, recomputed from nothing but the stored row.
+//
+// Every input to the price lives somewhere that changes — the driver's car, the
+// vehicle dataset, the region's fuel price, the route. Six months from now this
+// row is the only thing that can answer "why did I pay that", and a basis that
+// does not add up is worse than none, because it looks like an answer.
+func TestABookingCarriesAReceiptThatStillAddsUp(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+
+	// A long trip on purpose. The fixture's default hop is 13 km, which after
+	// the free-below waiver and the 50-cent floor prices at zero, and a receipt
+	// that reproduces zero reproduces nothing.
+	const long = "LINESTRING(25.00 40.85, 27.00 40.85)"
+	mustExec(t, f, `UPDATE route_templates SET
+		origin = ST_SetSRID(ST_MakePoint(25.00, 40.85), 4326),
+		destination = ST_SetSRID(ST_MakePoint(27.00, 40.85), 4326),
+		route_geom = ST_GeomFromText('`+long+`', 4326), route_km = 168`)
+	mustExec(t, f, `UPDATE trip_occurrences SET
+		route_geom = ST_GeomFromText('`+long+`', 4326), route_km = 168`)
+	mustExec(t, f, `UPDATE ride_requests SET status = 'open',
+		origin = ST_SetSRID(ST_MakePoint(25.10, 40.85), 4326),
+		destination = ST_SetSRID(ST_MakePoint(26.90, 40.85), 4326)`)
+	mustExec(t, f, `DELETE FROM asks`) // the fixture seeds one; AskNext must be free to pick
+	askID, err := f.matcher().AskNext(ctx, f.requestID)
+	if err != nil {
+		t.Fatalf("AskNext: %v", err)
+	}
+	bookingID, err := f.service().Accept(ctx, askID, f.driverID)
+	if err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+
+	var price float64
+	var raw []byte
+	must(t, f.pool.QueryRow(ctx,
+		`SELECT price_eur, pricing_basis FROM bookings WHERE id = $1`,
+		bookingID).Scan(&price, &raw), "booking")
+
+	if len(raw) == 0 {
+		t.Fatal("the booking carries no pricing basis, so the price is unexplainable")
+	}
+	var basis domain.Basis
+	if err := json.Unmarshal(raw, &basis); err != nil {
+		t.Fatalf("decoding the stored basis: %v", err)
+	}
+
+	if basis.Version != domain.BasisVersion {
+		t.Errorf("basis version %d, want %d", basis.Version, domain.BasisVersion)
+	}
+	if basis.ConsumptionSource == "" {
+		t.Error("the basis does not say where the consumption came from")
+	}
+	if basis.OfferedSeats == 0 || basis.TripKm == 0 || basis.FuelPriceEUR == 0 {
+		t.Fatalf("the basis is missing inputs and cannot be replayed: %+v", basis)
+	}
+	if price <= 0 {
+		t.Fatalf("this trip priced at %v, so replaying it proves nothing", price)
+	}
+
+	// Checked against the database rather than against the basis's own
+	// arithmetic: a divisor that is recorded wrong but consistently wrong would
+	// replay perfectly and still misdescribe the booking.
+	var seatsTotal int
+	must(t, f.pool.QueryRow(ctx,
+		`SELECT o.seats_total FROM trip_occurrences o
+		 JOIN bookings b ON b.occurrence_id = o.id WHERE b.id = $1`,
+		bookingID).Scan(&seatsTotal), "seats")
+	if basis.OfferedSeats != seatsTotal {
+		t.Errorf("the receipt says the cost was split over %d seats; the trip published %d",
+			basis.OfferedSeats, seatsTotal)
+	}
+
+	// Nothing below reads the fixture. This is what somebody holding only the
+	// stored row could do.
+	replayed := domain.SuggestedPriceCents(domain.PricingInputs{
+		TripKm:                   basis.TripKm,
+		FuelConsumptionLPer100Km: basis.ConsumptionLPer100Km,
+		FuelPriceEUR:             basis.FuelPriceEUR,
+		WearFactor:               basis.WearFactor,
+		FreeBelowKm:              basis.FreeBelowKm,
+		OfferedSeats:             basis.OfferedSeats,
+		TollShareCents:           basis.TollShareCents,
+		Mode:                     domain.PricingMode(basis.Mode),
+	})
+	if want := int(price*100 + 0.5); replayed != want {
+		t.Errorf("replaying the receipt gave %d cents, the booking says %d", replayed, want)
+	}
+}

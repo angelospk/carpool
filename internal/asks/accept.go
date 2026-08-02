@@ -223,9 +223,9 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	var bookingID uuid.UUID
 	err = tx.QueryRow(ctx, `
 		INSERT INTO bookings (occurrence_id, request_id, passenger_id, ask_id, seats, price_eur,
-		                      pickup_point, dropoff_point)
+		                      pricing_basis, pickup_point, dropoff_point)
 		SELECT a.occurrence_id, a.request_id, $2, a.id, $3, a.suggested_price_eur,
-		       a.pickup_point, a.dropoff_point
+		       a.pricing_basis, a.pickup_point, a.dropoff_point
 		FROM asks a WHERE a.id = $1
 		RETURNING id`, askID, passengerID, seats).Scan(&bookingID)
 	if err != nil {
