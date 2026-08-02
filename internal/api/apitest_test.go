@@ -18,6 +18,7 @@ import (
 	"carpool/internal/auth"
 	"carpool/internal/bookings"
 	"carpool/internal/clock"
+	"carpool/internal/drivers"
 	"carpool/internal/invites"
 	"carpool/internal/standing"
 	"carpool/internal/store"
@@ -72,6 +73,7 @@ func newHarness(t *testing.T) *harness {
 		Bookings: bookings.NewService(pool, c),
 		Invites:  invites.NewService(pool, c, false),
 		Account:  account.NewService(pool, c),
+		Drivers:  drivers.NewService(pool, c),
 	})
 
 	return &harness{t: t, router: router, pool: pool, clock: c, sms: sms, regionID: regionID}

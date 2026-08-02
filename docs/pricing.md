@@ -167,6 +167,23 @@ defaulted to a flat **7.0**, and a small petrol car drinks about 5.6. Every one
 of them was quoting a quarter more than it burnt, silently, by default. There is
 no neutral default; there is only a default that errs one way or the other.
 
+### How a driver gets a profile at all
+
+`PUT /v1/me/driver`, which is new: before it there was no way to become a driver
+through the API, and `scripts/e2e.sh` inserted the row with psql.
+
+The body carries make, model, fuel, displacement, the V.7 CO2 if the document
+has one, plus colour and plate. There is no field for consumption, and the JSON
+decoder rejects unknown fields, so a client that sends one gets a 400 rather
+than being quietly ignored. That distinction matters: silently discarding the
+field is a bug waiting for somebody to re-add it without knowing what it was
+for.
+
+`GET /v1/vehicles/makes` and `/v1/vehicles/models?make=X` back the picker.
+An unknown make returns an empty list rather than a 404, because the app's next
+move is to ask for the CO2 figure, not to tell the driver their car does not
+exist.
+
 ## Why not just ask, or search
 
 Two options that keep coming up, and why neither is here.
@@ -191,14 +208,17 @@ type the CO2 figure rather than upload the document.
 
 ## What is still open
 
-**The API is not wired to any of this.** `driver_profiles.fuel_consumption_l_100km`
-still holds a typed number. Making it server-set from `vehicles.Assess`, and
-rejecting the field on the way in, is the next change.
+**An unverified car does not yet price differently from a verified one.**
+`consumption_source` and `Assessment.Verified()` record the difference and the
+figure is already lower for an unverified car, but nothing refuses anything on
+that basis. The open question is whether a `band` profile should also be capped
+or barred from publishing until reviewed.
 
-**An unverified car should not price like a verified one.** `Assessment.Verified()`
-distinguishes them and nothing consumes it yet. The intended rule is that a
-`SourceBand` figure under-charges and a manual review raises it — corrections go
-upward, so no wrong price ever needs refunding.
+**The profiles that predate all this are marked, not fixed.** Every driver
+profile created before migration 00009 carries `consumption_source = 'legacy'`
+and the flat 7.0. They are deliberately not re-priced, because changing a
+number without changing what the driver told us would be inventing data.
+Re-assessing them is a person's job.
 
 **Fuel price is the mirror problem.** `regions.fuel_price_eur` is one number per
 region, updated by hand, and when it goes stale it is wrong for everybody at

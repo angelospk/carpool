@@ -24,6 +24,7 @@ import (
 	"carpool/internal/clock"
 	"carpool/internal/config"
 	"carpool/internal/dispatch"
+	"carpool/internal/drivers"
 	"carpool/internal/geo"
 	"carpool/internal/invites"
 	"carpool/internal/jobs"
@@ -148,6 +149,7 @@ func run() error {
 		Bookings: bookings.NewService(pool, clk),
 		Invites:  invites.NewService(pool, clk, cfg.InviteOnly),
 		Account:  account.NewService(pool, clk),
+		Drivers:  drivers.NewService(pool, clk),
 
 		Router:          router,
 		Materializer:    materializer,

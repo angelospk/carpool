@@ -15,6 +15,7 @@ import (
 	"carpool/internal/auth"
 	"carpool/internal/bookings"
 	"carpool/internal/clock"
+	"carpool/internal/drivers"
 	"carpool/internal/geo"
 	"carpool/internal/invites"
 	"carpool/internal/jobs"
@@ -47,6 +48,9 @@ type Deps struct {
 	Invites *invites.Service
 	// Account answers the two requests a person can make about their own data.
 	Account *account.Service
+	// Drivers records a driver's car, and works out what it drinks so that the
+	// driver does not get to say.
+	Drivers *drivers.Service
 
 	// Router snaps published routes to the road network.
 	Router *geo.OSRM
@@ -105,6 +109,15 @@ func NewRouter(deps Deps) http.Handler {
 				r.Delete("/me", deps.handleDeleteMe)
 			}
 			r.Put("/me/push-token", deps.handlePutPushToken)
+
+			// Guarded on its own collaborator: without it there is no way to
+			// become a driver at all, and a nil dereference would be a panic
+			// rather than an honest 404.
+			if deps.Drivers != nil {
+				r.Put("/me/driver", deps.handlePutDriver)
+				r.Get("/vehicles/makes", deps.handleListVehicleMakes)
+				r.Get("/vehicles/models", deps.handleListVehicleModels)
+			}
 
 			if deps.Router != nil {
 				r.Post("/routes", deps.handleCreateRoute)
