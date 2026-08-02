@@ -93,3 +93,49 @@ func TestARequestWithoutAnOriginGetsNoCORSHeaders(t *testing.T) {
 		t.Errorf("Access-Control-Allow-Origin = %q with no Origin sent", got)
 	}
 }
+
+// Signing in on a device you are not holding is the whole problem with testing
+// this app: DEV_MODE prints the code to the API's log, and somebody on a laptop
+// across the room cannot read that log.
+//
+// So in DEV_MODE the code comes back in the response. It is the real code from
+// the real generator, with the real expiry and the real rate limit, which is
+// the point — a fixed 0000 would test a path production never runs.
+func TestDevModeReturnsTheOTPSoATesterCanSeeIt(t *testing.T) {
+	h := newDevHarness(t)
+
+	res := h.do(http.MethodPost, "/v1/auth/otp/request", map[string]any{"phone": "+306900000055"}, "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("POST otp/request = %d, want 200 with the code: %s", res.Code, res.Body)
+	}
+	var got struct {
+		DevCode string `json:"dev_code"`
+	}
+	h.decode(res, &got)
+	if len(got.DevCode) != 6 {
+		t.Fatalf("dev_code = %q, want six digits", got.DevCode)
+	}
+
+	// And it must actually work, or it is worse than no help at all.
+	verify := h.do(http.MethodPost, "/v1/auth/otp/verify", map[string]any{
+		"phone": "+306900000055", "code": got.DevCode,
+		"name": "Δοκιμή", "region_id": h.regionID.String(),
+	}, "")
+	if verify.Code != http.StatusOK {
+		t.Fatalf("the returned code did not verify: %d %s", verify.Code, verify.Body)
+	}
+}
+
+// Without DEV_MODE the code must never leave the server, or anybody who knows a
+// phone number owns that account.
+func TestTheOTPIsNeverReturnedWithoutDevMode(t *testing.T) {
+	h := newHarness(t)
+
+	res := h.do(http.MethodPost, "/v1/auth/otp/request", map[string]any{"phone": "+306900000056"}, "")
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("POST otp/request = %d, want 204 and an empty body", res.Code)
+	}
+	if body := res.Body.String(); body != "" {
+		t.Fatalf("the response carried a body: %s", body)
+	}
+}

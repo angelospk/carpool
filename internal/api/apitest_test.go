@@ -37,7 +37,14 @@ type harness struct {
 	regionID uuid.UUID
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T) *harness { return newHarnessWith(t, false) }
+
+// newDevHarness builds the router as `DEV_MODE=true` does, which relaxes two
+// things that must stay strict elsewhere: the browser may call across origins,
+// and the OTP comes back in the response.
+func newDevHarness(t *testing.T) *harness { return newHarnessWith(t, true) }
+
+func newHarnessWith(t *testing.T, devMode bool) *harness {
 	t.Helper()
 	ctx := context.Background()
 
@@ -62,6 +69,7 @@ func newHarness(t *testing.T) *harness {
 	issuer := auth.NewTokenIssuer(testSecret, c)
 
 	router := api.NewRouter(api.Deps{
+		DevMode:  devMode,
 		Ready:    pool.Ping,
 		Pool:     pool,
 		Clock:    c,

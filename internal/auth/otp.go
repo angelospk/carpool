@@ -59,9 +59,12 @@ func NewOTPService(pool *pgxpool.Pool, c clock.Clock, sms SMSSender) *OTPService
 //
 // Any previous live code for the number is consumed first, so a resend
 // invalidates its predecessor and the partial unique index stays satisfied.
-func (s *OTPService) Request(ctx context.Context, phone string) error {
+// Request issues a code and sends it. It returns the code so that a caller
+// running in DEV_MODE can show it to whoever is testing; every other caller
+// must discard it, and the HTTP layer is where that rule is enforced.
+func (s *OTPService) Request(ctx context.Context, phone string) (string, error) {
 	if !e164.MatchString(phone) {
-		return fmt.Errorf("auth: phone must be E.164, got %q", phone)
+		return "", fmt.Errorf("auth: phone must be E.164, got %q", phone)
 	}
 	now := s.clock.Now()
 
@@ -70,44 +73,44 @@ func (s *OTPService) Request(ctx context.Context, phone string) error {
 		`SELECT count(*) FROM otp_codes WHERE phone = $1 AND created_at > $2`,
 		phone, now.Add(-OTPRateWindow)).Scan(&recent)
 	if err != nil {
-		return fmt.Errorf("auth: counting recent codes: %w", err)
+		return "", fmt.Errorf("auth: counting recent codes: %w", err)
 	}
 	if recent >= OTPMaxPerWindow {
-		return ErrRateLimited
+		return "", ErrRateLimited
 	}
 
 	code, err := newCode()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("auth: begin: %w", err)
+		return "", fmt.Errorf("auth: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx,
 		`UPDATE otp_codes SET consumed_at = $2 WHERE phone = $1 AND consumed_at IS NULL`,
 		phone, now); err != nil {
-		return fmt.Errorf("auth: superseding previous code: %w", err)
+		return "", fmt.Errorf("auth: superseding previous code: %w", err)
 	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO otp_codes (phone, code_hash, expires_at, created_at)
 		 VALUES ($1, $2, $3, $4)`,
 		phone, hashCode(phone, code), now.Add(OTPTTL), now); err != nil {
-		return fmt.Errorf("auth: storing code: %w", err)
+		return "", fmt.Errorf("auth: storing code: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("auth: commit: %w", err)
+		return "", fmt.Errorf("auth: commit: %w", err)
 	}
 
 	// Sent after commit: a delivered code that was never stored is
 	// unverifiable, which is the worse failure.
 	if err := s.sms.Send(ctx, phone, otpMessage(code)); err != nil {
-		return fmt.Errorf("auth: sending code: %w", err)
+		return "", fmt.Errorf("auth: sending code: %w", err)
 	}
-	return nil
+	return code, nil
 }
 
 // Verify consumes the live code for phone if it matches.

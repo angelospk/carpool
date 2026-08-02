@@ -11,8 +11,11 @@ import { colors, radius, space, type } from '../../src/design/tokens';
 export default function OtpScreen() {
   const { t } = useTranslation();
   const router = useRouter();
-  const { phone } = useLocalSearchParams<{ phone: string }>();
-  const [code, setCode] = useState('');
+  const { phone, devCode } = useLocalSearchParams<{ phone: string; devCode?: string }>();
+  // Prefilled only when the server ran with DEV_MODE and handed the code back
+  // instead of texting it. Everywhere else this is undefined and the field
+  // starts empty, exactly as before.
+  const [code, setCode] = useState(devCode ?? '');
   const [regions, setRegions] = useState<Region[]>([]);
   const [error, setError] = useState<string | null>(null);
 

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -97,6 +98,11 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		Schedule:         schedule,
 	})
 	if err != nil {
+		// The response stays vague on purpose — a rejected route must not
+		// describe the schema to whoever sent it. But throwing the reason away
+		// entirely leaves nothing to debug from either, which cost an hour of
+		// bisecting a seed script by hand.
+		slog.Warn("route rejected", "driver", userID, "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_request", "the route was rejected")
 		return
 	}

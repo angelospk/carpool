@@ -42,7 +42,7 @@ func (d Deps) handleOTPRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := d.OTP.Request(r.Context(), body.Phone)
+	code, err := d.OTP.Request(r.Context(), body.Phone)
 	switch {
 	case errors.Is(err, auth.ErrRateLimited):
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many codes requested for this number")
@@ -50,6 +50,19 @@ func (d Deps) handleOTPRequest(w http.ResponseWriter, r *http.Request) {
 		// The only other failure mode is a malformed number; treating it as a
 		// client error avoids leaking whether the number is known.
 		writeError(w, http.StatusBadRequest, "invalid_request", "the phone number must be in E.164 format")
+	case d.DevMode:
+		// Testing this app means signing in on a device you are not holding,
+		// and DEV_MODE writes the code to the API's log, which whoever is
+		// testing cannot read. So it comes back in the response instead.
+		//
+		// It is the real code: real generator, real expiry, real rate limit. A
+		// fixed 0000 would be easier and would test a path that production
+		// never runs, which is the opposite of what a test build is for.
+		//
+		// Anywhere but DEV_MODE this would mean that knowing a phone number is
+		// enough to take the account. The response stays empty there, and a
+		// test asserts it.
+		writeJSON(w, http.StatusOK, map[string]any{"dev_code": code})
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}

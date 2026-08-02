@@ -84,8 +84,16 @@ export type Message = {
 export const api = {
   regions: () => request<{ regions: Region[] }>('/v1/regions', { anonymous: true }),
 
+  // dev_code comes back only when the server runs with DEV_MODE, where the code
+  // is not sent by SMS at all. It lets a tester on a laptop sign in without
+  // reading the API's log, which is on another machine. It is absent in every
+  // other configuration, so treating it as optional is the whole guard.
   requestOtp: (phone: string) =>
-    request<void>('/v1/auth/otp/request', { method: 'POST', anonymous: true, body: { phone } }),
+    request<{ dev_code?: string } | void>('/v1/auth/otp/request', {
+      method: 'POST',
+      anonymous: true,
+      body: { phone },
+    }),
 
   verifyOtp: (phone: string, code: string, name: string, regionId: string) =>
     request<{ access_token: string; refresh_token: string }>('/v1/auth/otp/verify', {

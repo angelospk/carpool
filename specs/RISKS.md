@@ -282,6 +282,33 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
     ever argues otherwise. A driver-typed consumption of 14 is that argument
     breaking.
 
+14. **Half of the prefecture's main corridor cannot be published.**
+    `route_templates_geom_simple` rejects a route whose geometry is not simple,
+    and the reasoning is sound: `ST_LineLocatePoint` cannot place a point on a
+    self-intersecting line, and the gross match depends on it.
+
+    Measured against real OSRM output on 3 August 2026:
+
+    | Route | `ST_IsSimple` |
+    | --- | --- |
+    | Αλεξανδρούπολη → Ορεστιάδα | true |
+    | Ορεστιάδα → Αλεξανδρούπολη | **false** |
+    | Διδυμότειχο → Αλεξανδρούπολη | **false** |
+    | Φέρες → Αλεξανδρούπολη | true |
+
+    The same corridor passes northbound and fails southbound. That is not an
+    edge case: it is the road the pilot exists to serve, and a driver who
+    publishes their morning commute cannot publish the evening return.
+
+    Not fixed, because the fix is a choice rather than a patch.
+    `ST_RemoveRepeatedPoints` or a small `ST_Simplify` before storing would
+    likely make these simple, at the cost of the stored geometry no longer being
+    exactly what OSRM returned. The alternative is to stop depending on
+    `ST_LineLocatePoint`, which is a matcher change.
+
+    Discovered because `scripts/seed-demo.sh` could not publish the second
+    route, and the handler was throwing the reason away. It now logs it.
+
 ## Deferred tech (parked, with triggers to revisit)
 
 | Deferred | Revisit when |

@@ -33,7 +33,7 @@ func newOTP(t *testing.T) (*auth.OTPService, *pgxpool.Pool, *clock.Fake, *auth.F
 func TestRequestSendsACodeBySMS(t *testing.T) {
 	svc, _, _, sms := newOTP(t)
 
-	if err := svc.Request(context.Background(), testPhone); err != nil {
+	if _, err := svc.Request(context.Background(), testPhone); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func TestRequestSendsACodeBySMS(t *testing.T) {
 func TestVerifyAcceptsTheCodeThatWasSent(t *testing.T) {
 	svc, _, _, sms := newOTP(t)
 	ctx := context.Background()
-	if err := svc.Request(ctx, testPhone); err != nil {
+	if _, err := svc.Request(ctx, testPhone); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
 
@@ -67,7 +67,7 @@ func TestVerifyAcceptsTheCodeThatWasSent(t *testing.T) {
 func TestVerifyRejectsTheWrongCode(t *testing.T) {
 	svc, _, _, sms := newOTP(t)
 	ctx := context.Background()
-	if err := svc.Request(ctx, testPhone); err != nil {
+	if _, err := svc.Request(ctx, testPhone); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
 
@@ -84,7 +84,7 @@ func TestVerifyRejectsTheWrongCode(t *testing.T) {
 func TestVerifyIsSingleUse(t *testing.T) {
 	svc, _, _, sms := newOTP(t)
 	ctx := context.Background()
-	if err := svc.Request(ctx, testPhone); err != nil {
+	if _, err := svc.Request(ctx, testPhone); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
 	code := sms.LastCode()
@@ -101,7 +101,7 @@ func TestVerifyIsSingleUse(t *testing.T) {
 func TestVerifyRejectsAnExpiredCode(t *testing.T) {
 	svc, _, c, sms := newOTP(t)
 	ctx := context.Background()
-	if err := svc.Request(ctx, testPhone); err != nil {
+	if _, err := svc.Request(ctx, testPhone); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
 	code := sms.LastCode()
@@ -116,7 +116,7 @@ func TestVerifyRejectsAnExpiredCode(t *testing.T) {
 func TestVerifyAcceptsACodeJustBeforeExpiry(t *testing.T) {
 	svc, _, c, sms := newOTP(t)
 	ctx := context.Background()
-	if err := svc.Request(ctx, testPhone); err != nil {
+	if _, err := svc.Request(ctx, testPhone); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
 	code := sms.LastCode()
@@ -131,7 +131,7 @@ func TestVerifyAcceptsACodeJustBeforeExpiry(t *testing.T) {
 func TestVerifyLocksOutAfterTooManyAttempts(t *testing.T) {
 	svc, _, _, sms := newOTP(t)
 	ctx := context.Background()
-	if err := svc.Request(ctx, testPhone); err != nil {
+	if _, err := svc.Request(ctx, testPhone); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
 	code := sms.LastCode()
@@ -152,12 +152,12 @@ func TestVerifyLocksOutAfterTooManyAttempts(t *testing.T) {
 func TestRequestReplacesAnyPreviousLiveCode(t *testing.T) {
 	svc, _, _, sms := newOTP(t)
 	ctx := context.Background()
-	if err := svc.Request(ctx, testPhone); err != nil {
+	if _, err := svc.Request(ctx, testPhone); err != nil {
 		t.Fatalf("first Request: %v", err)
 	}
 	first := sms.LastCode()
 
-	if err := svc.Request(ctx, testPhone); err != nil {
+	if _, err := svc.Request(ctx, testPhone); err != nil {
 		t.Fatalf("second Request: %v", err)
 	}
 	second := sms.LastCode()
@@ -178,12 +178,12 @@ func TestRequestIsRateLimitedPerPhone(t *testing.T) {
 	ctx := context.Background()
 
 	for i := range auth.OTPMaxPerWindow {
-		if err := svc.Request(ctx, testPhone); err != nil {
+		if _, err := svc.Request(ctx, testPhone); err != nil {
 			t.Fatalf("request %d: %v", i, err)
 		}
 	}
 
-	if err := svc.Request(ctx, testPhone); !errors.Is(err, auth.ErrRateLimited) {
+	if _, err := svc.Request(ctx, testPhone); !errors.Is(err, auth.ErrRateLimited) {
 		t.Fatalf("error = %v, want ErrRateLimited", err)
 	}
 }
@@ -192,14 +192,14 @@ func TestRateLimitLiftsAfterTheWindow(t *testing.T) {
 	svc, _, c, _ := newOTP(t)
 	ctx := context.Background()
 	for range auth.OTPMaxPerWindow {
-		if err := svc.Request(ctx, testPhone); err != nil {
+		if _, err := svc.Request(ctx, testPhone); err != nil {
 			t.Fatalf("Request: %v", err)
 		}
 	}
 
 	c.Advance(auth.OTPRateWindow + time.Second)
 
-	if err := svc.Request(ctx, testPhone); err != nil {
+	if _, err := svc.Request(ctx, testPhone); err != nil {
 		t.Fatalf("the limit should lift once the window passes: %v", err)
 	}
 }
@@ -208,7 +208,7 @@ func TestRequestRejectsAMalformedPhoneNumber(t *testing.T) {
 	svc, _, _, _ := newOTP(t)
 
 	for _, phone := range []string{"", "6900000001", "+30 690 000 0001", "not-a-phone", "+0123"} {
-		if err := svc.Request(context.Background(), phone); err == nil {
+		if _, err := svc.Request(context.Background(), phone); err == nil {
 			t.Errorf("Request(%q) should have been rejected", phone)
 		}
 	}
@@ -219,7 +219,7 @@ func TestRequestRejectsAMalformedPhoneNumber(t *testing.T) {
 func TestConcurrentVerifyOfTheSameCodeSucceedsOnce(t *testing.T) {
 	svc, _, _, sms := newOTP(t)
 	ctx := context.Background()
-	if err := svc.Request(ctx, testPhone); err != nil {
+	if _, err := svc.Request(ctx, testPhone); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
 	code := sms.LastCode()

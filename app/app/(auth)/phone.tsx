@@ -24,8 +24,14 @@ export default function PhoneScreen() {
     setError(null);
     const normalized = phone.replace(/\s/g, '');
     try {
-      await api.requestOtp(normalized);
-      router.push({ pathname: '/(auth)/otp', params: { phone: normalized } });
+      const sent = await api.requestOtp(normalized);
+      // On a DEV_MODE server the code arrives here rather than by SMS; carrying
+      // it forward saves the tester a trip to a log file they cannot reach.
+      const devCode = sent && typeof sent === 'object' ? sent.dev_code : undefined;
+      router.push({
+        pathname: '/(auth)/otp',
+        params: devCode ? { phone: normalized, devCode } : { phone: normalized },
+      });
     } catch (e) {
       setError(
         e instanceof ApiError && e.code === 'rate_limited'
