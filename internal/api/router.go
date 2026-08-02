@@ -62,12 +62,20 @@ type Deps struct {
 	OSRMDataVersion string
 	// Hub fans chat messages out to foregrounded apps. Optional.
 	Hub *ws.Hub
+
+	// DevMode relaxes things that must stay strict in a deployment: OTP codes
+	// go to the log instead of an SMS, and the browser is allowed to call this
+	// API cross-origin so the Expo web build can be used for testing.
+	DevMode bool
 }
 
 // NewRouter builds the versioned HTTP handler.
 func NewRouter(deps Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
+	if deps.DevMode {
+		r.Use(devCORS)
+	}
 
 	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "the requested resource does not exist")

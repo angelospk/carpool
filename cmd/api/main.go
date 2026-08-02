@@ -148,6 +148,7 @@ func run() error {
 		Standing: standing.NewService(pool, clk),
 		Bookings: bookings.NewService(pool, clk),
 		Invites:  invites.NewService(pool, clk, cfg.InviteOnly),
+		DevMode:  cfg.DevMode,
 		Account:  account.NewService(pool, clk),
 		Drivers:  drivers.NewService(pool, clk),
 
