@@ -72,8 +72,20 @@ and is not: each price freezes at accept, so a car filling one seat at a time
 collects cost/2 + cost/3 + cost/4, which is more than the trip cost. Flooring
 rather than rounding to nearest closes the other end of the same leak. A driver
 who fills one seat of four therefore recovers a fifth of their fuel, which is the
-right direction to be wrong in — see `docs/research/sources.md` on άρθρο 18 παρ.
-1 ν. 1903/1990.
+right direction to be wrong in — see `docs/research/sources.md` on άρθρο 18
+ν. 1903/1990.
+
+Three boundaries the formula above does not show:
+
+- **No seats on offer** suggests no fuel share. A trip with `offered_seats ≤ 0`
+  has nobody to divide across, and dividing by the driver alone would quote half
+  the fuel to a passenger who cannot board.
+- **`free_below_km` waives the fuel share only.** A toll is cash the driver
+  handed over on that same hop, so it survives the waiver and is added after it.
+- **The toll share is not rounded.** It is added on top of the floored fuel
+  figure, because unlike the fuel estimate it is an exact amount. A suggestion
+  that is toll-only is therefore not a multiple of 0.50 €.
+- Any non-formula pricing mode suggests nothing at all, tolls included.
 
 - `fuel_consumption`: from driver's car profile (manual entry; car model picker
   post-MVP).

@@ -61,19 +61,25 @@ the checked claims separated from the reported ones.
 
 The short version, because one of them changes the product:
 
-**Question 1 (cost sharing vs reward): there is no statute.** No Greek act
-authorises or licences carpooling, and ν. 4530/2018 is about taxis. The price
-ceiling in this app is a product decision, not compliance with a rule, and it is
-the thing that keeps the arrangement out of "paid transport".
+**Question 1 (cost sharing vs reward): nothing found authorises carpooling, and
+one provision penalises what sits next to it.** Άρθρο 18 ν. 1903/1990, as amended
+by άρθρο 36 ν. 4663/2020, covers an Ε.Ι.Χ. vehicle carrying passengers με
+κόμιστρο where that work is assigned to another operator, and carries a €3.000
+administrative fine reaching the owner as well as the driver. Neither statute
+defines κόμιστρο or separates it from sharing costs, so the boundary is genuinely
+unresolved. The price ceiling in this app is an internal risk control, not
+compliance with a rule and not a guarantee of how any trip would be
+characterised.
 
 **Question 2 (insurance): the premise was wrong, and Terms §6 has changed.** Five
-insurers' general terms were read; none excludes a cost-sharing passenger. They
-exclude *use other than the declared use*, which is a right of recourse against
-the driver rather than a refusal to pay the injured party, and three of the five
-require a causal link to the accident. §6 previously told drivers to check
-whether carpooling "falls under an exclusion", which overstates it and frightens
-people away from a use their policy does not name. It now says what the policies
-actually say.
+insurers' general terms were read; none of the five excludes a cost-sharing
+passenger. They exclude *use other than the declared use*, which is a right of
+recourse against the driver rather than a refusal to pay the injured party, and
+three of the five require a causal link to the accident. §6 previously told
+drivers to check whether carpooling "falls under an exclusion", which implies an
+exclusion the sampled policies do not contain. It now describes the sample,
+declines to promise coverage, and sends the driver to their own policy. Five
+policies are not the market.
 
 ## What was asked for and did not come back
 

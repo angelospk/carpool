@@ -55,13 +55,18 @@ type PricingInputs struct {
 // trip costing 12.60 €, they came to 16.00 €. The driver was earning 27% over
 // the cost of the trip, one honest-looking price at a time.
 //
-// That is not a fairness bug. A driver of a private car who carries passengers
-// with a κόμιστρο commits an offence under άρθρο 18 παρ. 1 ν. 1903/1990 that
-// carries at least six months' imprisonment, and the line between a fare and a
-// shared cost is exactly whether the driver came out ahead. Dividing by the
-// published seats makes it arithmetically impossible to: n seats at
-// cost/(n+1) is n/(n+1) of the cost, always short of it, and flooring the
-// rounding keeps it short. docs/research/sources.md has the provision.
+// That is not only a fairness bug. Άρθρο 18 ν. 1903/1990, as amended by άρθρο 36
+// ν. 4663/2020, penalises the driver of a private car carrying passengers με
+// κόμιστρο with a 3.000 € administrative fine, and reaches the owner too when
+// they are a different person. What separates a fare from a shared cost is not
+// defined anywhere, so the driver's best available answer is that they did not
+// come out ahead. Dividing by the published seats makes coming out ahead
+// arithmetically impossible: n seats at cost/(n+1) is n/(n+1) of the cost,
+// always short of it, and flooring the rounding keeps it short.
+//
+// That is a risk control, not a safe harbour, and it does not decide how any
+// authority would characterise a given trip. docs/research/sources.md has the
+// provision, its amendment history, and what remains unsettled.
 //
 // The cost of this is that a driver who fills one seat of four recovers a fifth
 // of their fuel rather than half. That is the right direction to be wrong in,

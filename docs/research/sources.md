@@ -5,54 +5,65 @@ what the app has to say to drivers. Each entry records what was checked and what
 was only reported, because the two are not the same and the memo that started
 this got caught out on exactly that distinction.
 
-## 1. No statute authorises carpooling, but one criminalises the thing next to it
+## 1. No statute authorises carpooling, but one penalises the thing next to it
 
-There is no Greek act that permits or licences carpooling. What holds it up is an
+Nothing in this review found a Greek act that permits or licences carpooling, and
+none of the sources consulted names one. That is a negative finding from a
+non-exhaustive search, not a proof of absence. What the practice rests on is that
 absence: a driver making a trip they would make anyway, sharing real costs,
 taking no profit, is not carrying passengers for reward.
 
-The provision on the other side of that line is real, was checked, and is the
-most consequential fact in this file.
+The provision on the other side of that line is real and is the most consequential
+fact in this file. It is also the one this file got wrong on the first pass.
 
-**Άρθρο 18 παρ. 1 ν. 1903/1990** (ΦΕΚ Α΄ 142/23.10.1990), as it now stands after
-άρθρο 22 ν. 4530/2018:
+**Άρθρο 18 ν. 1903/1990** (ΦΕΚ Α΄ 142/23.10.1990), which penalises the driver of
+an Ε.Ι.Χ. vehicle carrying passengers **με κόμιστρο** where that transport work
+is assigned to another operator, and the owner too when they are a different
+person.
 
-> Ο οδηγός κάθε Επιβατικού Ιδιωτικής Χρήσης (Ε.Ι.Χ.) οχήματος, ο οποίος
-> διενεργεί επιβατικές μεταφορές **με κόμιστρο**, οι οποίες έχουν ανατεθεί σε
-> άλλο φορέα ή πρόσωπο σύμφωνα με τις ισχύουσες διατάξεις, καθώς και ο ιδιοκτήτης
-> αυτού, εφόσον είναι πρόσωπο διαφορετικό του οδηγού, τιμωρούνται με **φυλάκιση
-> τουλάχιστον έξι (6) μηνών** και χρηματική ποινή **τουλάχιστον τριών χιλιάδων
-> (3.000) ευρώ**.
+Read the version before relying on any figure. The chain: repealed by άρθρο 50
+ν. 2963/2001, restored by παρ. 3 άρθρου 11 ν. 3082/2002, replaced by παρ. 8
+άρθρου 17 ν. 3534/2007, and **amended by άρθρο 36 ν. 4663/2020** (ΦΕΚ Α΄ 30/
+12.02.2020, "Διενέργεια μεταφορικού έργου που έχει ανατεθεί σε άλλον φορέα ή
+επαγγελματική ομάδα"), which is the operative version.
 
-Its history, because the version matters more than the number: repealed by άρθρο
-50 ν. 2963/2001, brought back by παρ. 3 άρθρου 11 ν. 3082/2002, replaced by παρ.
-8 άρθρου 17 ν. 3534/2007, replaced again by άρθρο 22 ν. 4530/2018. The 1990
-original said *up to* three months. It now says *at least* six. Any text still
-quoting drachmas is quoting a repealed version.
+As it stands, the sanction is a **€3.000 administrative fine imposed by the
+police**, not imprisonment. ΔΠρΘεσ 6197/2024 applies it in exactly those terms,
+citing "άρθρο 18 ν. 1903/1990, όπως τροποποιήθηκε με το άρθρο 36 ν. 4663/2020".
 
-Four things follow, and they are not the ones an unsourced summary would suggest:
+This file previously said at least six months' imprisonment, from a consolidated
+text at poas.gr that stops at the 2007 amendment and a summary of ν. 4530/2018.
+Both describe superseded versions. That is the whole reason this section exists:
+a stale consolidation looks exactly like a current one.
 
-- It is **criminal, not administrative**. Prison, not a ticket. Παρ. 3 sends it
-  through the summary procedure of άρθρα 417 ΚΠΔ.
-- It reaches the **owner as well as the driver** when they are different people.
-- The trigger word is **κόμιστρο**, a fare. The statute does not define it and
-  does not distinguish it from sharing costs. That undefined gap is the entire
-  space this app operates in.
-- So the earlier reading that ν. 4530/2018 is only about taxis was half right.
-  The law as a whole is, but its άρθρο 22 is precisely the provision that
-  criminalises a private car carrying passengers for a fare.
+What still holds:
+
+- It reaches the **owner as well as the driver** when they differ.
+- The trigger word is **κόμιστρο**, a fare. Neither statute defines it or
+  separates it from sharing costs. That undefined gap is the space this app
+  operates in, and nothing found here closes it.
+- Whether any criminal limb survives alongside the administrative fine was not
+  established, and a lawyer should say. What is established is that the 2024
+  enforcement route is a fine.
 
 Consequences for the code:
 
-- The price ceiling is a **product decision**, not compliance with a rule. No
-  article hands down a number. What keeps the app on the safe side is that the
-  suggested contribution cannot exceed the trip's real cost, which is why the
-  driver-typed consumption and `wear_factor` of RISKS 13 carry more weight than
-  their size suggests.
+- The price ceiling is a **risk control we chose**, not compliance with a rule
+  and not a safe harbour. No article hands down a number, and keeping the
+  suggested contribution under the trip's real cost does not guarantee any
+  particular legal characterisation. It is simply the strongest fact available if
+  the question is ever asked, which is why the driver-typed consumption and
+  `wear_factor` of RISKS 13 carry more weight than their size suggests.
 - Never the word **κόμιστρο**, anywhere a user can see it, in any language, and
   never a synonym that means the same thing. MOBILE.md already requires
   "προτεινόμενη συνεισφορά"; this is the reason, and it is a harder rule than a
   style preference. Checked: the word appears nowhere in the app.
+
+Sources, with retrieval date 2 August 2026: e-nomothesia.gr and kodiko.gr for
+ν. 1903/1990 (ΦΕΚ Α΄ 142/23.10.1990); taxheaven.gr and e-nomothesia.gr for
+ν. 4663/2020 (ΦΕΚ Α΄ 30/12.02.2020); lawspot.gr for ΔΠρΘεσ 6197/2024. The
+gazette texts themselves were not read; these are consolidations, which is what
+went wrong the first time.
 
 Still unverified, and not to be repeated until someone reads it: a reference to
 **ΠΔ 50/2012**, asserted without a citation.
@@ -60,8 +71,13 @@ Still unverified, and not to be repeated until someone reads it: a reference to
 ## 2. Motor insurance: the premise was wrong
 
 Five sets of general terms were read directly (Generali, Syndea, Ατλαντική
-Ένωση, Ευρωπαϊκή Πίστη, Intersalonica). **None excludes carrying a passenger who
-shares costs.** The word κόμιστρο does not appear.
+Ένωση, Ευρωπαϊκή Πίστη, Intersalonica). **None of those five excludes carrying a
+passenger who shares costs.** The word κόμιστρο does not appear in any of them.
+
+Five policies are not the market, and what applies to any given driver is their
+own policy, their declared vehicle use and their permitted passenger count. The
+finding below is that the exclusion everyone assumes is there was not in the
+sample, not that no insurer has one.
 
 What every one of them has instead is an exclusion for **use other than the use
 declared in the policy and the registration document**. That is a different
@@ -76,10 +92,14 @@ thing in three ways that matter:
 - It turns on whether the private car became, in fact, a commercial one. Which is
   the same question as §1: cost sharing, no profit.
 
-So the honest line to a driver is not "your insurance may not cover you." It is:
-*you are sharing costs, not earning, which is why the car stays in private use.*
-The app's own ceiling is the driver's insurance argument. Terms §6 said the
-weaker, scarier thing and has been corrected.
+So the honest line to a driver is neither "your insurance may not cover you" nor
+"you are covered." It is that the exclusion turns on declared use, that no policy
+in the sample named cost sharing, and that they should check their own. Terms §6
+now says that, having previously implied an exclusion that the sampled policies
+do not contain.
+
+The app's ceiling supports the argument that the car stayed in private use. It
+does not settle it, and it is not a guarantee to make to a driver.
 
 Second axis, still open: ν. 2496/1997 on misrepresenting the risk. Somebody doing
 four priced trips a day is describing a different vehicle use to their insurer
@@ -102,8 +122,12 @@ sidesteps the anti-bot layer and is the more stable surface anyway.
 Shape to build, matching how tolls already work: harvest into a checked-in
 dataset, review the diff, ship it. Not a live feed.
 
-Worth an email to `fuelprices@mindev.gov.gr` for a written answer on reuse. The
-terms do not resolve it and no amount of reading will.
+**Release gate, not a footnote.** The site's terms limit use to consumer
+information and grant no redistribution right, and a checked-in dataset derived
+from the bulletins is redistribution. Reading them again will not settle it.
+Written clearance from `fuelprices@mindev.gov.gr` is required before any derived
+dataset ships, and the exact terms relied on go in this file when it arrives.
+That the MIT parser is freely licensed says nothing about the data it parses.
 
 ## 4. Vehicle consumption: EEA, and the field is there
 
@@ -126,8 +150,8 @@ actually meet is far older. Matching on make and model EU-wide rather than
 Greek-only widens it a lot, since a Berlingo burns the same in Spain, but a 2008
 car is simply not in this table at all.
 
-The fallback is deriving consumption from CO2, which is present from 2010. On the
-rows that carry both, the ratio comes out at:
+The fallback is deriving consumption from CO2, which is present from 2010, **for
+petrol and diesel only**. On the rows that carry both, the ratio comes out at:
 
 | Fuel | `Ewltp` ÷ `Fc`, mean | implied g CO2 per litre | textbook |
 | --- | --- | --- | --- |
@@ -136,8 +160,21 @@ rows that carry both, the ratio comes out at:
 | LPG | 20.05 | 2005 | ~1665 |
 
 Petrol and diesel land within a few percent, so the derivation is sound for
-those. LPG does not, which suggests the field is not reported in the same unit
-for it. The extremes are junk either way (a ratio of 1590 exists in the data), so
-any harvest has to filter on a plausible band and take medians, not means.
+those. LPG does not. Regulation 2019/631 allows reported consumption in
+l/100km, m³/100km **or kg/100km**, which is the likely explanation, and it means
+`Fc` cannot be treated as litres without checking the fuel type first.
 
-If it gets built: derived numbers must not be presented as manufacturer figures.
+Rules for whatever gets built:
+
+- Derive from CO2 only for fuels with a validated factor, which today means
+  petrol and diesel. No LPG, no NG, no hydrogen.
+- Never emit a litre-based figure for electric vehicles, and keep plug-in
+  hybrids out until both fuel and electricity are modelled.
+- Enforce a plausible band on the ratio as well as on `Fc`; a believable `Fc`
+  can still sit next to a mismatched CO2 value.
+- Medians, not means. The figures in the table above are means, quoted to show
+  the derivation is not wildly off, and must be recomputed as filtered medians
+  before anything depends on them.
+- An unsupported fuel gets no derived number. It falls through to whatever the
+  no-match path is, the same as a car that is not in the table.
+- Derived numbers must never be presented as manufacturer figures.

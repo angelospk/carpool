@@ -56,11 +56,10 @@ func TestSuggestedPriceDoesNotDependOnHowManySeatsAreAlreadyTaken(t *testing.T) 
 	}
 }
 
-// The invariant that keeps this app out of άρθρο 18 παρ. 1 ν. 1903/1990: what
-// the passengers hand over, added up, is never more than the trip cost. Once it
-// is more, the driver is earning, and an earning driver in a private car is
-// committing a criminal offence carrying at least six months — see
-// docs/research/sources.md.
+// The invariant this app leans on against άρθρο 18 ν. 1903/1990: what the
+// passengers hand over, added up, is never more than the trip cost. Once it is
+// more, the driver is earning, and an earning driver in a private car is a lot
+// closer to the κόμιστρο that provision fines — see docs/research/sources.md.
 //
 // Prices freeze at accept, so the sum is of the figures quoted at each accept,
 // not of one figure recomputed at the end.
@@ -236,5 +235,32 @@ func TestATollShareSurvivesTheFreeBelowThreshold(t *testing.T) {
 
 	if got := SuggestedPriceCents(in); got != 140 {
 		t.Fatalf("suggested %d, want the 140 of toll alone", got)
+	}
+}
+
+// A trip with no seats on it has nobody to divide the fuel across. Dividing by
+// the driver alone would quote half the tank to a passenger who cannot board.
+func TestATripOfferingNoSeatsSuggestsNoFuelShare(t *testing.T) {
+	for _, seats := range []int{0, -1} {
+		in := baseline()
+		in.TripKm = 100
+		in.OfferedSeats = seats
+
+		if got := SuggestedPriceCents(in); got != 0 {
+			t.Errorf("%d seats offered: SuggestedPriceCents = %d cents, want 0", seats, got)
+		}
+	}
+}
+
+// The toll still stands on a seatless trip, for the same reason it survives the
+// free-below threshold: it is money that changed hands, not an estimate.
+func TestATollSurvivesATripOfferingNoSeats(t *testing.T) {
+	in := baseline()
+	in.TripKm = 100
+	in.OfferedSeats = 0
+	in.TollShareCents = 275
+
+	if got := SuggestedPriceCents(in); got != 275 {
+		t.Fatalf("SuggestedPriceCents = %d cents, want 275", got)
 	}
 }
