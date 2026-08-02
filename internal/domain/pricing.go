@@ -27,10 +27,12 @@ type PricingInputs struct {
 	WearFactor               float64
 	FreeBelowKm              float64
 
-	// CurrentPassengers counts passengers already booked, excluding the one
-	// being priced.
-	CurrentPassengers int
-	Mode              PricingMode
+	// OfferedSeats is how many seats the driver published on this trip, not how
+	// many are taken. The cost is divided across the full car precisely because
+	// a seat that goes unsold must not raise anybody else's share.
+	OfferedSeats int
+
+	Mode PricingMode
 
 	// TollShareCents is this passenger's share of the motorway barriers they
 	// will actually be in the car for, already divided among the people aboard
@@ -42,14 +44,33 @@ type PricingInputs struct {
 // cents, per MATCHING.md:
 //
 //	cost    = fuel_consumption/100 × fuel_price × trip_km × wear_factor
-//	per_pax = round(cost / (current_passengers + 1 + 1), 0.50 €) + toll_share
+//	per_pax = floor(cost / (offered_seats + 1), 0.50 €) + toll_share
 //
-// The divisor counts the passenger being priced and the driver alongside the
-// passengers already aboard. A trip at or below the driver's free-below
-// threshold, or any non-formula pricing mode, suggests nothing.
+// The divisor is the whole car: every seat the driver offered, plus the driver.
+// It deliberately does not count who has actually booked.
 //
-// This is a suggestion shown to both sides, never an enforced fare — see
-// RISKS.md on staying inside cost-sharing rather than commercial transport.
+// It used to. The divisor was the passengers already aboard plus the new one
+// plus the driver, which meant the first passenger paid cost/2, the second
+// cost/3 and the third cost/4. Each figure looks like a share. Added up, on a
+// trip costing 12.60 €, they came to 16.00 €. The driver was earning 27% over
+// the cost of the trip, one honest-looking price at a time.
+//
+// That is not a fairness bug. A driver of a private car who carries passengers
+// with a κόμιστρο commits an offence under άρθρο 18 παρ. 1 ν. 1903/1990 that
+// carries at least six months' imprisonment, and the line between a fare and a
+// shared cost is exactly whether the driver came out ahead. Dividing by the
+// published seats makes it arithmetically impossible to: n seats at
+// cost/(n+1) is n/(n+1) of the cost, always short of it, and flooring the
+// rounding keeps it short. docs/research/sources.md has the provision.
+//
+// The cost of this is that a driver who fills one seat of four recovers a fifth
+// of their fuel rather than half. That is the right direction to be wrong in,
+// and a driver who wants a larger share can offer fewer seats.
+//
+// A trip at or below the driver's free-below threshold, or any non-formula
+// pricing mode, suggests nothing.
+//
+// This is a suggestion shown to both sides, never an enforced fare.
 func SuggestedPriceCents(in PricingInputs) int {
 	if in.Mode != PricingFormula {
 		return 0
@@ -64,12 +85,27 @@ func SuggestedPriceCents(in PricingInputs) int {
 		return in.TollShareCents
 	}
 
+	// A trip with no seats on it cannot be priced per seat. Suggest nothing
+	// rather than dividing by the driver alone and quoting them half the fuel.
+	if in.OfferedSeats <= 0 {
+		return in.TollShareCents
+	}
+
 	cost := in.FuelConsumptionLPer100Km / 100 * in.FuelPriceEUR * in.TripKm * in.WearFactor
-	shares := float64(in.CurrentPassengers + 2) // + the new passenger, + the driver
+	shares := float64(in.OfferedSeats + 1) // every published seat, + the driver
 	perPax := cost / shares
 
-	cents := perPax * 100
-	rounded := math.Round(cents/priceStepCents) * priceStepCents
+	// Two separate steps, and the order matters.
+	//
+	// First settle on a whole number of cents, because the division above is
+	// binary floating point and a share that is exactly 1.00 € arrives as
+	// 0.9999999. Flooring that directly would drop a euro trip to 0.50 €.
+	//
+	// Then floor to the step. Floor, not nearest: rounding 0.63 € up to 1.00 €
+	// is the same arithmetic that produced the overcharge above, in miniature,
+	// and it can only ever move money towards the driver.
+	cents := math.Round(perPax * 100)
+	rounded := math.Floor(cents/priceStepCents) * priceStepCents
 	if rounded < 0 {
 		rounded = 0
 	}

@@ -3,11 +3,11 @@ package domain
 import "testing"
 
 // baseline is a 10 km trip in a 7 l/100km car at 1.80 €/l with no wear markup
-// and no other passengers:
+// and a single seat on offer:
 //
 //	cost    = 7/100 × 1.80 × 10 × 1.0 = 1.26 €
-//	per_pax = 1.26 / (0 current + 1 new + 1 driver) = 0.63 €
-//	rounded to the nearest 0.50 € = 0.50 €
+//	per_pax = 1.26 / (1 seat + 1 driver) = 0.63 €
+//	floored to the 0.50 € below = 0.50 €
 func baseline() PricingInputs {
 	return PricingInputs{
 		TripKm:                   10,
@@ -15,7 +15,7 @@ func baseline() PricingInputs {
 		FuelPriceEUR:             1.80,
 		WearFactor:               1.0,
 		FreeBelowKm:              5.0,
-		CurrentPassengers:        0,
+		OfferedSeats:             1,
 		Mode:                     PricingFormula,
 	}
 }
@@ -26,24 +26,76 @@ func TestSuggestedPriceAppliesTheFuelFormula(t *testing.T) {
 	}
 }
 
-func TestSuggestedPriceSplitsAcrossExistingPassengersAndTheDriver(t *testing.T) {
+func TestSuggestedPriceSplitsAcrossEveryOfferedSeatAndTheDriver(t *testing.T) {
 	in := baseline()
 	in.TripKm = 100 // cost = 7/100 × 1.80 × 100 = 12.60 €
-	in.CurrentPassengers = 1
+	in.OfferedSeats = 2
 
-	// 12.60 / (1 existing + 1 new + 1 driver) = 4.20 € -> nearest 0.50 = 4.00 €
+	// 12.60 / (2 seats + 1 driver) = 4.20 € -> floored to 4.00 €
 	if got := SuggestedPriceCents(in); got != 400 {
 		t.Fatalf("SuggestedPriceCents = %d cents, want 400", got)
+	}
+}
+
+// The seat price is announced when the trip is published and does not move as
+// the car fills. A passenger who books last must not subsidise the empty seats,
+// and one who books first must not be punished for it.
+func TestSuggestedPriceDoesNotDependOnHowManySeatsAreAlreadyTaken(t *testing.T) {
+	in := baseline()
+	in.TripKm = 100
+	in.OfferedSeats = 3
+
+	want := SuggestedPriceCents(in)
+	if want == 0 {
+		t.Fatal("the baseline suggests nothing, so this proves nothing")
+	}
+	// Nothing about who is aboard is an input any more. If a field for it ever
+	// comes back, this is where it shows up.
+	if got := SuggestedPriceCents(in); got != want {
+		t.Fatalf("SuggestedPriceCents = %d cents, want %d", got, want)
+	}
+}
+
+// The invariant that keeps this app out of άρθρο 18 παρ. 1 ν. 1903/1990: what
+// the passengers hand over, added up, is never more than the trip cost. Once it
+// is more, the driver is earning, and an earning driver in a private car is
+// committing a criminal offence carrying at least six months — see
+// docs/research/sources.md.
+//
+// Prices freeze at accept, so the sum is of the figures quoted at each accept,
+// not of one figure recomputed at the end.
+func TestPassengersTogetherNeverPayMoreThanTheTripCosts(t *testing.T) {
+	for _, seats := range []int{1, 2, 3, 4, 5, 6, 7, 8} {
+		in := baseline()
+		in.TripKm = 100 // cost = 7/100 × 1.80 × 100 = 12.60 €
+		in.OfferedSeats = seats
+
+		total := 0
+		for taken := 0; taken < seats; taken++ {
+			total += SuggestedPriceCents(in)
+		}
+
+		// Not merely "no profit". The driver is one of the people in the car and
+		// pays a share like everybody else, so a full car can only ever cover
+		// seats/(seats+1) of the cost. A divisor that quietly drops the driver
+		// would leave the total exactly at cost, which passes a no-profit check
+		// while meaning the passengers bought the whole trip.
+		const costCents = 1260
+		ceiling := costCents * seats / (seats + 1)
+		if total > ceiling {
+			t.Errorf("%d seats sold one at a time collected %d cents for a trip costing %d; the passengers' share tops out at %d, so the driver is %d ahead",
+				seats, total, costCents, ceiling, total-ceiling)
+		}
 	}
 }
 
 func TestSuggestedPriceAppliesTheWearFactor(t *testing.T) {
 	in := baseline()
 	in.TripKm = 100
-	in.WearFactor = 1.5 // cost = 12.60 × 1.5 = 18.90; /2 = 9.45 -> 9.50
+	in.WearFactor = 1.5 // cost = 12.60 × 1.5 = 18.90; /2 = 9.45 -> floored to 9.00
 
-	if got := SuggestedPriceCents(in); got != 950 {
-		t.Fatalf("SuggestedPriceCents = %d cents, want 950", got)
+	if got := SuggestedPriceCents(in); got != 900 {
+		t.Fatalf("SuggestedPriceCents = %d cents, want 900", got)
 	}
 }
 
@@ -56,12 +108,26 @@ func TestSuggestedPriceIsZeroAtTheFreeBelowThreshold(t *testing.T) {
 	}
 }
 
-func TestSuggestedPriceIsChargedJustAboveTheFreeBelowThreshold(t *testing.T) {
+// Above the free-below threshold but below one rounding step, the honest
+// suggestion is still nothing. A 5 km hop costs about 32 cents a head; the
+// smallest figure the app can express is 50, and quoting that would be asking
+// for half again as much as the fuel. Free is the accurate answer, not a
+// shortfall to be papered over with a minimum charge.
+func TestATripTooCheapToRoundToAStepIsSuggestedFree(t *testing.T) {
 	in := baseline()
-	in.TripKm = 5.01
+	in.TripKm = 5.01 // cost 0.63 €; one seat plus the driver is 0.32 € each
 
-	if got := SuggestedPriceCents(in); got == 0 {
-		t.Fatal("a trip just above the free-below threshold should not be free")
+	if got := SuggestedPriceCents(in); got != 0 {
+		t.Fatalf("SuggestedPriceCents = %d cents, want 0", got)
+	}
+}
+
+func TestSuggestedPriceIsChargedOnceItReachesAStep(t *testing.T) {
+	in := baseline()
+	in.TripKm = 40 // cost 5.04 €; 2.52 € each -> 2.50 €
+
+	if got := SuggestedPriceCents(in); got != 250 {
+		t.Fatalf("SuggestedPriceCents = %d cents, want 250", got)
 	}
 }
 
@@ -77,18 +143,16 @@ func TestSuggestedPriceIsZeroForNonFormulaPricingModes(t *testing.T) {
 	}
 }
 
-func TestSuggestedPriceRoundsToTheNearestHalfEuro(t *testing.T) {
+func TestSuggestedPriceFloorsToTheHalfEuroBelow(t *testing.T) {
 	tests := []struct {
 		name   string
 		tripKm float64
 		want   int
 	}{
 		// cost = 0.126 €/km; per_pax = cost/2 = 0.063 €/km.
-		// Exact half-step inputs are deliberately not asserted: they land on a
-		// binary-float midpoint, so which way they tip is not a business rule.
-		{"rounds up to the nearest step", 20, 150},     // 1.260 -> 1.50
-		{"rounds down to the nearest step", 16, 100},   // 1.008 -> 1.00
-		{"lands exactly on a step", 15.873015873, 100}, // 1.000 -> 1.00
+		{"floors rather than rounding up", 20, 100},               // 1.260 -> 1.00
+		{"floors to the step below", 16, 100},                     // 1.008 -> 1.00
+		{"keeps a share that lands on a step", 15.873015873, 100}, // 1.000 -> 1.00
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -126,7 +190,7 @@ func TestTollShareIsAddedOnTopOfTheFuelSuggestion(t *testing.T) {
 		FuelConsumptionLPer100Km: 7,
 		FuelPriceEUR:             1.8,
 		WearFactor:               1.0,
-		CurrentPassengers:        0,
+		OfferedSeats:             1,
 		Mode:                     PricingFormula,
 	}
 

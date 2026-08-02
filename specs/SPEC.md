@@ -62,9 +62,18 @@ contribution:
 
 ```
 cost = fuel_consumption_l_per_100km × fuel_price_eur × (trip_km / 100)
-suggested_per_passenger = cost × wear_factor / (passengers + 1)   # driver counts as one
+suggested_per_passenger = floor(cost × wear_factor / (offered_seats + 1), 0.50€)
 if trip_km ≤ driver.free_below_km: suggested = 0
 ```
+
+The divisor is every seat the driver published, plus the driver, and it does not
+change as the car fills. Dividing by the passengers actually aboard looks fairer
+and is not: each price freezes at accept, so a car filling one seat at a time
+collects cost/2 + cost/3 + cost/4, which is more than the trip cost. Flooring
+rather than rounding to nearest closes the other end of the same leak. A driver
+who fills one seat of four therefore recovers a fifth of their fuel, which is the
+right direction to be wrong in — see `docs/research/sources.md` on άρθρο 18 παρ.
+1 ν. 1903/1990.
 
 - `fuel_consumption`: from driver's car profile (manual entry; car model picker
   post-MVP).

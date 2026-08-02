@@ -107,7 +107,7 @@ Sequential ask flow, TTL, and transactional accept live in ARCHITECTURE.md.
 ```
 trip_km   = OSRM distance Ro' → Rd' along driver's route
 cost      = fuel_consumption/100 × fuel_price(region) × trip_km × wear_factor
-per_pax   = round(cost / (current_passengers + 1 + 1), 0.5€)   # +driver
+per_pax   = floor(cost / (offered_seats + 1), 0.5€)            # every seat, +driver
 if trip_km ≤ free_below_km or pricing_mode != 'formula': per_pax = 0
 ```
 

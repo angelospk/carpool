@@ -239,9 +239,7 @@ func (s *Service) pricingInputs(ctx context.Context, occurrenceID uuid.UUID, tri
 	var mode string
 	err := s.pool.QueryRow(ctx, `
 		SELECT d.fuel_consumption_l_100km, d.wear_factor, d.free_below_km,
-		       r.fuel_price_eur, o.pricing_mode,
-		       (SELECT count(*) FROM bookings b
-		        WHERE b.occurrence_id = o.id AND b.status IN ('confirmed','completed'))
+		       r.fuel_price_eur, o.pricing_mode, o.seats_total
 		FROM trip_occurrences o
 		JOIN route_templates t ON t.id = o.template_id
 		JOIN driver_profiles d ON d.user_id = t.driver_id
@@ -249,7 +247,7 @@ func (s *Service) pricingInputs(ctx context.Context, occurrenceID uuid.UUID, tri
 		JOIN regions r        ON r.id = u.home_region_id
 		WHERE o.id = $1`, occurrenceID).Scan(
 		&in.FuelConsumptionLPer100Km, &in.WearFactor, &in.FreeBelowKm,
-		&in.FuelPriceEUR, &mode, &in.CurrentPassengers)
+		&in.FuelPriceEUR, &mode, &in.OfferedSeats)
 	if err != nil {
 		return domain.PricingInputs{}, fmt.Errorf("asks: loading pricing inputs: %w", err)
 	}

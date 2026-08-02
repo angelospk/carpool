@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -399,3 +400,45 @@ func TestAskPriceCarriesNoTollForAPassengerWhoJoinsAfterThePlaza(t *testing.T) {
 		t.Fatalf("suggested %.2f € carries a toll the passenger drove past before boarding", price)
 	}
 }
+
+// The divisor in the suggested contribution has to come from the trip's own
+// published seat count, and this is the only test that proves it does.
+//
+// Every other price assertion here checks a shape: non-negative, a multiple of
+// fifty cents. A bug that read the seat count as zero would satisfy all of them,
+// because a zero divisor short-circuits to nothing and nothing is a fine price.
+// So this pins the two things that would be silently lost: the figure is
+// actually a figure, and widening the car lowers it.
+func TestTheSuggestedPriceIsDividedByTheSeatsTheTripPublishes(t *testing.T) {
+	ctx := context.Background()
+
+	suggest := func(t *testing.T, seats int) float64 {
+		t.Helper()
+		f := newFixture(t)
+		mustExec(t, f, `UPDATE trip_occurrences SET seats_total = `+itoa(seats)+`, seats_free = `+itoa(seats))
+		mustExec(t, f, `UPDATE ride_requests SET status = 'open'`)
+		mustExec(t, f, `DELETE FROM asks`)
+
+		askID, err := f.matcher().AskNext(ctx, f.requestID)
+		if err != nil {
+			t.Fatalf("AskNext with %d seats: %v", seats, err)
+		}
+		var price float64
+		must(t, f.pool.QueryRow(ctx,
+			`SELECT suggested_price_eur FROM asks WHERE id = $1`, askID).Scan(&price), "ask price")
+		return price
+	}
+
+	narrow := suggest(t, 1)
+	wide := suggest(t, 4)
+
+	if narrow <= 0 {
+		t.Fatalf("a one-seat car suggested %.2f €: the seat count is not reaching the formula", narrow)
+	}
+	if wide >= narrow {
+		t.Errorf("four seats suggested %.2f € and one seat %.2f €; spreading the same fuel over more people has to cost each of them less",
+			wide, narrow)
+	}
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
