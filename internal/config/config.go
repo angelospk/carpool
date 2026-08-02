@@ -38,6 +38,10 @@ type Config struct {
 	SMSSender   string
 	SMSTemplate string
 
+	// InviteOnly makes a new account require a code somebody handed out. It
+	// does not affect anyone who already has an account.
+	InviteOnly bool
+
 	// DevMode enables developer conveniences that must never be reachable in
 	// production — most importantly printing the OTP to the console instead of
 	// sending an SMS. It defaults to false so production is the safe default.
@@ -48,9 +52,10 @@ type Config struct {
 // required variables are present.
 func Load(lookup LookupFunc) (Config, error) {
 	cfg := Config{
-		OSRMURL:  optional(lookup, "OSRM_URL", "http://localhost:5000"),
-		HTTPAddr: optional(lookup, "HTTP_ADDR", ":8080"),
-		DevMode:  optional(lookup, "DEV_MODE", "false") == "true",
+		OSRMURL:    optional(lookup, "OSRM_URL", "http://localhost:5000"),
+		HTTPAddr:   optional(lookup, "HTTP_ADDR", ":8080"),
+		DevMode:    optional(lookup, "DEV_MODE", "false") == "true",
+		InviteOnly: optional(lookup, "INVITE_ONLY", "false") == "true",
 
 		SMSURL:    optional(lookup, "SMS_URL", ""),
 		SMSToken:  optional(lookup, "SMS_TOKEN", ""),

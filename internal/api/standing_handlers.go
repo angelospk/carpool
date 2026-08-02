@@ -235,3 +235,22 @@ func (d Deps) handleAgain(w http.ResponseWriter, r *http.Request) {
 		"request_id": requestID, "ask_id": askID, "asking": true,
 	})
 }
+
+// handleMyInvite returns the caller's own invite code, minting one the first
+// time they ask.
+func (d Deps) handleMyInvite(w http.ResponseWriter, r *http.Request) {
+	userID, ok := callerID(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
+		return
+	}
+
+	code, err := d.Invites.Mine(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not load your invite")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"code": code.Code, "max_uses": code.MaxUses, "used_count": code.UsedCount,
+	})
+}

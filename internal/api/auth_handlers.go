@@ -5,11 +5,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 
 	"carpool/internal/auth"
-	"carpool/internal/store"
+	"carpool/internal/invites"
 )
 
 // maxBodyBytes bounds request bodies; nothing this API accepts is large.
@@ -60,6 +61,7 @@ func (d Deps) handleOTPVerify(w http.ResponseWriter, r *http.Request) {
 		Code     string `json:"code"`
 		Name     string `json:"name"`
 		RegionID string `json:"region_id"`
+		Invite   string `json:"invite_code"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -80,8 +82,16 @@ func (d Deps) handleOTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := store.EnsureUser(r.Context(), d.Pool, body.Phone, body.Name, regionID)
-	if err != nil {
+	user, err := d.Invites.Admit(r.Context(), body.Phone, body.Name, regionID,
+		strings.ToUpper(strings.TrimSpace(body.Invite)))
+	switch {
+	case errors.Is(err, invites.ErrCodeRequired):
+		writeError(w, http.StatusForbidden, "invite_required", "this pilot is invite-only")
+		return
+	case errors.Is(err, invites.ErrCodeNotUsable):
+		writeError(w, http.StatusForbidden, "invite_invalid", "that invite code cannot be used")
+		return
+	case err != nil:
 		writeError(w, http.StatusBadRequest, "invalid_request", "could not create the account; check region_id")
 		return
 	}

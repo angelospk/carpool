@@ -15,6 +15,7 @@ import (
 	"carpool/internal/bookings"
 	"carpool/internal/clock"
 	"carpool/internal/geo"
+	"carpool/internal/invites"
 	"carpool/internal/jobs"
 	"carpool/internal/standing"
 	"carpool/internal/ws"
@@ -41,6 +42,8 @@ type Deps struct {
 	Standing *standing.Service
 	// Bookings cancels a seat, whichever way it was booked.
 	Bookings *bookings.Service
+	// Invites admits new accounts, and decides whether a code is needed at all.
+	Invites *invites.Service
 
 	// Router snaps published routes to the road network.
 	Router *geo.OSRM
@@ -123,6 +126,7 @@ func NewRouter(deps Deps) http.Handler {
 
 			r.Get("/trips/upcoming", deps.handleUpcomingTrips)
 			r.Get("/trips/past", deps.handlePastTrips)
+			r.Get("/invites/mine", deps.handleMyInvite)
 			r.Route("/trips/{id}", func(r chi.Router) {
 				r.Get("/", deps.handleGetTrip)
 				r.Post("/confirm", deps.handleConfirmTrip)

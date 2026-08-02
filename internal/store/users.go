@@ -40,14 +40,26 @@ type Region struct {
 // Name and region are only applied at creation: a later sign-in must not let
 // whatever the client happens to send overwrite the stored profile.
 func EnsureUser(ctx context.Context, pool *pgxpool.Pool, phone, name string, regionID uuid.UUID) (User, error) {
+	return EnsureUserTx(ctx, pool, phone, name, regionID)
+}
+
+// querier is the part of pgx both a pool and a transaction satisfy, so a caller
+// that has to create the account alongside other work can pass its transaction.
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// EnsureUserTx is EnsureUser inside the caller's transaction.
+func EnsureUserTx(ctx context.Context, q querier, phone, name string, regionID uuid.UUID) (User, error) {
 	var u User
-	err := pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		INSERT INTO users (phone, name, home_region_id)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (phone) DO UPDATE SET updated_at = now()
-		RETURNING id, phone, name, photo_url, gender, home_region_id, women_only, status`,
+		RETURNING id, phone, name, photo_url, gender, home_region_id, women_only, status, social_url`,
 		phone, name, regionID).Scan(
-		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status)
+		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
+		&u.SocialURL)
 	if err != nil {
 		return User{}, fmt.Errorf("store: ensuring user: %w", err)
 	}
