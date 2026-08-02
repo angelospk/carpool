@@ -283,8 +283,13 @@ the car. The app never moves money. What it protects is the number it puts on
 the screen, which is the thing people will treat as fair.
 
 **Fuel price.** `regions.fuel_price_eur` is seeded per region and never moves.
-A scraper against a published Greek fuel-price source, per region and per fuel
-type (petrol, diesel), run daily, would keep it honest. Three things that will
+The source to use is not a scraper: the Παρατηρητήριο Τιμών Υγρών Καυσίμων is
+published as an open dataset on data.gov.gr
+(`parathrhthrio-timwn-ygrwn-kaysimwn`), served by a JSON API at
+`api/v1/query/<dataset>` behind a free token. Structured data with a licence
+beats parsing the ministry's HTML, and it removes the question of whether
+automated fetching is allowed. Confirm the per-prefecture and per-fuel breakdown
+against the live response before building. Three things that will
 bite whoever builds it:
 
 - Diesel and petrol are different numbers and the car decides which applies, so

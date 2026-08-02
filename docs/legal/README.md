@@ -33,6 +33,26 @@ should look at rather than a generator.
 country is not filled in. Both feed §6 and §7 of the policy, and the second one
 decides whether there are international transfers to declare at all.
 
+## One citation in the memo does not hold
+
+The memo supports its DPIA advice with this: "Σύμφωνα με τον ν. 5307/2026
+προβλέπεται εκτίμηση αντικτύπου για συγκεκριμένη ψηφιακή πλατφόρμα πριν από
+παραγωγική λειτουργία, σύμφωνα με το άρθρο 35 GDPR."
+
+Law 5307/2026 exists. It was published in ΦΕΚ Α΄ 90 on 11 June 2026 and it is
+titled "Εφαρμογή του Συμφώνου για τη Μετανάστευση και το Άσυλο, λοιπές διατάξεις
+του Υπουργείου Μετανάστευσης και Ασύλου και άλλες επείγουσες διατάξεις". It is
+migration and asylum law. Whatever platform-specific impact assessment the memo
+is thinking of, this is not the statute that requires it.
+
+Checked against taxheaven.gr, forin.gr and e-nomothesia.gr, which agree on the
+title and the gazette reference.
+
+This does not change the practical advice, which was that a DPIA is prudent for
+a pilot processing movement data and an optional gender field. It does mean the
+memo cites a law it did not read, so every other authority it names deserves the
+same check before anything is relied on.
+
 ## What was asked for and did not come back
 
 The brief asked for a short legal memo on six questions. Only the two documents
