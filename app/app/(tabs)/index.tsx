@@ -24,16 +24,26 @@ export default function HomeScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const me = useSession((s) => s.me);
+  // The tabs mount before the session is settled, so without this both queries
+  // fire without a token and come back 401 on every cold start — two failed
+  // requests, two console errors, and on a phone two round trips over mobile
+  // data before the sign-in screen has even been drawn.
+  const signedIn = useSession((s) => s.status === 'signedIn');
 
   // Shares react-query's cache key with PastTrips, so asking here costs no
   // extra request. It is asked at all because an empty upcoming list must not
   // hide the history — someone with nothing booked is exactly who wants to
   // repeat a ride.
-  const past = useQuery({ queryKey: ['trips', 'past'], queryFn: () => api.pastTrips() });
+  const past = useQuery({
+    queryKey: ['trips', 'past'],
+    queryFn: () => api.pastTrips(),
+    enabled: signedIn,
+  });
 
   const trips = useQuery({
     queryKey: ['trips', 'upcoming'],
     queryFn: () => api.upcomingTrips(),
+    enabled: signedIn,
   });
 
   const all = trips.data?.trips ?? [];

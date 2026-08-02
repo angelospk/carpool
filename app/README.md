@@ -18,6 +18,9 @@ with these two packages in particular.
 Point it at a backend with `EXPO_PUBLIC_API_URL`; without one it falls back to
 `http://localhost:8080`.
 
+Verified in a headless browser on 3 August 2026: the page loads with no console
+errors and a full sign-in — phone, OTP, name, region — reaches the home screen.
+
 **What the browser will not tell you.** Push notifications do not exist on web.
 `expo-secure-store` has no web implementation, so tokens land somewhere less
 protected than on a device — fine for looking around, not a security test. And

@@ -12,12 +12,20 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { upcomingTrips: jest.fn(), trip: jest.fn() },
+  api: { upcomingTrips: jest.fn(), pastTrips: jest.fn(), trip: jest.fn() },
 }));
+
+// Prefixed `mock` because jest.mock's factory may not close over anything else.
+let mockSessionStatus: 'loading' | 'signedOut' | 'signedIn' = 'signedIn';
 
 jest.mock('../../src/state/session', () => ({
   useSession: (select: (s: unknown) => unknown) =>
-    select({ me: { id: 'u1', name: 'Χαράλαμπος', photo_url: null } }),
+    select({
+      me: { id: 'u1', name: 'Χαράλαμπος', photo_url: null },
+      get status() {
+        return mockSessionStatus;
+      },
+    }),
 }));
 
 const trip = (over: Partial<Record<string, unknown>> = {}) => ({
@@ -91,4 +99,26 @@ test('gives the hero card to the next trip only', async () => {
 
   expect(screen.getAllByTestId('route-glyph')).toHaveLength(1);
   expect(screen.getByTestId('trip-t2')).toBeTruthy();
+});
+
+
+// The tab navigator mounts before the session is settled. Asking the server for
+// this user's trips before there is a user gets two 401s on every cold start —
+// harmless but wasteful, and it buries any real error in noise.
+describe('before the session is settled', () => {
+  afterEach(() => {
+    mockSessionStatus = 'signedIn';
+  });
+
+  it.each(['loading', 'signedOut'] as const)('asks for nothing while %s', async (status) => {
+    mockSessionStatus = status;
+    (api.upcomingTrips as jest.Mock).mockResolvedValue({ trips: [] });
+    (api.pastTrips as jest.Mock).mockResolvedValue({ trips: [] });
+
+    render(wrap(<HomeScreen />));
+    await waitFor(() => expect(screen.queryByText('Χαράλαμπος')).toBeTruthy());
+
+    expect(api.upcomingTrips).not.toHaveBeenCalled();
+    expect(api.pastTrips).not.toHaveBeenCalled();
+  });
 });

@@ -1,7 +1,9 @@
 // Credential storage.
 //
-// Tokens live in the secure store (Keychain / Keystore), never in AsyncStorage:
-// AsyncStorage is plain text on disk and is swept into device backups.
+// Where the tokens actually sit is decided by ./secureStorage, which is the
+// Keychain or the Keystore on a device and localStorage on web, because
+// expo-secure-store has no web implementation and throwing on import took the
+// whole web build down. That file explains what the web fallback costs.
 //
 // Every mutation carries an epoch. A refresh is a read-modify-write that spans a
 // network round trip, so by the time it finishes the user may have signed out or
@@ -9,7 +11,7 @@
 // on a device that just logged out, or overwrite one account's tokens with
 // another's. The epoch makes those writes detectable and refusable.
 
-import * as SecureStore from 'expo-secure-store';
+import { storage } from './secureStorage';
 
 const KEY = 'carpool.tokens';
 
@@ -47,7 +49,7 @@ export function tokenEpoch(): number {
 export function getTokens(): Promise<Tokens | null> {
   return serialize(async () => {
     if (cached !== undefined) return cached;
-    const raw = await SecureStore.getItemAsync(KEY);
+    const raw = await storage.getItemAsync(KEY);
     // Re-check: a clear may have run while the read was outstanding.
     if (cached !== undefined) return cached;
     cached = raw ? (JSON.parse(raw) as Tokens) : null;
@@ -68,7 +70,7 @@ export function setTokens(tokens: Tokens, expectedEpoch?: number): Promise<boole
     // Disk first: if the write fails, the cache must not claim a token that is
     // not durably stored, or a restart would replay the older one and the
     // server would revoke the whole family.
-    await SecureStore.setItemAsync(KEY, JSON.stringify(tokens));
+    await storage.setItemAsync(KEY, JSON.stringify(tokens));
     cached = tokens;
     return true;
   });
@@ -79,7 +81,7 @@ export function clearTokens(): Promise<void> {
   return serialize(async () => {
     epoch += 1;
     cached = null;
-    await SecureStore.deleteItemAsync(KEY);
+    await storage.deleteItemAsync(KEY);
   });
 }
 
