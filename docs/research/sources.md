@@ -5,26 +5,57 @@ what the app has to say to drivers. Each entry records what was checked and what
 was only reported, because the two are not the same and the memo that started
 this got caught out on exactly that distinction.
 
-## 1. There is no carpooling statute, so the cap is ours
+## 1. No statute authorises carpooling, but one criminalises the thing next to it
 
-Greek law has no act that authorises or licences carpooling. What holds it up is
-an absence: a driver making a trip they would make anyway, sharing real costs,
-taking no profit, is not carrying passengers for reward. Once there is profit it
-becomes unlicensed paid transport.
+There is no Greek act that permits or licences carpooling. What holds it up is an
+absence: a driver making a trip they would make anyway, sharing real costs,
+taking no profit, is not carrying passengers for reward.
 
-Two consequences for the code:
+The provision on the other side of that line is real, was checked, and is the
+most consequential fact in this file.
 
-- The price ceiling is a **product decision**, not compliance with a rule. There
-  is no article to cite and no number handed down. What keeps the app on the
-  right side is that the suggested contribution cannot exceed the trip's real
-  cost, which is exactly why `wear_factor` and the driver-entered consumption in
-  RISKS 13 matter more than they look.
-- ν. 4530/2018 is not relevant. It governs taxis and hired cars with a driver.
+**Άρθρο 18 παρ. 1 ν. 1903/1990** (ΦΕΚ Α΄ 142/23.10.1990), as it now stands after
+άρθρο 22 ν. 4530/2018:
 
-Unverified and not to be repeated in any user-facing text until someone reads the
-gazette: a claim that the profit/cost-sharing line comes from **άρθρο 18 παρ. 1
-ν. 1903/1990**, and a reference to **ΠΔ 50/2012**. Both were asserted without a
-citation.
+> Ο οδηγός κάθε Επιβατικού Ιδιωτικής Χρήσης (Ε.Ι.Χ.) οχήματος, ο οποίος
+> διενεργεί επιβατικές μεταφορές **με κόμιστρο**, οι οποίες έχουν ανατεθεί σε
+> άλλο φορέα ή πρόσωπο σύμφωνα με τις ισχύουσες διατάξεις, καθώς και ο ιδιοκτήτης
+> αυτού, εφόσον είναι πρόσωπο διαφορετικό του οδηγού, τιμωρούνται με **φυλάκιση
+> τουλάχιστον έξι (6) μηνών** και χρηματική ποινή **τουλάχιστον τριών χιλιάδων
+> (3.000) ευρώ**.
+
+Its history, because the version matters more than the number: repealed by άρθρο
+50 ν. 2963/2001, brought back by παρ. 3 άρθρου 11 ν. 3082/2002, replaced by παρ.
+8 άρθρου 17 ν. 3534/2007, replaced again by άρθρο 22 ν. 4530/2018. The 1990
+original said *up to* three months. It now says *at least* six. Any text still
+quoting drachmas is quoting a repealed version.
+
+Four things follow, and they are not the ones an unsourced summary would suggest:
+
+- It is **criminal, not administrative**. Prison, not a ticket. Παρ. 3 sends it
+  through the summary procedure of άρθρα 417 ΚΠΔ.
+- It reaches the **owner as well as the driver** when they are different people.
+- The trigger word is **κόμιστρο**, a fare. The statute does not define it and
+  does not distinguish it from sharing costs. That undefined gap is the entire
+  space this app operates in.
+- So the earlier reading that ν. 4530/2018 is only about taxis was half right.
+  The law as a whole is, but its άρθρο 22 is precisely the provision that
+  criminalises a private car carrying passengers for a fare.
+
+Consequences for the code:
+
+- The price ceiling is a **product decision**, not compliance with a rule. No
+  article hands down a number. What keeps the app on the safe side is that the
+  suggested contribution cannot exceed the trip's real cost, which is why the
+  driver-typed consumption and `wear_factor` of RISKS 13 carry more weight than
+  their size suggests.
+- Never the word **κόμιστρο**, anywhere a user can see it, in any language, and
+  never a synonym that means the same thing. MOBILE.md already requires
+  "προτεινόμενη συνεισφορά"; this is the reason, and it is a harder rule than a
+  style preference. Checked: the word appears nowhere in the app.
+
+Still unverified, and not to be repeated until someone reads it: a reference to
+**ΠΔ 50/2012**, asserted without a citation.
 
 ## 2. Motor insurance: the premise was wrong
 
