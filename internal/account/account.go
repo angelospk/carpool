@@ -1,0 +1,280 @@
+// Package account carries out the two requests a person can make about their
+// own data: give me a copy, and erase me.
+//
+// Erasure here means anonymisation rather than DELETE, and the reason is that a
+// carpool account is not only its owner's data. A rating is somebody else's
+// judgement, a message is half of somebody else's conversation, and a report is
+// the record that protected a third person. Cascading a DELETE through users
+// would rewrite all of it, and the reports table refuses outright: its foreign
+// keys carry no ON DELETE at all, so a hard delete fails rather than quietly
+// destroying evidence.
+//
+// So the person becomes unidentifiable and everything that was about other
+// people stays standing.
+package account
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"carpool/internal/clock"
+)
+
+// ErrNotFound means there is no such account.
+var ErrNotFound = errors.New("account: no such account")
+
+// Service exports and erases accounts.
+type Service struct {
+	pool  *pgxpool.Pool
+	clock clock.Clock
+}
+
+// NewService returns a service reading time from c.
+func NewService(pool *pgxpool.Pool, c clock.Clock) *Service {
+	return &Service{pool: pool, clock: c}
+}
+
+// Delete erases the person and leaves the record.
+//
+// It is idempotent: a second call on an account already erased changes nothing
+// and reports success, because the answer to "erase me" is the same either way.
+func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
+	now := s.clock.Now()
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("account: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var status string
+	err = tx.QueryRow(ctx,
+		`SELECT status FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("account: loading the account: %w", err)
+	}
+	if status == "deleted" {
+		return nil
+	}
+
+	// Seats first, while the account can still be identified. A deleted person
+	// holding next Tuesday's seat is a seat nobody can use and a driver who
+	// stops for nobody.
+	if _, err := tx.Exec(ctx, `
+		WITH released AS (
+			UPDATE bookings b
+			SET status = 'cancelled_by_passenger', updated_at = now()
+			FROM trip_occurrences o
+			WHERE b.passenger_id = $1
+			  AND o.id = b.occurrence_id
+			  AND b.status = 'confirmed'
+			  AND o.depart_earliest > $2
+			RETURNING b.occurrence_id, b.seats
+		)
+		UPDATE trip_occurrences o
+		SET seats_free = o.seats_free + r.seats, updated_at = now()
+		FROM released r WHERE o.id = r.occurrence_id`, userID, now); err != nil {
+		return fmt.Errorf("account: releasing seats: %w", err)
+	}
+
+	// Stop offering rides that nobody will now turn up to drive, and withdraw
+	// anything still waiting for an answer.
+	//
+	// Every statement takes the same two parameters whether it needs both or
+	// not, because a list where the placeholders differ per line is a list that
+	// breaks the first time somebody adds to it.
+	windDown := []string{
+		`UPDATE route_templates SET active = false, updated_at = now()
+		 WHERE driver_id = $1 AND $2::timestamptz IS NOT NULL`,
+		`UPDATE trip_occurrences o SET status = 'cancelled', updated_at = now()
+		 FROM route_templates t
+		 WHERE t.id = o.template_id AND t.driver_id = $1
+		   AND o.status = 'scheduled' AND o.depart_earliest > $2`,
+		`UPDATE ride_requests SET status = 'cancelled', updated_at = now()
+		 WHERE passenger_id = $1 AND status IN ('open','asking') AND $2::timestamptz IS NOT NULL`,
+		`UPDATE standing_arrangements SET status = 'cancelled', updated_at = now()
+		 WHERE passenger_id = $1 AND status IN ('pending','active') AND $2::timestamptz IS NOT NULL`,
+		// Credentials and reachability go outright: they identify a living
+		// person and serve no purpose once the account is closed.
+		`DELETE FROM push_tokens WHERE user_id = $1 AND $2::timestamptz IS NOT NULL`,
+		`DELETE FROM refresh_tokens WHERE user_id = $1 AND $2::timestamptz IS NOT NULL`,
+		`UPDATE invite_codes SET disabled_at = $2 WHERE created_by = $1 AND disabled_at IS NULL`,
+	}
+	for _, stmt := range windDown {
+		if _, err := tx.Exec(ctx, stmt, userID, now); err != nil {
+			return fmt.Errorf("account: winding down: %w", err)
+		}
+	}
+
+	// The phone is the identifier, and it is unique, so it cannot simply be
+	// blanked. Replacing it with the account's own id keeps the column's
+	// promise while making the number unrecoverable.
+	if _, err := tx.Exec(ctx, `
+		UPDATE users SET
+			phone      = 'deleted:' || id::text,
+			name       = 'Διαγραμμένος χρήστης',
+			photo_url  = NULL,
+			social_url = NULL,
+			gender     = NULL,
+			status     = 'deleted',
+			updated_at = now()
+		WHERE id = $1`, userID); err != nil {
+		return fmt.Errorf("account: anonymising: %w", err)
+	}
+
+	// The car identifies the driver as surely as the phone does, so the plate
+	// and the model go. The row itself stays: route_templates points at
+	// driver_profiles with ON DELETE CASCADE, so deleting it would take every
+	// route this person ever published, and with them the occurrences, the
+	// bookings other people held and the ratings attached to those bookings.
+	// Erasing one account is not licence to erase everyone else's history.
+	if _, err := tx.Exec(ctx, `
+		UPDATE driver_profiles
+		SET car_model = '—', car_color = NULL, car_plate = '—', updated_at = now()
+		WHERE user_id = $1`, userID); err != nil {
+		return fmt.Errorf("account: clearing the vehicle: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO data_requests (user_id, kind, handled_at)
+		VALUES ($1, 'erasure', $2)`, userID, now); err != nil {
+		return fmt.Errorf("account: recording the request: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("account: commit: %w", err)
+	}
+	return nil
+}
+
+// Export returns everything held about the person, as JSON.
+//
+// Article 20 asks for a commonly readable, machine-readable format, which JSON
+// is. Messages are included as sent and as received, because a conversation the
+// person took part in is theirs to read even though it is not theirs alone.
+func (s *Service) Export(ctx context.Context, userID uuid.UUID) ([]byte, error) {
+	now := s.clock.Now()
+
+	out := map[string]any{"exported_at": now.UTC().Format(time.RFC3339)}
+
+	profile := map[string]any{}
+	var (
+		phone, name           string
+		photo, social, gender *string
+		womenOnly             bool
+		status                string
+		createdAt             time.Time
+	)
+	err := s.pool.QueryRow(ctx, `
+		SELECT phone, name, photo_url, social_url, gender, women_only, status, created_at
+		FROM users WHERE id = $1`, userID).
+		Scan(&phone, &name, &photo, &social, &gender, &womenOnly, &status, &createdAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("account: loading the profile: %w", err)
+	}
+	profile["phone"] = phone
+	profile["name"] = name
+	profile["photo_url"] = photo
+	profile["social_url"] = social
+	profile["gender"] = gender
+	profile["women_only"] = womenOnly
+	profile["status"] = status
+	profile["created_at"] = createdAt.UTC().Format(time.RFC3339)
+	out["profile"] = profile
+
+	sections := []struct {
+		name string
+		sql  string
+	}{
+		{"routes_published", `
+			SELECT origin_label, destination_label, route_km, seats, active, created_at
+			FROM route_templates WHERE driver_id = $1 ORDER BY created_at`},
+		{"requests_made", `
+			SELECT origin_label, destination_label, window_start, window_end, seats, status, created_at
+			FROM ride_requests WHERE passenger_id = $1 ORDER BY created_at`},
+		{"trips_taken", `
+			SELECT t.origin_label, t.destination_label, o.service_date, b.price_eur, b.seats, b.status
+			FROM bookings b
+			JOIN trip_occurrences o ON o.id = b.occurrence_id
+			JOIN route_templates  t ON t.id = o.template_id
+			WHERE b.passenger_id = $1 ORDER BY o.service_date`},
+		{"messages", `
+			SELECT body, created_at, (sender_id = $1) AS sent_by_me
+			FROM trip_messages m
+			WHERE m.sender_id = $1
+			   OR m.occurrence_id IN (SELECT occurrence_id FROM bookings WHERE passenger_id = $1)
+			ORDER BY created_at`},
+		{"ratings_given", `
+			SELECT stars, tag, created_at FROM ratings WHERE rater_id = $1 ORDER BY created_at`},
+		{"ratings_received", `
+			SELECT stars, tag, created_at FROM ratings WHERE ratee_id = $1 ORDER BY created_at`},
+		{"invite_codes", `
+			SELECT code, max_uses, used_count, created_at
+			FROM invite_codes WHERE created_by = $1 ORDER BY created_at`},
+	}
+	for _, section := range sections {
+		rows, err := s.pool.Query(ctx, section.sql, userID)
+		if err != nil {
+			return nil, fmt.Errorf("account: exporting %s: %w", section.name, err)
+		}
+		items, err := collect(rows)
+		if err != nil {
+			return nil, fmt.Errorf("account: exporting %s: %w", section.name, err)
+		}
+		out[section.name] = items
+	}
+
+	body, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("account: encoding the export: %w", err)
+	}
+
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO data_requests (user_id, kind, handled_at)
+		VALUES ($1, 'access', $2)`, userID, now); err != nil {
+		return nil, fmt.Errorf("account: recording the request: %w", err)
+	}
+	return body, nil
+}
+
+// collect turns rows into maps keyed by column name, so a section can be added
+// by writing one query rather than one query and one struct.
+func collect(rows pgx.Rows) ([]map[string]any, error) {
+	defer rows.Close()
+
+	names := make([]string, 0, len(rows.FieldDescriptions()))
+	for _, f := range rows.FieldDescriptions() {
+		names = append(names, string(f.Name))
+	}
+
+	out := []map[string]any{}
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return nil, err
+		}
+		item := make(map[string]any, len(names))
+		for i, name := range names {
+			if t, ok := values[i].(time.Time); ok {
+				item[name] = t.UTC().Format(time.RFC3339)
+				continue
+			}
+			item[name] = values[i]
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}

@@ -16,14 +16,11 @@ of art are untouched.
 These are promises the software does not currently keep. Each one is either a
 gap to close before publishing or a sentence to change.
 
-**Deletion and access have no endpoints.** The policy offers deletion within 30
-days and rights of access, portability and correction. There is no
-`DELETE /me`, no export, and no admin path that performs any of it. Today those
-requests could only be honoured by hand, in psql. Closing this is real work: the
-schema has foreign keys from bookings, asks, ratings, messages and invite
-redemptions to `users`, and deletion has to decide, per table, between removal
-and anonymisation. Ratings in particular cannot simply vanish without rewriting
-other people's history.
+**Deletion and access: done.** `DELETE /v1/me` and `GET /v1/me/export` exist,
+and every request is written to `data_requests` so it can be shown that it was
+answered. Erasure anonymises rather than deletes, because a rating is somebody
+else's judgement and a report protected a third person; `internal/account`
+explains the reasoning. Correction is `PATCH /v1/me`, which already existed.
 
 **The chat retention promise is unimplemented.** Nothing deletes messages after
 twelve months. There is no retention job at all, for any table.

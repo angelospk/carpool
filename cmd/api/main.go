@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"carpool/internal/account"
 	"carpool/internal/api"
 	"carpool/internal/asks"
 	"carpool/internal/auth"
@@ -146,6 +147,7 @@ func run() error {
 		Standing: standing.NewService(pool, clk),
 		Bookings: bookings.NewService(pool, clk),
 		Invites:  invites.NewService(pool, clk, cfg.InviteOnly),
+		Account:  account.NewService(pool, clk),
 
 		Router:          router,
 		Materializer:    materializer,

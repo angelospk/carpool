@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"carpool/internal/account"
 	"carpool/internal/asks"
 	"carpool/internal/auth"
 	"carpool/internal/bookings"
@@ -44,6 +45,8 @@ type Deps struct {
 	Bookings *bookings.Service
 	// Invites admits new accounts, and decides whether a code is needed at all.
 	Invites *invites.Service
+	// Account answers the two requests a person can make about their own data.
+	Account *account.Service
 
 	// Router snaps published routes to the road network.
 	Router *geo.OSRM
@@ -97,6 +100,10 @@ func NewRouter(deps Deps) http.Handler {
 
 			r.Get("/me", deps.handleGetMe)
 			r.Patch("/me", deps.handlePatchMe)
+			if deps.Account != nil {
+				r.Get("/me/export", deps.handleExportMe)
+				r.Delete("/me", deps.handleDeleteMe)
+			}
 			r.Put("/me/push-token", deps.handlePutPushToken)
 
 			if deps.Router != nil {

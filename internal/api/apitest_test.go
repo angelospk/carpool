@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"carpool/internal/account"
 	"carpool/internal/api"
 	"carpool/internal/asks"
 	"carpool/internal/auth"
@@ -70,6 +71,7 @@ func newHarness(t *testing.T) *harness {
 		Standing: standing.NewService(pool, c),
 		Bookings: bookings.NewService(pool, c),
 		Invites:  invites.NewService(pool, c, false),
+		Account:  account.NewService(pool, c),
 	})
 
 	return &harness{t: t, router: router, pool: pool, clock: c, sms: sms, regionID: regionID}

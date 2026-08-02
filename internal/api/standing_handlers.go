@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"carpool/internal/account"
 	"carpool/internal/asks"
 	"carpool/internal/bookings"
 	"carpool/internal/standing"
@@ -253,4 +254,42 @@ func (d Deps) handleMyInvite(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"code": code.Code, "max_uses": code.MaxUses, "used_count": code.UsedCount,
 	})
+}
+
+// handleExportMe returns everything held about the caller, as a JSON download.
+func (d Deps) handleExportMe(w http.ResponseWriter, r *http.Request) {
+	userID, ok := callerID(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
+		return
+	}
+
+	body, err := d.Account.Export(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not build your export")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="carpool-data.json"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// handleDeleteMe erases the caller.
+func (d Deps) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
+	userID, ok := callerID(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
+		return
+	}
+
+	switch err := d.Account.Delete(r.Context(), userID); {
+	case errors.Is(err, account.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "no such account")
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "could not delete your account")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
