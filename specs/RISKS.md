@@ -246,6 +246,23 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
     one API process and a queue that drains in seconds, so a deploy is
     effectively a drain; if that ever stops being true, version the payloads.
 
+13. **The driver sets their own fuel consumption, and the price follows it.**
+    `driver_profiles.fuel_consumption_l_100km` defaults to 7.0 and is whatever
+    the driver types. The suggested contribution is
+    `consumption/100 × fuel_price × km × wear`, so a driver who enters 14 asks
+    for roughly double. Nothing checks it against the car they actually drive,
+    and the passenger has no way to tell.
+
+    The fuel price has the mirror problem from the other side:
+    `regions.fuel_price_eur` is a single number seeded per region and updated by
+    hand. It goes stale, and when it does the suggestion is wrong for everybody
+    in that region at once.
+
+    Neither is urgent while the pilot is twenty drivers who know each other, and
+    both matter the moment it is not. The intended fix is in PROGRESS.md under
+    "Pricing that nobody can tilt"; the trigger to build it is the first
+    complaint that a price looked too high.
+
 ## Deferred tech (parked, with triggers to revisit)
 
 | Deferred | Revisit when |

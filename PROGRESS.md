@@ -255,6 +255,50 @@ Worth noting what this says about review: three rounds of high-effort adversaria
 review of the *code* found real bugs and never once questioned the *data* the
 code was reasoning over.
 
+## Pricing that nobody can tilt (planned, 2026-08-02)
+
+Two inputs to the suggested contribution are currently taken on trust, and both
+are the driver's word.
+
+**Consumption.** The driver types a litres-per-100km figure into their profile.
+It defaults to 7.0 and nothing checks it. Since the price is linear in it,
+typing 14 doubles what every passenger is asked for. The plan is to remove the
+field from the driver entirely: they pick a make and model, and the consumption
+comes from a table shipped with the app, the same way toll prices already do.
+
+That table is the work. Options, roughly in order of how much they cost:
+
+- A checked-in dataset of common models in Greece with a combined figure each,
+  harvested once and reviewed, exactly like `internal/tolls/data/greece.json`.
+  The same review gate applies: a refresh that moves a figure by more than a
+  threshold stops and asks a human.
+- Falling back to a class average (small petrol, medium diesel, van) when the
+  model is not in the table, and saying on screen that it is an estimate.
+- Letting a driver appeal a figure to the operator rather than edit it. The
+  point is that the number is not theirs to choose.
+
+Note what this buys and what it does not: it stops a driver inflating the
+suggestion, but it cannot stop two people agreeing on any figure they like in
+the car. The app never moves money. What it protects is the number it puts on
+the screen, which is the thing people will treat as fair.
+
+**Fuel price.** `regions.fuel_price_eur` is seeded per region and never moves.
+A scraper against a published Greek fuel-price source, per region and per fuel
+type (petrol, diesel), run daily, would keep it honest. Three things that will
+bite whoever builds it:
+
+- Diesel and petrol are different numbers and the car decides which applies, so
+  the driver profile has to record fuel type before the price can be picked.
+- A scraper that fails silently leaves a stale price that still looks live. It
+  needs a fetched-at timestamp, and the price needs to be visibly an estimate
+  once it is older than a few days.
+- Prices move for everyone at once. A quote frozen at booking must keep the
+  price it was quoted at, which the schema already does for bookings.
+
+Neither of these is scheduled. They are written down because the design
+decision, that the driver does not get to set what a kilometre costs, should be
+made before the code and not after the first argument about a price.
+
 ## Deliberately not built
 
 Parked with a reason, not forgotten:
