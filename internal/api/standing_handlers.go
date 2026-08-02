@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"carpool/internal/asks"
+	"carpool/internal/bookings"
 	"carpool/internal/standing"
 	"carpool/internal/store"
 )
@@ -113,14 +114,25 @@ func (d Deps) handleCancelArrangement(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleSkipWeek gives back one week of an arrangement without ending it.
-func (d Deps) handleSkipWeek(w http.ResponseWriter, r *http.Request) {
+// handleCancelBooking gives back one seat. For a standing arrangement that is
+// one week called off, and the agreement carries on.
+func (d Deps) handleCancelBooking(w http.ResponseWriter, r *http.Request) {
 	userID, bookingID, ok := d.standingParams(w, r)
 	if !ok {
 		return
 	}
-	if err := d.Standing.SkipWeek(r.Context(), bookingID, userID); err != nil {
-		d.writeStandingError(w, err)
+	switch err := d.Bookings.Cancel(r.Context(), bookingID, userID); {
+	case errors.Is(err, bookings.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "no such booking")
+		return
+	case errors.Is(err, bookings.ErrNotYours):
+		writeError(w, http.StatusForbidden, "not_yours", "that seat is not yours")
+		return
+	case errors.Is(err, bookings.ErrDeparted):
+		writeError(w, http.StatusConflict, "departed", "that trip has already left")
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "could not cancel that seat")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

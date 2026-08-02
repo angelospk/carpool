@@ -329,71 +329,6 @@ func TestDecliningLeavesEveryWeekAlone(t *testing.T) {
 	}
 }
 
-func TestSkippingOneWeekLeavesTheArrangementStanding(t *testing.T) {
-	w := newWorld(t)
-	ctx := context.Background()
-
-	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
-	if err != nil {
-		t.Fatalf("Repeat: %v", err)
-	}
-	if err := w.svc.Approve(ctx, id, w.driverID); err != nil {
-		t.Fatalf("Approve: %v", err)
-	}
-
-	var bookingID uuid.UUID
-	if err := w.pool.QueryRow(ctx, `
-		SELECT b.id FROM bookings b JOIN trip_occurrences o ON o.id = b.occurrence_id
-		WHERE b.arrangement_id = $1 AND o.id = $2`, id, w.tuesdays[1]).Scan(&bookingID); err != nil {
-		t.Fatalf("finding the week: %v", err)
-	}
-
-	if err := w.svc.SkipWeek(ctx, bookingID, w.passengerID); err != nil {
-		t.Fatalf("SkipWeek: %v", err)
-	}
-
-	if free := w.seatsFree(t, w.tuesdays[1]); free != 3 {
-		t.Errorf("the skipped week still holds a seat (%d free)", free)
-	}
-	if free := w.seatsFree(t, w.tuesdays[2]); free != 2 {
-		t.Errorf("skipping one week released another (%d free)", free)
-	}
-	// One missed Tuesday is a missed Tuesday, not the end of the agreement.
-	if got := w.status(t, id); got != "active" {
-		t.Errorf("status = %q, want the arrangement still active", got)
-	}
-}
-
-func TestSkippingTheSameWeekTwiceReleasesOneSeat(t *testing.T) {
-	w := newWorld(t)
-	ctx := context.Background()
-
-	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
-	if err != nil {
-		t.Fatalf("Repeat: %v", err)
-	}
-	if err := w.svc.Approve(ctx, id, w.driverID); err != nil {
-		t.Fatalf("Approve: %v", err)
-	}
-	var bookingID uuid.UUID
-	if err := w.pool.QueryRow(ctx,
-		`SELECT b.id FROM bookings b WHERE b.arrangement_id = $1 AND b.occurrence_id = $2`,
-		id, w.tuesdays[1]).Scan(&bookingID); err != nil {
-		t.Fatalf("finding the week: %v", err)
-	}
-
-	if err := w.svc.SkipWeek(ctx, bookingID, w.passengerID); err != nil {
-		t.Fatalf("first SkipWeek: %v", err)
-	}
-	if err := w.svc.SkipWeek(ctx, bookingID, w.passengerID); err != nil {
-		t.Fatalf("second SkipWeek: %v", err)
-	}
-
-	if free := w.seatsFree(t, w.tuesdays[1]); free != 3 {
-		t.Fatalf("a repeated skip freed the seat twice (%d free of 3)", free)
-	}
-}
-
 func TestCancellingTheArrangementReleasesEveryWeekAhead(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()
@@ -464,43 +399,5 @@ func TestAnActiveArrangementCannotBeDeclined(t *testing.T) {
 
 	if err := w.svc.Decline(ctx, id, w.driverID); !errors.Is(err, standing.ErrNotRepeatable) {
 		t.Fatalf("Decline on an active arrangement returned %v; the booked weeks would keep their seats", err)
-	}
-}
-
-// A trip that has already left cannot give a seat back. Doing so would invent
-// capacity on a journey that has happened.
-func TestAWeekThatHasAlreadyRunCannotBeSkipped(t *testing.T) {
-	w := newWorld(t)
-	ctx := context.Background()
-
-	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
-	if err != nil {
-		t.Fatalf("Repeat: %v", err)
-	}
-	if err := w.svc.Approve(ctx, id, w.driverID); err != nil {
-		t.Fatalf("Approve: %v", err)
-	}
-	var bookingID uuid.UUID
-	if err := w.pool.QueryRow(ctx,
-		`SELECT id FROM bookings WHERE arrangement_id = $1 AND occurrence_id = $2`,
-		id, w.tuesdays[1]).Scan(&bookingID); err != nil {
-		t.Fatalf("finding the week: %v", err)
-	}
-	// That Tuesday comes and goes.
-	if _, err := w.pool.Exec(ctx, `
-		UPDATE trip_occurrences
-		SET depart_earliest = $2::timestamptz - interval '2 hours',
-		    depart_latest   = $2::timestamptz - interval '1 hour'
-		WHERE id = $1`, w.tuesdays[1], testNow); err != nil {
-		t.Fatalf("moving the trip into the past: %v", err)
-	}
-
-	err = w.svc.SkipWeek(ctx, bookingID, w.passengerID)
-
-	if !errors.Is(err, standing.ErrNotRepeatable) {
-		t.Fatalf("SkipWeek on a departed trip returned %v", err)
-	}
-	if free := w.seatsFree(t, w.tuesdays[1]); free != 2 {
-		t.Errorf("a seat came back on a trip that has already run (%d free)", free)
 	}
 }

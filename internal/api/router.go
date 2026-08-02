@@ -12,6 +12,7 @@ import (
 
 	"carpool/internal/asks"
 	"carpool/internal/auth"
+	"carpool/internal/bookings"
 	"carpool/internal/clock"
 	"carpool/internal/geo"
 	"carpool/internal/jobs"
@@ -38,6 +39,8 @@ type Deps struct {
 	// Standing records the agreements two people already made, so the matcher
 	// stops handing their seat to a stranger.
 	Standing *standing.Service
+	// Bookings cancels a seat, whichever way it was booked.
+	Bookings *bookings.Service
 
 	// Router snaps published routes to the road network.
 	Router *geo.OSRM
@@ -107,9 +110,11 @@ func NewRouter(deps Deps) http.Handler {
 			// Guarded on its own collaborator: these handlers dereference
 			// deps.Standing, and hanging them off the asks check would panic in
 			// any wiring that has one and not the other.
+			if deps.Bookings != nil {
+				r.Delete("/bookings/{id}", deps.handleCancelBooking)
+			}
 			if deps.Standing != nil {
 				r.Post("/bookings/{id}/repeat", deps.handleRepeatBooking)
-				r.Delete("/bookings/{id}", deps.handleSkipWeek)
 				r.Get("/arrangements", deps.handleListArrangements)
 				r.Post("/arrangements/{id}/approve", deps.handleApproveArrangement)
 				r.Post("/arrangements/{id}/decline", deps.handleDeclineArrangement)

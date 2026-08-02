@@ -19,6 +19,7 @@ import (
 	"carpool/internal/api"
 	"carpool/internal/asks"
 	"carpool/internal/auth"
+	"carpool/internal/bookings"
 	"carpool/internal/clock"
 	"carpool/internal/config"
 	"carpool/internal/dispatch"
@@ -142,6 +143,7 @@ func run() error {
 		Sessions: auth.NewSessionService(pool, clk, issuer),
 		Asks:     askSvc,
 		Standing: standing.NewService(pool, clk),
+		Bookings: bookings.NewService(pool, clk),
 
 		Router:          router,
 		Materializer:    materializer,
