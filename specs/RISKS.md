@@ -269,6 +269,13 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
     parseable PDFs rather than a feed. Neither is a blocker any more; the
     remaining question is the old Greek fleet the EEA table does not cover.
 
+    Half done. The consumption side is built: internal/vehicles resolves a
+    car through the EEA dataset, then the CO2 at field V.7 of its άδεια
+    κυκλοφορίας, then a conservative class floor, and records which. Nothing
+    consumes it yet — driver_profiles still holds the typed number. The fuel
+    price side is untouched and gated on a licence question. docs/pricing.md
+    explains all of it.
+
     Raised in priority by the insurance finding. The ceiling is not only a
     fairness feature. A driver whose contribution stays at cost is a driver whose
     car is still in private use, which is the whole of their answer if an insurer
