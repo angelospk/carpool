@@ -13,6 +13,7 @@ of load time, so everything goes out as no-store.
 """
 import functools
 import http.server
+import os
 import sys
 
 
@@ -29,6 +30,14 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         # browser already has: exactly what this is here to stop.
         for conditional in ("If-Modified-Since", "If-None-Match"):
             del self.headers[conditional]
+
+        # The export is one page and the router runs in the browser, so only /
+        # exists on disk. Without this, reloading on a trip, or opening a link
+        # to one, answers "File not found" from a file server the person
+        # reading it has no idea is involved.
+        path = self.translate_path(self.path)
+        if not os.path.exists(path) and "." not in os.path.basename(self.path.split("?")[0]):
+            self.path = "/"
         return super().send_head()
 
 

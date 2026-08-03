@@ -1,0 +1,126 @@
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react-native';
+
+import { PlaceField } from '../PlaceField';
+import { api } from '../../api/endpoints';
+
+jest.mock('../../api/endpoints', () => ({
+  api: { places: jest.fn() },
+}));
+
+const evros = [
+  { id: 'node/1', region: 'evros', kind: 'city', name: 'Αλεξανδρούπολη', lon: 25.8743, lat: 40.8476 },
+  { id: 'node/2', region: 'evros', kind: 'town', name: 'Ορεστιάδα', lon: 26.5297, lat: 41.5039 },
+];
+
+const setup = () => {
+  const onChange = jest.fn();
+  render(<PlaceField testID="from" label="Από" value={null} onChange={onChange} />);
+  return onChange;
+};
+
+const type = async (text: string) => {
+  fireEvent.changeText(screen.getByTestId('from-input'), text);
+  await act(async () => {
+    jest.advanceTimersByTime(400);
+  });
+};
+
+beforeEach(() => {
+  jest.useFakeTimers();
+  (api.places as jest.Mock).mockResolvedValue({ places: evros });
+});
+afterEach(() => {
+  jest.useRealTimers();
+  jest.clearAllMocks();
+});
+
+describe('PlaceField', () => {
+  it('waits for a pause before asking, so a typed word is one request', async () => {
+    setup();
+    const input = screen.getByTestId('from-input');
+    for (const text of ['α', 'αλ', 'αλε', 'αλεξ']) {
+      fireEvent.changeText(input, text);
+      jest.advanceTimersByTime(50);
+    }
+    expect(api.places).not.toHaveBeenCalled();
+
+    await act(async () => {
+      jest.advanceTimersByTime(400);
+    });
+    expect(api.places).toHaveBeenCalledTimes(1);
+    expect(api.places).toHaveBeenCalledWith('αλεξ');
+  });
+
+  it('gives back the place that was chosen, coordinates and all', async () => {
+    const onChange = setup();
+    await type('αλεξ');
+    await waitFor(() => expect(screen.getByText('Αλεξανδρούπολη')).toBeTruthy());
+
+    fireEvent.press(screen.getByText('Αλεξανδρούπολη'));
+    expect(onChange).toHaveBeenCalledWith({
+      lon: 25.8743,
+      lat: 40.8476,
+      label: 'Αλεξανδρούπολη',
+    });
+  });
+
+  it('forgets the choice as soon as the text is edited', async () => {
+    // The invariant that matters. If the field kept the old coordinate while
+    // showing new text, a passenger would be picked up somewhere they did not
+    // ask for and nothing on screen would say so.
+    const onChange = setup();
+    await type('αλεξ');
+    await waitFor(() => expect(screen.getByText('Αλεξανδρούπολη')).toBeTruthy());
+    fireEvent.press(screen.getByText('Αλεξανδρούπολη'));
+    onChange.mockClear();
+
+    fireEvent.changeText(screen.getByTestId('from-input'), 'Αλεξανδρούπολ');
+    expect(onChange).toHaveBeenCalledWith(null);
+  });
+
+  it('ignores an answer to a question that is no longer being asked', async () => {
+    // Two requests in flight, the first one slower. Without a guard the stale
+    // list lands last and the user picks from suggestions for text they have
+    // already replaced.
+    let resolveSlow!: (v: unknown) => void;
+    (api.places as jest.Mock)
+      .mockReturnValueOnce(new Promise((r) => (resolveSlow = r)))
+      .mockResolvedValueOnce({ places: [evros[1]] });
+
+    setup();
+    await type('αλεξ');
+    await type('ορε');
+    await waitFor(() => expect(screen.getByText('Ορεστιάδα')).toBeTruthy());
+
+    await act(async () => {
+      resolveSlow({ places: [evros[0]] });
+    });
+    expect(screen.queryByText('Αλεξανδρούπολη')).toBeNull();
+  });
+
+  it('still takes a raw coordinate, without asking the server about it', async () => {
+    // The pilot was run this way and the format is in older notes, so it keeps
+    // working. Nothing is looked up: it is already a location.
+    const onChange = setup();
+    await type('25.8743, 40.8476 Σπίτι');
+
+    expect(api.places).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenCalledWith({ lon: 25.8743, lat: 40.8476, label: 'Σπίτι' });
+  });
+
+  it('says when it found nothing, rather than showing an empty box', async () => {
+    (api.places as jest.Mock).mockResolvedValue({ places: [] });
+    setup();
+    await type('zzzz');
+    await waitFor(() => expect(screen.getByTestId('from-empty')).toBeTruthy());
+  });
+
+  it('survives the server being unreachable', async () => {
+    (api.places as jest.Mock).mockRejectedValue(new Error('offline'));
+    const onChange = setup();
+    await type('αλεξ');
+    // No crash, no suggestions, and nothing selected on the caller's behalf.
+    expect(screen.queryByTestId('from-suggestions')).toBeNull();
+    expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({ lon: expect.anything() }));
+  });
+});

@@ -17,7 +17,8 @@ import {
   Title,
 } from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
-import { parsePin, type Pin } from '../../src/design/pin';
+import { type Pin } from '../../src/design/pin';
+import { PlaceField } from '../../src/components/PlaceField';
 
 const WEEKDAYS = [
   { iso: 1, label: 'Δε' },
@@ -33,16 +34,14 @@ export default function PublishScreen() {
   const { t } = useTranslation();
   // The wizard defaults aggressively — the target is a recurring route
   // published in under 90 seconds, so only the two pins are truly required.
-  const [origin, setOrigin] = useState('');
-  const [destination, setDestination] = useState('');
+  const [from, setFrom] = useState<Pin | null>(null);
+  const [to, setTo] = useState<Pin | null>(null);
   const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [earliest, setEarliest] = useState('07:30');
   const [latest, setLatest] = useState('08:00');
   const [seats, setSeats] = useState(3);
   const [outcome, setOutcome] = useState<string | null>(null);
 
-  const from = parsePin(origin);
-  const to = parsePin(destination);
 
   const publish = useMutation({
     mutationFn: () =>
@@ -76,23 +75,19 @@ export default function PublishScreen() {
 
         <SectionHeader title={t('publish.route')} />
         <Card>
-          <Field
+          <PlaceField
             testID="publish-origin"
             label={t('search.from')}
-            value={origin}
-            onChangeText={setOrigin}
-            placeholder="25.87, 40.85 Αλεξανδρούπολη"
-            autoCapitalize="none"
-            valid={!!from}
+            value={from}
+            onChange={setFrom}
+            placeholder={t('search.placeholder')}
           />
-          <Field
+          <PlaceField
             testID="publish-destination"
             label={t('search.to')}
-            value={destination}
-            onChangeText={setDestination}
-            placeholder="26.17, 40.90 Φέρες"
-            autoCapitalize="none"
-            valid={!!to}
+            value={to}
+            onChange={setTo}
+            placeholder={t('search.placeholder')}
           />
         </Card>
 

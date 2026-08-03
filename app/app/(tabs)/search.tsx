@@ -6,20 +6,21 @@ import { useMutation } from '@tanstack/react-query';
 
 import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
-import { Button, Card, Field, Hint, Screen, Stepper, Title } from '../../src/components/ui';
+import { Button, Card, Hint, Screen, Stepper, Title } from '../../src/components/ui';
+import { PlaceField } from '../../src/components/PlaceField';
 import { colors, space, type } from '../../src/design/tokens';
-import { parsePin, type Pin } from '../../src/design/pin';
+import { type Pin } from '../../src/design/pin';
 
 export default function SearchScreen() {
   const { t } = useTranslation();
   const router = useRouter();
-  const [fromText, setFromText] = useState('');
-  const [toText, setToText] = useState('');
+  // The place itself rather than the text naming it: PlaceField only hands one
+  // up once it refers to somewhere real, and takes it back the moment the text
+  // is edited.
+  const [from, setFrom] = useState<Pin | null>(null);
+  const [to, setTo] = useState<Pin | null>(null);
   const [seats, setSeats] = useState(1);
   const [outcome, setOutcome] = useState<string | null>(null);
-
-  const from = parsePin(fromText);
-  const to = parsePin(toText);
 
   const create = useMutation({
     mutationFn: () => {
@@ -63,23 +64,19 @@ export default function SearchScreen() {
               <View style={[styles.dot, to && styles.dotSet]} />
             </View>
             <View style={styles.fields}>
-              <Field
-                testID="from-input"
+              <PlaceField
+                testID="from"
                 label={t('search.from')}
-                value={fromText}
-                onChangeText={setFromText}
-                placeholder="25.87, 40.85 Αλεξανδρούπολη"
-                autoCapitalize="none"
-                valid={!!from}
+                value={from}
+                onChange={setFrom}
+                placeholder={t('search.placeholder')}
               />
-              <Field
-                testID="to-input"
+              <PlaceField
+                testID="to"
                 label={t('search.to')}
-                value={toText}
-                onChangeText={setToText}
-                placeholder="25.40, 41.12 Κομοτηνή"
-                autoCapitalize="none"
-                valid={!!to}
+                value={to}
+                onChange={setTo}
+                placeholder={t('search.placeholder')}
               />
             </View>
           </View>

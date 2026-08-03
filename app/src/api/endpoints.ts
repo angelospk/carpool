@@ -4,6 +4,16 @@
 import { request } from './client';
 
 export type Region = { id: string; name: string; fuel_price_eur: number };
+
+export type Place = {
+  id: string;
+  region: string;
+  kind: 'city' | 'town' | 'village';
+  name: string;
+  name_en?: string;
+  lon: number;
+  lat: number;
+};
 export type Me = {
   id: string;
   phone: string;
@@ -83,6 +93,10 @@ export type Message = {
 
 export const api = {
   regions: () => request<{ regions: Region[] }>('/v1/regions', { anonymous: true }),
+
+  /** Settlements matching what is being typed into a pickup field. */
+  places: (q: string) =>
+    request<{ places: Place[] }>(`/v1/places?q=${encodeURIComponent(q)}`),
 
   // dev_code comes back only when the server runs with DEV_MODE, where the code
   // is not sent by SMS at all. It lets a tester on a laptop sign in without

@@ -48,6 +48,12 @@
     "againAsked": "The driver has been asked",
     "againNone": "No next trip with a free seat"
   },
+  "places": {
+    "city": "city",
+    "none": "No such place",
+    "town": "town",
+    "village": "village"
+  },
   "profile": {
     "car": "Your car",
     "detourBudget": "Maximum detour",
@@ -74,10 +80,14 @@
     "title": "Publish a route",
     "until": "Until"
   },
+  "request": {
+    "title": "Your request"
+  },
   "search": {
     "asking": "Asking a driver…",
     "from": "From",
     "noDrivers": "No driver right now. We'll let you know.",
+    "placeholder": "Type a town or village",
     "post": "Send request",
     "seats": "Seats",
     "title": "Find a ride",
@@ -123,8 +133,5 @@
     "5": "Friday",
     "6": "Saturday",
     "7": "Sunday"
-  },
-  "request": {
-    "title": "Your request"
   }
 }
