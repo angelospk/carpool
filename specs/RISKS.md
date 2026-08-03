@@ -309,6 +309,30 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
     Discovered because `scripts/seed-demo.sh` could not publish the second
     route, and the handler was throwing the reason away. It now logs it.
 
+15. **The place list stops at the prefecture line, and the obvious destination
+    is on the other side of it.** `internal/places` holds 153 settlements
+    harvested inside the Evros boundary: one city, six towns, the rest
+    villages.
+
+    | Kind | Names |
+    | --- | --- |
+    | city | Αλεξανδρούπολη |
+    | town | Φέρες, Σουφλί, Τυχερό, Διδυμότειχο, Ορεστιάδα, Νέα Βύσσα |
+
+    Κομοτηνή is not in it, because Κομοτηνή is in Ροδόπη. Neither is
+    Θεσσαλονίκη, or the airport at Καβάλα. Yet Αλεξανδρούπολη → Κομοτηνή is the
+    example route in the demo seed, and it is a drive people actually make: the
+    nearest large town westward, a hospital, a university.
+
+    So the field cannot express a trip out of the prefecture, while the app is
+    perfectly able to price and match one. A boundary drawn for administration
+    is being used as the edge of where people go.
+
+    Not fixed, because widening it is a decision with several answers: harvest
+    the neighbouring prefectures too, harvest everything above a population
+    threshold nationally, or keep the pilot's list and add a handful of named
+    exceptions. The last is the smallest and the least honest.
+
 ## Deferred tech (parked, with triggers to revisit)
 
 | Deferred | Revisit when |
