@@ -1,23 +1,27 @@
 import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 import { configure } from '../src/api/client';
+import { resolveBaseUrl } from '../src/api/baseUrl';
 import { useSession } from '../src/state/session';
 import '../src/i18n';
 
-// The server URL is configuration, not a constant: dev builds point at the mini
-// PC on the LAN, production at the deployed host.
-//
-// The environment variable comes first on purpose. app.json's value is baked
-// into the binary at build time, so if it won, a build could never be pointed at
-// a different machine without editing the file and rebuilding — which is exactly
-// what testing on a phone needs to do.
+// See src/api/baseUrl.ts. On a device this is configuration; on web the API is
+// taken from the host that served the page, because a host baked in at export
+// time is unreachable from anywhere but the network it was built for.
 configure(
-  process.env.EXPO_PUBLIC_API_URL ??
-    (Constants.expoConfig?.extra?.apiUrl as string | undefined) ??
-    'http://localhost:8080',
+  resolveBaseUrl({
+    platform: Platform.OS,
+    env: {
+      EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL,
+      EXPO_PUBLIC_API_SAME_HOST: process.env.EXPO_PUBLIC_API_SAME_HOST,
+    },
+    location: typeof window !== 'undefined' ? window.location : undefined,
+    extraApiUrl: Constants.expoConfig?.extra?.apiUrl as string | undefined,
+  }),
 );
 
 const queryClient = new QueryClient({

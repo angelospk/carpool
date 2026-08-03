@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 
 import { api } from '../../src/api/endpoints';
-import { ApiError } from '../../src/api/client';
+import { ApiError, NetworkError, currentBaseUrl } from '../../src/api/client';
 import { Button, Card, Field, Hint, Screen, Title } from '../../src/components/ui';
 import { space } from '../../src/design/tokens';
 
@@ -33,11 +33,17 @@ export default function PhoneScreen() {
         params: devCode ? { phone: normalized, devCode } : { phone: normalized },
       });
     } catch (e) {
-      setError(
-        e instanceof ApiError && e.code === 'rate_limited'
-          ? t('auth.tooManyRequests')
-          : t('common.error'),
-      );
+      // The three failures here are not interchangeable, and the first one is
+      // invisible everywhere else: a request that never reaches a server has no
+      // status code and leaves no server-side log, so if this screen does not
+      // name the address it tried, nothing does.
+      if (e instanceof NetworkError) {
+        setError(t('auth.unreachable', { url: currentBaseUrl() }));
+      } else if (e instanceof ApiError && e.code === 'rate_limited') {
+        setError(t('auth.tooManyRequests'));
+      } else {
+        setError(t('common.error'));
+      }
     } finally {
       setBusy(false);
     }

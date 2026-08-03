@@ -16,19 +16,32 @@ export default function OtpScreen() {
   // instead of texting it. Everywhere else this is undefined and the field
   // starts empty, exactly as before.
   const [code, setCode] = useState(devCode ?? '');
-  const [regions, setRegions] = useState<Region[]>([]);
+  const [regions, setRegions] = useState<Region[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Regions are needed by the next step; fetching now means the profile screen
-  // opens without a spinner.
-  useEffect(() => {
+  // Regions are needed by the next step, which has no way to fetch its own: it
+  // reads the list out of the route parameters and picks the first one. So an
+  // empty list there is not a slow start, it is a dead end. Its submit button
+  // stays disabled with nothing on screen to say why, and no response arriving
+  // later can repair it, because this screen has already been left behind.
+  //
+  // Hence null for "not yet" as distinct from an empty list, and a submit that
+  // waits. With the code prefilled on a DEV_MODE server there is nothing to
+  // type, so the press can easily land before the fetch returns.
+  const load = () => {
+    setError(null);
     api
       .regions()
       .then((r) => setRegions(r.regions))
-      .catch(() => setRegions([]));
-  }, []);
+      .catch(() => setError(t('auth.regionsUnavailable')));
+  };
+
+  useEffect(load, []);
 
   const submit = () => {
+    if (!regions) {
+      return;
+    }
     setError(null);
     router.push({
       pathname: '/(auth)/profile-setup',
@@ -62,11 +75,15 @@ export default function OtpScreen() {
 
       <View style={styles.spacer} />
 
+      {error ? (
+        <Button testID="otp-retry" label={t('common.retry')} onPress={load} />
+      ) : null}
+
       <Button
         testID="otp-submit"
         label={t('common.next')}
         onPress={submit}
-        disabled={code.length !== 6}
+        disabled={code.length !== 6 || !regions}
       />
     </Screen>
   );

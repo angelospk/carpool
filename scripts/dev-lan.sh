@@ -60,10 +60,15 @@ curl -fsS -o /dev/null "http://$IP:$API_PORT/v1/regions" ||
 echo "   up, DEV_MODE, log at /tmp/api-lan.log"
 
 step "web bundle"
+# The host in here is used by a device build only. A web build ignores it and
+# asks whichever host served the page, because this box is reachable at more
+# than one address (LAN, Tailscale, localhost) and a baked-in one is wrong from
+# every network but its own. See app/src/api/baseUrl.ts.
+#
 # --clear is not optional. Metro caches aggressively and will happily rebuild in
-# under a second while shipping yesterday's API URL, which then fails on a
-# device with no visible cause. And the URL comes from app/.env: `expo export`
-# does not read EXPO_PUBLIC_* out of the environment.
+# under a second while shipping yesterday's bundle, which then fails on a device
+# with no visible cause. And the value comes from app/.env: `expo export` does
+# not read EXPO_PUBLIC_* out of the environment.
 printf 'EXPO_PUBLIC_API_URL=http://%s:%s\n' "$IP" "$API_PORT" > app/.env
 (cd app && npx expo export --platform web --clear --output-dir "$WEB_DIR" > /tmp/expo-export.log 2>&1) ||
   { echo "the export failed; see /tmp/expo-export.log" >&2; exit 1; }
@@ -76,9 +81,12 @@ pkill -f "http.server $WEB_PORT" 2>/dev/null || true
 disown -a 2>/dev/null || true
 sleep 2
 
+TS=$(tailscale ip -4 2>/dev/null | head -1 || true)
+
 cat <<TXT
 
-$(printf '\033[1mOpen http://%s:%s\033[0m' "$IP" "$WEB_PORT")
+$(printf '\033[1mOpen http://%s:%s\033[0m' "$IP" "$WEB_PORT")${TS:+
+$(printf '  or over Tailscale: \033[1mhttp://%s:%s\033[0m' "$TS" "$WEB_PORT")}
 
 Sign in with any seeded number — the code fills itself in, so tap through.
 Type the number in full, including +30; the field starts at +30 and the

@@ -20,7 +20,9 @@
     "phoneTitle": "Your number",
     "profileTitle": "Tell us a little about you",
     "region": "Region",
-    "tooManyRequests": "Too many attempts. Try again shortly."
+    "regionsUnavailable": "Could not load the regions. Try again.",
+    "tooManyRequests": "Too many attempts. Try again shortly.",
+    "unreachable": "Cannot reach the server at {{url}}. Is it running, and are you on the same network?"
   },
   "common": {
     "cancel": "Cancel",

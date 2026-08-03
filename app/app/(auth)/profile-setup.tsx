@@ -14,7 +14,17 @@ export default function ProfileSetupScreen() {
   const params = useLocalSearchParams<{ phone: string; code: string; regions: string }>();
   const signIn = useSession((s) => s.signIn);
 
-  const regions: Region[] = params.regions ? JSON.parse(params.regions) : [];
+  // Parsed defensively because this arrives as a URL query parameter on web,
+  // where it is editable, truncatable and repeatable. A throw here happens
+  // during render, so it takes the screen down rather than showing an error.
+  const regions: Region[] = (() => {
+    try {
+      const parsed = params.regions ? JSON.parse(params.regions) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  })();
   const [name, setName] = useState('');
   const [regionId, setRegionId] = useState(regions[0]?.id ?? '');
   const [error, setError] = useState<string | null>(null);
