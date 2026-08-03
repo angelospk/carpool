@@ -127,6 +127,10 @@ func NewRouter(deps Deps) http.Handler {
 				r.Get("/vehicles/models", deps.handleListVehicleModels)
 			}
 
+			// No collaborator to guard: the settlement list is embedded in
+			// the binary, so this handler cannot be half-wired.
+			r.Get("/places", deps.handlePlaces)
+
 			if deps.Router != nil {
 				r.Post("/routes", deps.handleCreateRoute)
 			}
