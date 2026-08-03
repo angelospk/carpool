@@ -86,6 +86,19 @@ func TestLatinKeysHandleTheDigraphsThatAreNotLetterByLetter(t *testing.T) {
 	}
 }
 
+func TestDialytikaBlocksTheDigraph(t *testing.T) {
+	// Καϊρο is read as two vowels, Καιρο as one sound. If the digraph table
+	// runs anyway, the first is romanised with the spellings of the second and
+	// the two words become findable as each other.
+	keys := latinKeys(fold("Καϊρο"))
+	if slices.Contains(keys, "kero") {
+		t.Errorf("dialytika ignored: αϊ romanised as the αι digraph; got %v", keys)
+	}
+	if !slices.Contains(keys, "kairo") {
+		t.Errorf("the separate vowels were not romanised at all; got %v", keys)
+	}
+}
+
 func TestLatinKeysStayBounded(t *testing.T) {
 	// Every ambiguous letter doubles the number of spellings, so a long name
 	// with many of them would generate thousands of keys and turn a 153-row

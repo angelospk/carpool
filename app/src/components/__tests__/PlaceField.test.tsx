@@ -108,6 +108,35 @@ describe('PlaceField', () => {
     expect(onChange).toHaveBeenCalledWith({ lon: 25.8743, lat: 40.8476, label: 'Σπίτι' });
   });
 
+  it('does not reopen the list with an answer that arrived after the choice', async () => {
+    // A request is still in flight when the user taps a suggestion. Without a
+    // guard its answer lands afterwards and the list springs back open over a
+    // field that is already filled in, inviting a second, contradictory choice.
+    let resolveSlow!: (v: unknown) => void;
+    (api.places as jest.Mock).mockReturnValueOnce(new Promise((r) => (resolveSlow = r)));
+
+    setup();
+    await type('αλεξ');
+    await act(async () => {
+      resolveSlow({ places: evros });
+    });
+    await waitFor(() => expect(screen.getByText('Αλεξανδρούπολη')).toBeTruthy());
+
+    // Choose, then let a second, older request answer.
+    let resolveOlder!: (v: unknown) => void;
+    (api.places as jest.Mock).mockReturnValueOnce(new Promise((r) => (resolveOlder = r)));
+    fireEvent.changeText(screen.getByTestId('from-input'), 'ορε');
+    await act(async () => {
+      jest.advanceTimersByTime(400);
+    });
+    fireEvent.press(screen.getByText('Αλεξανδρούπολη'));
+
+    await act(async () => {
+      resolveOlder({ places: evros });
+    });
+    expect(screen.queryByTestId('from-suggestions')).toBeNull();
+  });
+
   it('says when it found nothing, rather than showing an empty box', async () => {
     (api.places as jest.Mock).mockResolvedValue({ places: [] });
     setup();

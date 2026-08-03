@@ -75,6 +75,10 @@ export function PlaceField({
     // A raw coordinate is already a location, so there is nothing to look up.
     const typed = parsePin(query);
     if (typed) {
+      // Bumped so that a search still in flight resolves as stale. Otherwise
+      // its answer lands after this and reopens a list over a field that is
+      // already settled.
+      asked.current++;
       setSuggestions(null);
       setSearched(false);
       selected.current = query;
@@ -110,6 +114,9 @@ export function PlaceField({
   }, [text]);
 
   const choose = (place: Place) => {
+    // Same reason as the coordinate branch: choosing ends every question this
+    // field has outstanding, so no answer to one may reopen the list.
+    asked.current++;
     selected.current = place.name;
     setText(place.name);
     setSuggestions(null);

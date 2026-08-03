@@ -121,7 +121,10 @@ func latinKeys(folded string) []string {
 	}
 
 	for i := 0; i < len(runes); {
-		if i+1 < len(runes) {
+		// A dialytika sits on the second vowel and says the pair is read apart,
+		// so it is exactly the mark that says "this is not a digraph". Checking
+		// it here is what makes keeping it through folding worth anything.
+		if i+1 < len(runes) && !(i+2 < len(runes) && runes[i+2] == dialytika) {
 			pair := string(runes[i : i+2])
 			if d, ok := digraphFor(pair); ok {
 				appendAll(d)

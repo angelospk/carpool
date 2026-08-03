@@ -27,6 +27,7 @@ Output: © OpenStreetMap contributors, ODbL.
 import argparse
 import csv
 import json
+import os
 import pathlib
 import sys
 import urllib.parse
@@ -124,7 +125,7 @@ def main() -> int:
         return 1
 
     fresh = render(data)
-    current = OUT.read_text() if OUT.exists() else ""
+    current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
 
     if fresh == current:
         print(f"{OUT.name}: unchanged, {len(data)} places")
@@ -144,9 +145,19 @@ def main() -> int:
         return 1
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    tmp = OUT.with_suffix(".part")
-    tmp.write_text(fresh)
-    tmp.replace(OUT)
+    # Encoding stated rather than inherited: every name in here is Greek, and on
+    # a machine whose locale is not UTF-8 the default would write mojibake into
+    # a file that is then embedded in the binary and shipped.
+    #
+    # The temporary name carries the pid so two runs cannot write through each
+    # other, and is removed even when the replace fails, rather than left behind
+    # to be mistaken for the dataset.
+    tmp = OUT.with_suffix(f".part.{os.getpid()}")
+    try:
+        tmp.write_text(fresh, encoding="utf-8", newline="\n")
+        tmp.replace(OUT)
+    finally:
+        tmp.unlink(missing_ok=True)
     print(f"wrote {OUT}")
     return 0
 
