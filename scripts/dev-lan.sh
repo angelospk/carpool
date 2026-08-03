@@ -72,21 +72,24 @@ step "web bundle"
 printf 'EXPO_PUBLIC_API_URL=http://%s:%s\n' "$IP" "$API_PORT" > app/.env
 (cd app && npx expo export --platform web --clear --output-dir "$WEB_DIR" > /tmp/expo-export.log 2>&1) ||
   { echo "the export failed; see /tmp/expo-export.log" >&2; exit 1; }
+pkill -f 'serve-web.py' 2>/dev/null || true
 pkill -f "http.server $WEB_PORT" 2>/dev/null || true
 # setsid, not just nohup: a plain background job stays a child of this script,
 # and bash then waits for it at exit, so the script never returns and anything
 # reading its output hangs with everything apparently working.
-(cd "$WEB_DIR" && setsid python3 -m http.server "$WEB_PORT" --bind 0.0.0.0 \
-  < /dev/null > /tmp/carpool-web.log 2>&1 &)
-disown -a 2>/dev/null || true
+( setsid python3 scripts/serve-web.py "$WEB_DIR" "$WEB_PORT" \
+  < /dev/null > /tmp/carpool-web.log 2>&1 & )
 sleep 2
 
+# The LAN address and the Tailscale address are not interchangeable, and which
+# one works depends on where the person opening it is sitting. Printing both,
+# labelled, is cheaper than working out afterwards why a page would not load.
 TS=$(tailscale ip -4 2>/dev/null | head -1 || true)
 
 cat <<TXT
 
-$(printf '\033[1mOpen http://%s:%s\033[0m' "$IP" "$WEB_PORT")${TS:+
-$(printf '  or over Tailscale: \033[1mhttp://%s:%s\033[0m' "$TS" "$WEB_PORT")}
+$(printf 'Same wifi:  \033[1mhttp://%s:%s\033[0m' "$IP" "$WEB_PORT")${TS:+
+$(printf 'Tailscale:  \033[1mhttp://%s:%s\033[0m' "$TS" "$WEB_PORT")}
 
 Sign in with any seeded number — the code fills itself in, so tap through.
 Type the number in full, including +30; the field starts at +30 and the
@@ -97,5 +100,5 @@ button stays dead until the whole thing is there.
   +306900000103   Νίκος     passenger
 
 No accounts yet? Run scripts/seed-demo.sh.
-Stop everything: pkill -f bin/api; pkill -f http.server; docker compose -f docker-compose.dev.yml down
+Stop everything: pkill -f bin/api; pkill -f serve-web.py; docker compose -f docker-compose.dev.yml down
 TXT
