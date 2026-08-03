@@ -65,9 +65,30 @@ echo "   Γιώργος: $(car "$DRIVER_A" '{"make":"Toyota","model":"Yaris","fu
 echo "   Μαρία:   $(car "$DRIVER_B" '{"make":"Toyota","model":"Corolla Verso","fuel":"diesel","engine_cc":2000,"co2_g_km":160,"plate":"ΑΒΕ-5678","colour":"γκρι"}')"
 
 step "publishing routes for $DAY (weekday $DOW)"
+# Signing in is idempotent; publishing is not. Three runs of this script during
+# one debugging session is how a demo account ends up showing the same 07:30
+# departure three times over, which reads as a bug in the app and cost an
+# evening to tell apart from one.
+#
+# There is no endpoint that lists a driver's own routes yet, so the demo cast's
+# existing ones are retired directly. Scoped to the three seeded phone numbers,
+# and skipped with a warning when the database is not reachable, because a
+# script that silently duplicates is worse than one that says it cannot help.
+DSN=${DATABASE_URL:-postgres://carpool:carpool@localhost:5433/lan?sslmode=disable}
+if psql "$DSN" -tAc 'SELECT 1' >/dev/null 2>&1; then
+  psql "$DSN" -qtAc "
+    UPDATE route_templates SET active = false
+     WHERE active
+       AND driver_id IN (SELECT id FROM users
+                          WHERE phone IN ('+306900000101','+306900000102','+306900000103'))" >/dev/null
+  echo "   retired the cast's previous routes"
+else
+  echo "   NOTE: no database at \$DATABASE_URL, so re-running will duplicate routes" >&2
+fi
+
 route() {
   curl -s -X POST "$API/routes" -H "Authorization: Bearer $1" -H 'Content-Type: application/json' \
-    -d "$2" | j "d.id ? 'ok' : JSON.stringify(d)"
+    -d "$2" | j "d.template_id ? 'ok' : JSON.stringify(d)"
 }
 echo "   Αλεξανδρούπολη → Κομοτηνή:  $(route "$DRIVER_A" "{
   \"origin_lon\": 25.8743, \"origin_lat\": 40.8476, \"origin_label\": \"Αλεξανδρούπολη\",

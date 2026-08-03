@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Platform } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import Constants from 'expo-constants';
 
 import { configure } from '../src/api/client';
@@ -47,6 +48,7 @@ export default function RootLayout() {
 // AuthGate keeps the URL and the session in step: a signed-out user is pushed
 // into the auth flow, a signed-in one out of it.
 function AuthGate() {
+  const { t } = useTranslation();
   const status = useSession((s) => s.status);
   const restore = useSession((s) => s.restore);
   const segments = useSegments();
@@ -68,9 +70,15 @@ function AuthGate() {
   }, [status, segments, router]);
 
   return (
-    <Stack screenOptions={{ headerBackTitle: 'Πίσω' }}>
+    <Stack screenOptions={{ headerBackTitle: t('common.back') }}>
       <Stack.Screen name="(auth)" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      {/* Without these, expo-router titles a screen after its own file, so the
+          header above somebody's trip reads "trip/[id]". */}
+      <Stack.Screen name="trip/[id]" options={{ title: t('trip.title') }} />
+      <Stack.Screen name="ask/[id]" options={{ title: t('ask.title') }} />
+      <Stack.Screen name="request/[id]" options={{ title: t('request.title') }} />
+      <Stack.Screen name="user/[id]" options={{ title: t('user.title') }} />
     </Stack>
   );
 }
