@@ -123,6 +123,9 @@ func NewRouter(deps Deps) http.Handler {
 			r.Get("/me/routes", deps.handleMyRoutes)
 			r.Delete("/me/routes/{id}", deps.handleRetireRoute)
 
+			r.Put("/me/photo", deps.handlePutPhoto)
+			r.Delete("/me/photo", deps.handleDeletePhoto)
+
 			// Guarded on its own collaborator: without it there is no way to
 			// become a driver at all, and a nil dereference would be a panic
 			// rather than an honest 404.
@@ -176,6 +179,8 @@ func NewRouter(deps Deps) http.Handler {
 			})
 
 			r.Route("/users/{id}", func(r chi.Router) {
+				r.Get("/photo", deps.handleGetPhoto)
+				r.Head("/photo", deps.handleGetPhoto)
 				r.Post("/block", deps.handleBlockUser)
 				r.Delete("/block", deps.handleUnblockUser)
 				r.Post("/report", deps.handleReportUser)

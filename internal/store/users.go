@@ -16,15 +16,20 @@ var ErrNotFound = errors.New("store: not found")
 
 // User is an account.
 type User struct {
-	ID           uuid.UUID
-	Phone        string
-	Name         string
-	PhotoURL     *string
-	Gender       *string
-	HomeRegionID uuid.UUID
-	WomenOnly    bool
-	Status       string
-	SocialURL    *string
+	ID       uuid.UUID
+	Phone    string
+	Name     string
+	PhotoURL *string
+	// PhotoVersion is a prefix of the stored photo's hash, present only when
+	// there is one. The API composes the URL from it, so a replaced photo lands
+	// at a new address and no cache goes on serving the old one.
+	PhotoVersion    *string
+	Gender          *string
+	HomeRegionID    uuid.UUID
+	WomenOnly       bool
+	Status          string
+	FacebookHandle  *string
+	InstagramHandle *string
 }
 
 // Region is a service area.
@@ -56,10 +61,13 @@ func EnsureUserTx(ctx context.Context, q querier, phone, name string, regionID u
 		INSERT INTO users (phone, name, home_region_id)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (phone) DO UPDATE SET updated_at = now()
-		RETURNING id, phone, name, photo_url, gender, home_region_id, women_only, status, social_url`,
+		RETURNING id, phone, name, photo_url,
+		          (SELECT encode(substring(sha256 from 1 for 6), 'hex') FROM profile_photos WHERE user_id = users.id),
+		          gender, home_region_id, women_only, status,
+		          facebook_handle, instagram_handle`,
 		phone, name, regionID).Scan(
-		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
-		&u.SocialURL)
+		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.PhotoVersion, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
+		&u.FacebookHandle, &u.InstagramHandle)
 	if err != nil {
 		return User{}, fmt.Errorf("store: ensuring user: %w", err)
 	}
@@ -70,10 +78,13 @@ func EnsureUserTx(ctx context.Context, q querier, phone, name string, regionID u
 func GetUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (User, error) {
 	var u User
 	err := pool.QueryRow(ctx, `
-		SELECT id, phone, name, photo_url, gender, home_region_id, women_only, status, social_url
+		SELECT id, phone, name, photo_url,
+		       (SELECT encode(substring(sha256 from 1 for 6), 'hex') FROM profile_photos WHERE user_id = users.id),
+		       gender, home_region_id, women_only, status,
+		       facebook_handle, instagram_handle
 		FROM users WHERE id = $1`, id).Scan(
-		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
-		&u.SocialURL)
+		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.PhotoVersion, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
+		&u.FacebookHandle, &u.InstagramHandle)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -86,15 +97,15 @@ func GetUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (User, error
 // UserUpdate carries the fields a user may change on their own profile. A nil
 // field is left untouched.
 type UserUpdate struct {
-	Name     *string
-	PhotoURL *string
-	// SocialURL follows the same nil-means-untouched rule as the rest, with one
-	// addition: an empty string clears it. A link you can add and never remove
-	// is not a link you would add.
-	SocialURL *string
-	Gender    *string
-	WomenOnly *bool
-	RegionID  *uuid.UUID
+	Name *string
+	// The handles follow the same nil-means-untouched rule as the rest, with
+	// one addition: an empty string clears one. A link you can add and never
+	// remove is not a link you would add.
+	FacebookHandle  *string
+	InstagramHandle *string
+	Gender          *string
+	WomenOnly       *bool
+	RegionID        *uuid.UUID
 }
 
 // UpdateUser applies a partial profile update and returns the new state.
@@ -102,18 +113,21 @@ func UpdateUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, up UserUp
 	var u User
 	err := pool.QueryRow(ctx, `
 		UPDATE users SET
-			name           = COALESCE($2, name),
-			photo_url      = COALESCE($3, photo_url),
-			gender         = COALESCE($4, gender),
-			women_only     = COALESCE($5, women_only),
-			home_region_id = COALESCE($6, home_region_id),
-			social_url     = CASE WHEN $7::text IS NULL THEN social_url ELSE NULLIF($7, '') END,
-			updated_at     = now()
+			name             = COALESCE($2, name),
+			gender           = COALESCE($3, gender),
+			women_only       = COALESCE($4, women_only),
+			home_region_id   = COALESCE($5, home_region_id),
+			facebook_handle  = CASE WHEN $6::text IS NULL THEN facebook_handle  ELSE NULLIF($6, '') END,
+			instagram_handle = CASE WHEN $7::text IS NULL THEN instagram_handle ELSE NULLIF($7, '') END,
+			updated_at       = now()
 		WHERE id = $1
-		RETURNING id, phone, name, photo_url, gender, home_region_id, women_only, status, social_url`,
-		id, up.Name, up.PhotoURL, up.Gender, up.WomenOnly, up.RegionID, up.SocialURL).Scan(
-		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
-		&u.SocialURL)
+		RETURNING id, phone, name, photo_url,
+		          (SELECT encode(substring(sha256 from 1 for 6), 'hex') FROM profile_photos WHERE user_id = users.id),
+		          gender, home_region_id, women_only, status,
+		          facebook_handle, instagram_handle`,
+		id, up.Name, up.Gender, up.WomenOnly, up.RegionID, up.FacebookHandle, up.InstagramHandle).Scan(
+		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.PhotoVersion, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
+		&u.FacebookHandle, &u.InstagramHandle)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}

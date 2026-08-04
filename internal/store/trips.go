@@ -81,11 +81,12 @@ type TripParticipant struct {
 	Name     string
 	PhotoURL *string
 	Rating   *float64
-	// SocialURL is where this person says they can also be found. It travels
+	// The handles are where this person says they can also be found. They travel
 	// only inside a trip both parties are on, for the same reason the plate
 	// does: it is theirs to hand to someone they are riding with, not to the
 	// whole region.
-	SocialURL *string
+	FacebookHandle  *string
+	InstagramHandle *string
 	// Driver-only fields.
 	CarModel *string
 	CarColor *string
@@ -137,7 +138,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		        WHERE b.occurrence_id = o.id AND b.passenger_id = $2
 		          AND b.status IN ('confirmed','completed')),
 		       ST_AsEncodedPolyline(o.route_geom, 6),
-		       u.id, u.name, u.photo_url, u.social_url,
+		       u.id, u.name, u.photo_url, u.facebook_handle, u.instagram_handle,
 		       (SELECT round(avg(stars)::numeric, 2) FROM ratings WHERE ratee_id = u.id),
 		       dp.car_model, dp.car_color, dp.car_plate
 		FROM trip_occurrences o
@@ -147,7 +148,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		WHERE o.id = $1`, occurrenceID, userID).Scan(
 		&d.DepartEarliest, &d.DepartLatest, &d.Status, &d.RouteKm, &d.SeatsFree,
 		&d.OriginLabel, &d.DestLabel, &d.TemplateID, &d.Weekday, &d.BookingID, &d.RoutePolyline,
-		&d.Driver.UserID, &d.Driver.Name, &d.Driver.PhotoURL, &d.Driver.SocialURL, &d.Driver.Rating,
+		&d.Driver.UserID, &d.Driver.Name, &d.Driver.PhotoURL, &d.Driver.FacebookHandle, &d.Driver.InstagramHandle, &d.Driver.Rating,
 		&d.Driver.CarModel, &d.Driver.CarColor, &d.Driver.CarPlate)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TripDetail{}, ErrNotParticipant
@@ -157,7 +158,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 	}
 
 	rows, err := pool.Query(ctx, `
-		SELECT u.id, u.name, u.photo_url, u.social_url,
+		SELECT u.id, u.name, u.photo_url, u.facebook_handle, u.instagram_handle,
 		       (SELECT round(avg(stars)::numeric, 2) FROM ratings WHERE ratee_id = u.id),
 		       b.price_eur, b.seats
 		FROM bookings b JOIN users u ON u.id = b.passenger_id
@@ -170,7 +171,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 
 	for rows.Next() {
 		var p TripParticipant
-		if err := rows.Scan(&p.UserID, &p.Name, &p.PhotoURL, &p.SocialURL, &p.Rating,
+		if err := rows.Scan(&p.UserID, &p.Name, &p.PhotoURL, &p.FacebookHandle, &p.InstagramHandle, &p.Rating,
 			&p.PriceEUR, &p.Seats); err != nil {
 			return TripDetail{}, fmt.Errorf("store: scanning passenger: %w", err)
 		}

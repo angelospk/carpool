@@ -124,7 +124,8 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 			phone      = 'deleted:' || id::text,
 			name       = 'Διαγραμμένος χρήστης',
 			photo_url  = NULL,
-			social_url = NULL,
+			facebook_handle  = NULL,
+			instagram_handle = NULL,
 			gender     = NULL,
 			status     = 'deleted',
 			updated_at = now()
@@ -169,16 +170,18 @@ func (s *Service) Export(ctx context.Context, userID uuid.UUID) ([]byte, error) 
 
 	profile := map[string]any{}
 	var (
-		phone, name           string
-		photo, social, gender *string
-		womenOnly             bool
-		status                string
-		createdAt             time.Time
+		phone, name         string
+		photo, gender       *string
+		facebook, instagram *string
+		womenOnly           bool
+		status              string
+		createdAt           time.Time
 	)
 	err := s.pool.QueryRow(ctx, `
-		SELECT phone, name, photo_url, social_url, gender, women_only, status, created_at
+		SELECT phone, name, photo_url, facebook_handle, instagram_handle,
+		       gender, women_only, status, created_at
 		FROM users WHERE id = $1`, userID).
-		Scan(&phone, &name, &photo, &social, &gender, &womenOnly, &status, &createdAt)
+		Scan(&phone, &name, &photo, &facebook, &instagram, &gender, &womenOnly, &status, &createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -188,7 +191,8 @@ func (s *Service) Export(ctx context.Context, userID uuid.UUID) ([]byte, error) 
 	profile["phone"] = phone
 	profile["name"] = name
 	profile["photo_url"] = photo
-	profile["social_url"] = social
+	profile["facebook_handle"] = facebook
+	profile["instagram_handle"] = instagram
 	profile["gender"] = gender
 	profile["women_only"] = womenOnly
 	profile["status"] = status

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"carpool/internal/domain"
 	"carpool/internal/store"
 )
 
@@ -91,8 +92,9 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 	for _, p := range trip.Passengers {
 		passengers = append(passengers, map[string]any{
 			"id": p.UserID, "name": p.Name, "photo_url": p.PhotoURL,
-			"social_url": p.SocialURL,
-			"rating":     p.Rating, "price_eur": p.PriceEUR, "seats": p.Seats,
+			"facebook_url":  socialURL(domain.FacebookURL, p.FacebookHandle),
+			"instagram_url": socialURL(domain.InstagramURL, p.InstagramHandle),
+			"rating":        p.Rating, "price_eur": p.PriceEUR, "seats": p.Seats,
 		})
 	}
 
@@ -112,8 +114,9 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		"driver": map[string]any{
 			"id": trip.Driver.UserID, "name": trip.Driver.Name,
 			"photo_url": trip.Driver.PhotoURL, "rating": trip.Driver.Rating,
-			"social_url": trip.Driver.SocialURL,
-			"car_model":  trip.Driver.CarModel, "car_color": trip.Driver.CarColor,
+			"facebook_url":  socialURL(domain.FacebookURL, trip.Driver.FacebookHandle),
+			"instagram_url": socialURL(domain.InstagramURL, trip.Driver.InstagramHandle),
+			"car_model":     trip.Driver.CarModel, "car_color": trip.Driver.CarColor,
 			// Revealed only here, and only to people already on the trip.
 			"car_plate": trip.Driver.CarPlate,
 		},
