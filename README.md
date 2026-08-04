@@ -277,3 +277,39 @@ Where the implementation diverged from a spec, the reason is recorded under
 Distilled from Harold's vault notes, web research (BlaBlaCar Zen matching
 architecture, routing engine comparisons, the Expo maps ecosystem), and Codex
 plan and code reviews whose corrections are folded in.
+
+## Correcting the meeting points
+
+The harvested landmarks are good in villages and poor in cities: Θεσσαλονίκη's
+three entries are all coach-ticket agencies that OSM tags `amenity=bus_station`.
+Fixing that needs a person, so there is a way for one to do it.
+
+Make the first moderator from the server — there is no way to become one through
+the app, and there should not be:
+
+```bash
+go run ./cmd/moderator -list
+go run ./cmd/moderator -grant <user-uuid> -note "runs the Evros pilot"
+```
+
+Then, as that account:
+
+```bash
+# take away a point that is not one
+POST /v1/moderation/meeting-points/edit
+{"place_id":"node/139260064","action":"hide","target_id":"node/12345"}
+
+# fix a label
+{"place_id":"...","action":"update","target_id":"node/12345","name":"ΚΤΕΛ Έβρου"}
+
+# add the right one, above the automatic ones (lower priority sorts first)
+{"place_id":"...","action":"add","name":"ΚΤΕΛ Έβρου","kind":"bus_station",
+ "lon":25.874,"lat":40.851,"priority":-1}
+```
+
+Anybody can suggest a point from the app, and nobody else sees it until a
+moderator has looked: `GET /v1/moderation/meeting-points` is the queue,
+`POST .../{id}/approve` and `.../reject` are the answers. A rejection can carry
+a reason, and the person who suggested it sees that reason.
+
+Every correction and every decision is recorded, including a moderator's own.

@@ -159,6 +159,7 @@ func NewRouter(deps Deps) http.Handler {
 				r.Get("/meeting-points", deps.handlePendingMeetingPoints)
 				r.Post("/meeting-points/{id}/approve", deps.handleDecideMeetingPoint(true))
 				r.Post("/meeting-points/{id}/reject", deps.handleDecideMeetingPoint(false))
+				r.Post("/meeting-points/edit", deps.handleModeratorEdit)
 			})
 
 			if deps.Router != nil {

@@ -161,3 +161,49 @@ func (d Deps) handleDecideMeetingPoint(approve bool) http.HandlerFunc {
 		}
 	}
 }
+
+// handleModeratorEdit is the other half of moderation, and the half the
+// automatic list actually needs: hiding a point that is a ticket agency,
+// renaming one whose OSM label is unreadable, or putting the ΚΤΕΛ above the
+// three bad entries that came out of the harvest.
+func (d Deps) handleModeratorEdit(w http.ResponseWriter, r *http.Request) {
+	moderator, ok := callerID(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
+		return
+	}
+
+	var body struct {
+		PlaceID  string  `json:"place_id"`
+		Action   string  `json:"action"`
+		TargetID string  `json:"target_id"`
+		Name     string  `json:"name"`
+		Kind     string  `json:"kind"`
+		Lon      float64 `json:"lon"`
+		Lat      float64 `json:"lat"`
+		Priority int     `json:"priority"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+
+	err := store.ApplyModeratorEdit(r.Context(), d.Pool, store.ModeratorEdit{
+		PlaceID: body.PlaceID, Action: body.Action, TargetID: body.TargetID,
+		Name: body.Name, Kind: body.Kind, Lon: body.Lon, Lat: body.Lat,
+		Priority: body.Priority, By: moderator,
+	})
+	switch {
+	case errors.Is(err, store.ErrUnknownPlace):
+		writeError(w, http.StatusBadRequest, "unknown_place", "that place is not in the list")
+	case errors.Is(err, store.ErrBadKind):
+		writeError(w, http.StatusBadRequest, "invalid_kind", "that is not a kind of meeting point")
+	case errors.Is(err, store.ErrTooFarFromPlace):
+		writeError(w, http.StatusBadRequest, "too_far", "that point is not in that place")
+	case errors.Is(err, domain.ErrBadName):
+		writeError(w, http.StatusBadRequest, "invalid_name", "that name cannot be used")
+	case err != nil:
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}

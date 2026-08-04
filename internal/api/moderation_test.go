@@ -239,3 +239,122 @@ func meetingPoints(t *testing.T, h *harness, token string) []string {
 	}
 	return names
 }
+
+// What the automatic list actually needs: taking away a ticket agency tagged as
+// a bus station, and putting the real one above what is left.
+func TestAModeratorCanCorrectTheAutomaticList(t *testing.T) {
+	h := newHarness(t)
+	reader, _ := h.signUp("+306900000910", "Αναγνώστης")
+	mod, _ := h.signUp("+306900000911", "Ελένη")
+	makeModerator(t, h, "+306900000911", true)
+
+	before := meetingPoints(t, h, reader)
+	if len(before) == 0 {
+		t.Fatal("nothing harvested to correct")
+	}
+
+	// The id of the first harvested point, which is the one to take away.
+	rec := h.do(http.MethodGet, "/v1/places/points?place=node%2F139260064", nil, reader)
+	var listed struct {
+		Points []struct {
+			ID string `json:"id"`
+		} `json:"points"`
+	}
+	h.decode(rec, &listed)
+
+	hide := h.do(http.MethodPost, "/v1/moderation/meeting-points/edit", map[string]any{
+		"place_id": alexandroupoli, "action": "hide", "target_id": listed.Points[0].ID,
+	}, mod)
+	if hide.Code != http.StatusNoContent {
+		t.Fatalf("hiding: %d %s", hide.Code, hide.Body.String())
+	}
+
+	add := h.do(http.MethodPost, "/v1/moderation/meeting-points/edit", map[string]any{
+		"place_id": alexandroupoli, "action": "add", "name": "ΚΤΕΛ Έβρου",
+		"kind": "bus_station", "lon": spotLon, "lat": spotLat, "priority": -1,
+	}, mod)
+	if add.Code != http.StatusNoContent {
+		t.Fatalf("adding: %d %s", add.Code, add.Body.String())
+	}
+
+	after := meetingPoints(t, h, reader)
+	if len(after) == 0 || after[0] != "ΚΤΕΛ Έβρου" {
+		t.Errorf("list = %v, want the curated point first", after)
+	}
+	for _, name := range after {
+		if name == before[0] {
+			t.Errorf("%q is still listed after being hidden", name)
+		}
+	}
+}
+
+// A moderator's own corrections leave a trace, or the question "who removed
+// this, and when" has no answer.
+func TestAModeratorsOwnCorrectionIsRecorded(t *testing.T) {
+	h := newHarness(t)
+	mod, _ := h.signUp("+306900000912", "Ελένη")
+	makeModerator(t, h, "+306900000912", true)
+
+	if rec := h.do(http.MethodPost, "/v1/moderation/meeting-points/edit", map[string]any{
+		"place_id": alexandroupoli, "action": "add", "name": "ΚΤΕΛ Έβρου",
+		"kind": "bus_station", "lon": spotLon, "lat": spotLat,
+	}, mod); rec.Code != http.StatusNoContent {
+		t.Fatalf("adding: %d %s", rec.Code, rec.Body.String())
+	}
+
+	var n int
+	if err := h.pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM meeting_point_requests r
+		  JOIN users u ON u.id = r.reviewed_by
+		 WHERE u.phone = '+306900000912' AND r.status = 'approved'`).Scan(&n); err != nil {
+		t.Fatalf("counting: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("%d recorded corrections, want the one that was made", n)
+	}
+}
+
+// The correction endpoint is moderation, so it is refused like the rest of it.
+func TestCorrectingIsRefusedToOrdinaryAccounts(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000913", "Νίκος")
+
+	rec := h.do(http.MethodPost, "/v1/moderation/meeting-points/edit", map[string]any{
+		"place_id": alexandroupoli, "action": "hide", "target_id": "node/1",
+	}, token)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status %d, want 403", rec.Code)
+	}
+}
+
+// A moderator is trusted to judge a place, not to invent a taxonomy or put a
+// point in another country. The checks are the same ones an ordinary
+// suggestion gets.
+func TestAModeratorsCorrectionIsCheckedToo(t *testing.T) {
+	h := newHarness(t)
+	mod, _ := h.signUp("+306900000914", "Ελένη")
+	makeModerator(t, h, "+306900000914", true)
+
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+		code string
+	}{
+		{"a kind nobody offers", map[string]any{
+			"place_id": alexandroupoli, "action": "add", "name": "Κάπου",
+			"kind": "helipad", "lon": spotLon, "lat": spotLat}, "invalid_kind"},
+		{"a point in Paris", map[string]any{
+			"place_id": alexandroupoli, "action": "add", "name": "Κάπου",
+			"kind": "other", "lon": 2.35, "lat": 48.85}, "too_far"},
+		{"a name of only spaces", map[string]any{
+			"place_id": alexandroupoli, "action": "add", "name": "   ",
+			"kind": "other", "lon": spotLon, "lat": spotLat}, "invalid_name"},
+		{"hiding without saying which", map[string]any{
+			"place_id": alexandroupoli, "action": "hide"}, "invalid_request"},
+	} {
+		rec := h.do(http.MethodPost, "/v1/moderation/meeting-points/edit", tc.body, mod)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), tc.code) {
+			t.Errorf("%s: %d %s, want 400 and %q", tc.name, rec.Code, rec.Body.String(), tc.code)
+		}
+	}
+}

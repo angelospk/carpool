@@ -324,3 +324,108 @@ func listRequests(ctx context.Context, pool *pgxpool.Pool, sql string, args ...a
 	}
 	return out, rows.Err()
 }
+
+// ModeratorEdit is a correction made directly: hiding a point that is not one,
+// renaming one whose OSM label is a ticket agency, or moving a good one to the
+// top of the list.
+type ModeratorEdit struct {
+	PlaceID  string
+	Action   string // add, update or hide
+	TargetID string // the point being changed; empty only when adding
+	Name     string
+	Kind     string
+	Lon, Lat float64
+	Priority int
+	By       uuid.UUID
+}
+
+// ApplyModeratorEdit records the correction and applies it in one transaction.
+//
+// It goes through the same request table as anybody else's suggestion, already
+// approved. A moderation system whose own actions leave no trace is one where
+// the question "who removed this, and when" has no answer.
+func ApplyModeratorEdit(ctx context.Context, pool *pgxpool.Pool, e ModeratorEdit) error {
+	if e.Action != "add" && e.Action != "update" && e.Action != "hide" {
+		return fmt.Errorf("store: %q is not something that can be done to a meeting point", e.Action)
+	}
+	if e.Action != "add" && e.TargetID == "" {
+		return fmt.Errorf("store: a %s needs to say which point", e.Action)
+	}
+	place, ok := places.ByID(e.PlaceID)
+	if !ok {
+		return ErrUnknownPlace
+	}
+
+	var name *string
+	var kind *string
+	var lon, lat *float64
+	if e.Action != "hide" {
+		if e.Name != "" {
+			normalised, err := domain.NormaliseName(e.Name)
+			if err != nil {
+				return err
+			}
+			name = &normalised
+		}
+		if e.Kind != "" {
+			if !slicesContains(PointKinds, e.Kind) {
+				return ErrBadKind
+			}
+			kind = &e.Kind
+		}
+		if e.Lon != 0 || e.Lat != 0 {
+			if err := plausible(place, e.Lon, e.Lat); err != nil {
+				return err
+			}
+			lon, lat = &e.Lon, &e.Lat
+		}
+		// Adding needs all three, which the schema also insists on; saying so
+		// here gives a reason rather than a constraint violation.
+		if e.Action == "add" && (name == nil || kind == nil || lon == nil) {
+			return fmt.Errorf("store: a new point needs a name, a kind and a coordinate")
+		}
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("store: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var requestID uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO meeting_point_requests
+		    (place_id, action, target_id, name, kind, point, status,
+		     proposed_by, reviewed_by, reviewed_at)
+		VALUES ($1, $2, nullif($3, ''), $4, $5,
+		        CASE WHEN $6::float8 IS NULL THEN NULL
+		             ELSE ST_SetSRID(ST_MakePoint($6, $7), 4326) END,
+		        'approved', $8, $8, now())
+		RETURNING id`,
+		e.PlaceID, e.Action, e.TargetID, name, kind, lon, lat, e.By).Scan(&requestID); err != nil {
+		return fmt.Errorf("store: recording the correction: %w", err)
+	}
+
+	targetID := e.TargetID
+	if targetID == "" {
+		targetID = CuratedPrefix + requestID.String()
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO meeting_point_overrides
+		    (target_id, place_id, action, name, kind, point, priority, request_id)
+		VALUES ($1, $2, $3, $4, $5,
+		        CASE WHEN $6::float8 IS NULL THEN NULL
+		             ELSE ST_SetSRID(ST_MakePoint($6, $7), 4326) END, $8, $9)
+		ON CONFLICT (target_id) DO UPDATE
+		   SET action = EXCLUDED.action, name = EXCLUDED.name, kind = EXCLUDED.kind,
+		       point = EXCLUDED.point, priority = EXCLUDED.priority,
+		       request_id = EXCLUDED.request_id, updated_at = now()`,
+		targetID, e.PlaceID, e.Action, name, kind, lon, lat, e.Priority, requestID); err != nil {
+		return fmt.Errorf("store: applying the correction: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("store: commit: %w", err)
+	}
+	return nil
+}
