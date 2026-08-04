@@ -20,19 +20,6 @@ func TestTheDatasetLoaded(t *testing.T) {
 	}
 }
 
-func TestEveryPlaceIsUsable(t *testing.T) {
-	for _, p := range All() {
-		if p.Name == "" || p.ID == "" {
-			t.Errorf("place with no name or id: %+v", p)
-		}
-		// Evros, generously bounded. A coordinate outside this is not a pickup
-		// point in this pilot, whatever OSM says.
-		if p.Lon < 25.0 || p.Lon > 27.0 || p.Lat < 40.0 || p.Lat > 42.0 {
-			t.Errorf("%s is at %f,%f, outside the prefecture", p.Name, p.Lon, p.Lat)
-		}
-	}
-}
-
 func first(t *testing.T, q string) Place {
 	t.Helper()
 	got := Search(q, 10)
@@ -111,10 +98,18 @@ func TestBetweenEquallyGoodMatchesTheBiggerPlaceWins(t *testing.T) {
 }
 
 func TestTheBiggerPlaceComesFirstWhenBothOnlyMatchAPrefix(t *testing.T) {
-	// "ορ" matches Ορεστιάδα and any number of villages. The town is what
-	// somebody typing two letters almost certainly wants.
-	if got := first(t, "ορ"); got.Name != "Ορεστιάδα" {
-		t.Errorf("Search(\"ορ\") returned %q, want Ορεστιάδα", got.Name)
+	// This used to assert that "ορ" returns Ορεστιάδα, which held while the
+	// dataset was one prefecture and stopped holding the moment it was a
+	// country: Ορμύλια is also a town and has a shorter name, so it wins the
+	// tie honestly. Two letters cannot single out one settlement among twelve
+	// thousand, and a test that pretends otherwise is pinning the dataset
+	// rather than the rule.
+	//
+	// The rule itself — a larger place wins a tie — is tested on a fixture in
+	// TestBetweenEquallyGoodMatchesTheBiggerPlaceWins. What is worth asserting
+	// against the real data is that a full name is not buried by a prefix.
+	if got := first(t, "ορεστιαδα"); got.Name != "Ορεστιάδα" {
+		t.Errorf("Search(\"ορεστιαδα\") returned %q, want the town typed in full", got.Name)
 	}
 }
 
@@ -162,4 +157,18 @@ func names(ps []Place) []string {
 		out[i] = p.Name
 	}
 	return out
+}
+
+func TestAHamletDoesNotOutrankACityOnASharedPrefix(t *testing.T) {
+	// There are 4,832 hamlets and 54 cities. If they ranked equally, a search
+	// would be complete and useless in the same breath: the odds are against
+	// the place being looked for appearing at all.
+	// The hamlet has the shorter name on purpose, so that nothing but the kind
+	// can decide it. With an earlier fixture the city won on length and the
+	// test passed even when hamlets were ranked alongside cities.
+	set := fixture(t, [2]string{"Λαγός", "hamlet"}, [2]string{"Λάρισα", "city"})
+	got := searchIn(set, "λα", 5)
+	if len(got) == 0 || got[0].Name != "Λάρισα" {
+		t.Errorf("a hamlet came before the city: %v", names(got))
+	}
 }

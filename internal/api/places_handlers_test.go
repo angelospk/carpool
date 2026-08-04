@@ -83,7 +83,7 @@ func TestPlacesCapsHowMuchCanBeAskedFor(t *testing.T) {
 	token, _ := h.signUp("+306900000504", "Νίκος")
 
 	for _, limit := range []string{"1000", "-1", "0", "abc"} {
-		rec := h.do(http.MethodGet, "/v1/places?q=α&limit="+limit, nil, token)
+		rec := h.do(http.MethodGet, "/v1/places?q=αλεξ&limit="+limit, nil, token)
 		if rec.Code != http.StatusOK {
 			t.Errorf("limit=%s gave %d", limit, rec.Code)
 			continue

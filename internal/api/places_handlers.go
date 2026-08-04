@@ -29,6 +29,14 @@ func (d Deps) handlePlaces(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "q is required")
 		return
 	}
+	// One character is not a search, but it is also not a mistake: it is the
+	// first keystroke of one. Answering 400 would flash an error under the
+	// field of somebody who is doing nothing wrong, so a query too short to
+	// mean anything gets the same empty list as one that matches nothing.
+	if len([]rune(q)) < places.MinQuery {
+		writeJSON(w, http.StatusOK, map[string]any{"places": []places.Place{}})
+		return
+	}
 
 	// A limit that is missing, negative, zero or not a number is a client that
 	// did not ask, not a client to refuse: the field still needs suggestions.

@@ -63,7 +63,8 @@
     "city": "city",
     "none": "No such place",
     "town": "town",
-    "village": "village"
+    "village": "village",
+    "hamlet": "settlement"
   },
   "profile": {
     "car": "Your car",

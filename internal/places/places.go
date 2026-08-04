@@ -1,11 +1,15 @@
 // Package places answers "where do you want picked up" with a name instead of
 // a coordinate.
 //
-// The dataset is 153 settlements in the Evros prefecture, harvested from
-// OpenStreetMap by scripts/harvest-places.py and embedded here. At that size a
-// table would buy nothing: the whole thing is searched in memory in
-// microseconds, there is no migration to run, and the data changes when someone
-// deliberately re-harvests it rather than at runtime.
+// The dataset is every city, town, village and hamlet in Greece — 12,442 of
+// them — harvested from the same OpenStreetMap extract the router runs on by
+// scripts/harvest-places.py, and embedded here.
+//
+// Still embedded rather than in a table, and still searched by walking the
+// whole list. That was obviously right at 153 rows and is worth restating at
+// twelve thousand: measured, a search costs 0.85 ms and does not grow with how
+// broad the query is. A table would add a migration, a round trip and a second
+// place for the ranking to live, and buy nothing back.
 //
 // © OpenStreetMap contributors, ODbL.
 package places
@@ -19,20 +23,29 @@ import (
 	"sync"
 )
 
-//go:embed data/evros.csv
+//go:embed data/greece.csv
 var dataset string
 
 type Place struct {
 	// ID is "node/123456": the OSM type and id together, because ids are only
 	// unique within a type, and because a name is not an identity — two
 	// villages in this dataset can share one.
-	ID     string  `json:"id"`
-	Region string  `json:"region"`
-	Kind   string  `json:"kind"` // city, town or village
-	Name   string  `json:"name"`
+	ID   string `json:"id"`
+	Kind string `json:"kind"` // city, town, village or hamlet
+	Name string `json:"name"`
+	// Area is the municipality, and it is not decoration. Greece has dozens of
+	// Άγιος Γεώργιος; a list of identical rows is no better than no list.
+	Area   string  `json:"area"`
+	AreaEn string  `json:"area_en,omitempty"`
 	NameEn string  `json:"name_en,omitempty"`
 	Lon    float64 `json:"lon"`
 	Lat    float64 `json:"lat"`
+
+	// Population orders places of the same kind. OSM has it for 50 of the 54
+	// cities and about half the villages; where it is missing it is zero, which
+	// puts an untagged place behind a tagged one of the same kind rather than
+	// ahead of it.
+	Population int `json:"-"`
 }
 
 // How a place matched, which is most of how results are ordered. A name OSM
@@ -81,14 +94,17 @@ func load() {
 		if errLon != nil || errLat != nil {
 			continue
 		}
+		population, _ := strconv.Atoi(row[col["population"]])
 		p := Place{
-			ID:     row[col["osm_type"]] + "/" + row[col["osm_id"]],
-			Region: row[col["region"]],
-			Kind:   row[col["kind"]],
-			Name:   row[col["name"]],
-			NameEn: row[col["name_en"]],
-			Lon:    lon,
-			Lat:    lat,
+			ID:         row[col["osm_type"]] + "/" + row[col["osm_id"]],
+			Area:       row[col["area"]],
+			AreaEn:     row[col["area_en"]],
+			Kind:       row[col["kind"]],
+			Name:       row[col["name"]],
+			NameEn:     row[col["name_en"]],
+			Lon:        lon,
+			Lat:        lat,
+			Population: population,
 		}
 		index = append(index, indexed{Place: p, keys: keysFor(row, col)})
 	}
@@ -146,8 +162,13 @@ func rank(kind string) int {
 		return 0
 	case "town":
 		return 1
-	default:
+	case "village":
 		return 2
+	default:
+		// hamlet, and anything OSM invents later. Last on purpose: there are
+		// 4,832 of them against 54 cities, and a search that led with them
+		// would be complete and useless in the same breath.
+		return 3
 	}
 }
 
@@ -176,6 +197,15 @@ func score(k key, q string) (int, bool) {
 	return 0, false
 }
 
+// MinQuery is the shortest thing that counts as a search.
+//
+// One character is not a search, it is a sample of the dataset: 4,832 hamlets
+// start with alpha and eight of them arrive in no order anyone asked for. Two
+// rather than three because the shortest Greek place names are exactly three
+// letters — Κως, Ίος, Λία — and a floor of three would mean typing the whole
+// name before seeing it.
+const MinQuery = 2
+
 // Search returns up to limit places matching what was typed, best first.
 func Search(query string, limit int) []Place {
 	once.Do(load)
@@ -187,7 +217,7 @@ func Search(query string, limit int) []Place {
 // about the Evros prefecture. Ranking rules outlive any particular dataset.
 func searchIn(set []indexed, query string, limit int) []Place {
 	q := fold(query)
-	if q == "" || limit <= 0 {
+	if len([]rune(q)) < MinQuery || limit <= 0 {
 		return nil
 	}
 
@@ -218,6 +248,12 @@ func searchIn(set []indexed, query string, limit int) []Place {
 		}
 		if r := rank(a.Kind) - rank(b.Kind); r != 0 {
 			return r
+		}
+		// Larger first. This is what puts Αλεξανδρούπολη ahead of Αλεξάνδρεια
+		// for "alexandr": both are cities, so the tie used to fall to the
+		// shorter name, which is not a fact about either place.
+		if p := b.Population - a.Population; p != 0 {
+			return p
 		}
 		if l := len(a.Name) - len(b.Name); l != 0 {
 			return l

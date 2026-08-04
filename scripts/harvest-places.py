@@ -1,165 +1,260 @@
 #!/usr/bin/env python3
-"""Refresh the settlement list at internal/places/data/evros.csv.
+"""Build the settlement list at internal/places/data/greece.csv.
 
-    python3 scripts/harvest-places.py            # fetch, diff, exit 1 if stale
+    python3 scripts/harvest-places.py            # rebuild, diff, exit 1 if stale
     python3 scripts/harvest-places.py --update   # write the dataset
 
 Why this exists: pickup points were typed as "25.8743, 40.8476 Αλεξανδρούπολη",
 which is not a thing anyone will do twice. A person types a town name, so there
 has to be a list of town names with coordinates attached.
 
-The source is OpenStreetMap, queried through Overpass against the Evros
-relation rather than a bounding box: a box around this prefecture reaches into
-Turkey and Bulgaria, and offering a driver a pickup point across a border is
-worse than offering none.
+The source is the same OpenStreetMap extract the router runs on, read locally
+with osmium. It used to be the public Overpass API, one query per prefecture.
+That was fine for one prefecture and wrong for a country: seventy-odd queries
+against a shared free service, whose answers change under you, is a build that
+depends on somebody else's afternoon. The extract is already on disk, already
+the thing every route is computed against, and reading it twice is free.
 
-Only nodes are harvested. Overpass can return ways and relations too, but their
-`center` is the middle of a bounding box and is not guaranteed to sit inside the
-feature, let alone somewhere a car can stop. Settlements in OSM are nodes in
-practice, and a point that is wrong by a kilometre is worse than absent.
+Duplicate names are the reason the municipality is harvested too. Greece has
+dozens of Άγιος Γεώργιος, and a list showing eight identical rows is no better
+than no list. Each settlement is assigned the smallest administrative area that
+contains it, by point-in-polygon against the same extract.
 
-Names are kept as OSM has them rather than romanised here: name, name:en,
-int_name and alt_name each carry authority that a generated transliteration
-does not, and the Go side ranks them above what it generates itself.
+Greek OSM tags municipalities at admin_level 5 and 6 inconsistently -- both hold
+Δήμος, Δημοτική Ενότητα and Κοινότητα -- so both are read and the smallest match
+wins. There is no level that cleanly holds the περιφερειακή ενότητα, which is
+why the answer is a δήμος rather than the prefecture a person might expect.
+
+A settlement inside no Greek municipality is dropped and reported. In practice
+those are the Bulgarian and Turkish villages the extract's border box reaches
+into, plus Mount Athos, which has its own administrative status and no
+carpooling.
 
 Output: © OpenStreetMap contributors, ODbL.
 """
 import argparse
 import csv
+import io
 import json
-import os
 import pathlib
+import subprocess
 import sys
-import urllib.parse
-import urllib.request
+import tempfile
 
-RELATION = 939217  # Evros, admin_level 6
-REGION = "evros"
-KINDS = ("city", "town", "village")
-OUT = pathlib.Path(__file__).resolve().parent.parent / "internal/places/data/evros.csv"
-ENDPOINT = "https://overpass-api.de/api/interpreter"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+OUT = ROOT / "internal/places/data/greece.csv"
+DEFAULT_PBF = ROOT / "osrm-data/greece-latest.osm.pbf"
 
-QUERY = f"""
-[out:json][timeout:180];
-rel({RELATION}); map_to_area->.a;
-node["place"~"^({'|'.join(KINDS)})$"]["name"](area.a);
-out body;
-"""
+# hamlet is included and ranked last by the Go side. Leaving it out would mean
+# somebody living in one cannot name where they are; including it costs 4,832
+# rows that only surface when their name is typed.
+KINDS = ("city", "town", "village", "hamlet")
 
-FIELDS = ["osm_type", "osm_id", "region", "kind", "name", "name_en", "int_name", "alt_name", "lon", "lat"]
+# Both levels, because Greek OSM uses them interchangeably for municipalities.
+ADMIN_LEVELS = ("5", "6")
 
+FIELDS = [
+    "osm_type", "osm_id", "kind", "name", "name_en", "int_name", "alt_name",
+    "area", "area_en", "population", "lon", "lat",
+]
 
-def fetch() -> list[dict]:
-    body = urllib.parse.urlencode({"data": QUERY}).encode()
-    # Overpass answers 406 to urllib's default User-Agent. Identifying the
-    # caller is also what its usage policy asks for.
-    req = urllib.request.Request(
-        ENDPOINT, data=body, headers={"User-Agent": "carpool-harvest/1.0 (+local pilot, Evros)"}
-    )
-    with urllib.request.urlopen(req, timeout=300) as r:
-        return json.load(r)["elements"]
+# Prefixes stripped from a municipality name for display. "Νέα Χώρα, Δήμος
+# Χανίων" is what OSM says; "Νέα Χώρα, Χανίων" is what fits under a search
+# result.
+AREA_PREFIXES = ("Δημοτική Ενότητα ", "Δημοτική Κοινότητα ", "Κοινότητα ", "Δήμος ")
 
 
-def rows(elements: list[dict]) -> list[dict]:
-    out, seen = [], set()
-    for e in elements:
-        tags = e.get("tags", {})
-        name, kind = tags.get("name"), tags.get("place")
-        lon, lat = e.get("lon"), e.get("lat")
+def osmium(*args):
+    try:
+        subprocess.run(["osmium", *args], check=True, capture_output=True)
+    except FileNotFoundError:
+        sys.exit("osmium is not installed: brew install osmium-tool")
+    except subprocess.CalledProcessError as e:
+        sys.exit(f"osmium {' '.join(args)} failed:\n{e.stderr.decode(errors='replace')}")
 
-        # Every one of these has been wrong in real OSM data at some point, and
-        # a settlement with no name or a coordinate in the Gulf of Guinea is
-        # worse than one that is missing: it is offered to a driver as a place
-        # to stop.
-        if not name or kind not in KINDS:
-            continue
-        if lon is None or lat is None:
-            continue
-        if not (-180 <= lon <= 180 and -90 <= lat <= 90):
-            print(f"skipping {name}: coordinates out of range", file=sys.stderr)
-            continue
 
-        key = ("node", e["id"])
-        if key in seen:  # Overpass does not promise to deduplicate
-            continue
-        seen.add(key)
+def features(pbf: pathlib.Path, tmp: pathlib.Path, filters: list[str], geometry: str):
+    """Runs osmium tags-filter then export, and yields GeoJSON features."""
+    filtered = tmp / "filtered.osm.pbf"
+    exported = tmp / "exported.geojsonseq"
+    osmium("tags-filter", str(pbf), *filters, "-o", str(filtered), "--overwrite")
+    # -u type_id puts "node/123456" in the properties as @id. Without it the
+    # export carries no identity at all, and a name is not an identity: this
+    # dataset holds many settlements that share one.
+    osmium("export", str(filtered), "-f", "geojsonseq", "-u", "type_id",
+           f"--geometry-types={geometry}", "-o", str(exported), "--overwrite")
+    with exported.open(encoding="utf-8") as fh:
+        for line in fh:
+            # geojsonseq separates records with RS (U+001E).
+            line = line.lstrip("\x1e").strip()
+            if line:
+                yield json.loads(line)
 
-        out.append(
-            {
+
+def rings(geometry: dict) -> list:
+    kind = geometry.get("type")
+    if kind == "Polygon":
+        return [geometry["coordinates"]]
+    if kind == "MultiPolygon":
+        return geometry["coordinates"]
+    return []
+
+
+class Area:
+    """One municipality, with a bounding box so most points are rejected fast."""
+
+    __slots__ = ("name", "name_en", "polygons", "x0", "y0", "x1", "y1", "span")
+
+    def __init__(self, name, name_en, polygons):
+        self.name, self.name_en, self.polygons = name, name_en, polygons
+        xs = [x for poly in polygons for ring in poly for x, _ in ring]
+        ys = [y for poly in polygons for ring in poly for _, y in ring]
+        self.x0, self.y0, self.x1, self.y1 = min(xs), min(ys), max(xs), max(ys)
+        # Used to break ties: where two administrative levels both contain a
+        # settlement, the smaller one is the more useful thing to show.
+        self.span = (self.x1 - self.x0) * (self.y1 - self.y0)
+
+    def contains(self, x, y) -> bool:
+        if not (self.x0 <= x <= self.x1 and self.y0 <= y <= self.y1):
+            return False
+        for poly in self.polygons:
+            if in_ring(x, y, poly[0]) and not any(in_ring(x, y, h) for h in poly[1:]):
+                return True
+        return False
+
+
+def in_ring(x, y, ring) -> bool:
+    """Ray casting. A point exactly on an edge may fall either way; that is
+    acceptable here because the answer is a label, not a boundary decision."""
+    hit = False
+    j = len(ring) - 1
+    for i in range(len(ring)):
+        xi, yi = ring[i]
+        xj, yj = ring[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            hit = not hit
+        j = i
+    return hit
+
+
+def load_areas(pbf, tmp) -> list[Area]:
+    areas = []
+    for level in ADMIN_LEVELS:
+        for f in features(pbf, tmp / level, [f"r/admin_level={level}"], "polygon"):
+            p = f.get("properties", {})
+            if p.get("boundary") != "administrative" or not p.get("name"):
+                continue
+            polygons = rings(f.get("geometry", {}))
+            if polygons:
+                areas.append(Area(p["name"], p.get("name:en", ""), polygons))
+    # Smallest first, so the first containing area found is the most specific.
+    areas.sort(key=lambda a: a.span)
+    return areas
+
+
+def population(raw: str) -> str:
+    """OSM population values are free text: "12.500", "~3000", "1,234"."""
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    return digits if digits else "0"
+
+
+def strip_prefix(name: str) -> str:
+    for prefix in AREA_PREFIXES:
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    return name
+
+
+def build(pbf: pathlib.Path) -> tuple[list[dict], list[str]]:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = pathlib.Path(td)
+        for level in ADMIN_LEVELS:
+            (tmp / level).mkdir()
+        (tmp / "places").mkdir()
+
+        areas = load_areas(pbf, tmp)
+        print(f"{len(areas)} administrative areas", file=sys.stderr)
+
+        rows, orphans = [], []
+        for f in features(pbf, tmp / "places",
+                          [f"n/place={','.join(KINDS)}"], "point"):
+            p = f.get("properties", {})
+            name = p.get("name")
+            coords = f.get("geometry", {}).get("coordinates")
+            if not name or not coords:
+                continue
+            lon, lat = coords[0], coords[1]
+
+            area = next((a for a in areas if a.contains(lon, lat)), None)
+            if area is None:
+                orphans.append(name)
+                continue
+
+            rows.append({
                 "osm_type": "node",
-                "osm_id": e["id"],
-                "region": REGION,
-                "kind": kind,
+                # osmium renders a type_id as "n441183": one letter, then the
+                # number. Only nodes are harvested, so the letter is dropped.
+                "osm_id": str(f.get("id", ""))[1:],
+                "kind": p["place"],
                 "name": name,
-                "name_en": tags.get("name:en", ""),
-                "int_name": tags.get("int_name", ""),
-                "alt_name": tags.get("alt_name", ""),
+                "name_en": p.get("name:en", ""),
+                "int_name": p.get("int_name", ""),
+                "alt_name": p.get("alt_name", ""),
+                "area": strip_prefix(area.name),
+                "area_en": area.name_en,
+                # Present on 50 of the 54 cities and about half the villages.
+                # It is what tells Alexandroupoli from Alexandreia when both
+                # match what was typed; without it the tie fell to whichever
+                # name was shorter, which is not a fact about anywhere.
+                "population": population(p.get("population", "")),
+                # Six decimals is about ten centimetres, far finer than a
+                # settlement centre is known to.
                 "lon": f"{lon:.6f}",
                 "lat": f"{lat:.6f}",
-            }
-        )
+            })
 
-    # Sorted by id so that two harvests of unchanged data produce byte-identical
-    # files and the diff below means something.
-    return sorted(out, key=lambda r: r["osm_id"])
+    # Sorted so that a rebuild from the same extract produces the same bytes,
+    # and a diff shows what OSM changed rather than what osmium reordered.
+    rows.sort(key=lambda r: (r["name"], r["area"], r["osm_id"]))
+    return rows, orphans
 
 
-def render(data: list[dict]) -> str:
-    import io
-
+def render(rows: list[dict]) -> str:
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=FIELDS, lineterminator="\n")
     w.writeheader()
-    w.writerows(data)
+    w.writerows(rows)
     return buf.getvalue()
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--pbf", type=pathlib.Path, default=DEFAULT_PBF)
     ap.add_argument("--update", action="store_true", help="write the dataset")
     args = ap.parse_args()
 
-    data = rows(fetch())
-    if not data:
-        print("the query returned nothing; refusing to write", file=sys.stderr)
-        return 1
+    if not args.pbf.exists():
+        sys.exit(f"{args.pbf} not found; download the Greece extract from Geofabrik")
 
-    fresh = render(data)
-    current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
+    rows, orphans = build(args.pbf)
+    print(f"{len(rows)} settlements, {len(orphans)} outside any Greek municipality",
+          file=sys.stderr)
+    if orphans:
+        print("  dropped: " + ", ".join(sorted(set(orphans))[:12]), file=sys.stderr)
 
-    if fresh == current:
-        print(f"{OUT.name}: unchanged, {len(data)} places")
+    rendered = render(rows)
+    if args.update:
+        OUT.parent.mkdir(parents=True, exist_ok=True)
+        OUT.write_text(rendered, encoding="utf-8")
+        print(f"wrote {OUT}", file=sys.stderr)
         return 0
 
-    kinds = {k: sum(1 for r in data if r["kind"] == k) for k in KINDS}
-    print(f"{OUT.name}: {len(data)} places ({kinds})")
-    if current:
-        was = {r["name"] for r in csv.DictReader(current.splitlines())}
-        now = {r["name"] for r in data}
-        for label, diff in (("added", now - was), ("removed", was - now)):
-            if diff:
-                print(f"  {label}: {', '.join(sorted(diff))}")
-
-    if not args.update:
-        print("run again with --update to write it", file=sys.stderr)
-        return 1
-
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    # Encoding stated rather than inherited: every name in here is Greek, and on
-    # a machine whose locale is not UTF-8 the default would write mojibake into
-    # a file that is then embedded in the binary and shipped.
-    #
-    # The temporary name carries the pid so two runs cannot write through each
-    # other, and is removed even when the replace fails, rather than left behind
-    # to be mistaken for the dataset.
-    tmp = OUT.with_suffix(f".part.{os.getpid()}")
-    try:
-        tmp.write_text(fresh, encoding="utf-8", newline="\n")
-        tmp.replace(OUT)
-    finally:
-        tmp.unlink(missing_ok=True)
-    print(f"wrote {OUT}")
-    return 0
+    current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
+    if current == rendered:
+        print("dataset is current", file=sys.stderr)
+        return 0
+    print("dataset is stale; rerun with --update", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

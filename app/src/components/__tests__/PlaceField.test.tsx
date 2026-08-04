@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react-native';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react-native';
 
 import { PlaceField } from '../PlaceField';
 import { api } from '../../api/endpoints';
@@ -8,8 +8,8 @@ jest.mock('../../api/endpoints', () => ({
 }));
 
 const evros = [
-  { id: 'node/1', region: 'evros', kind: 'city', name: 'Αλεξανδρούπολη', lon: 25.8743, lat: 40.8476 },
-  { id: 'node/2', region: 'evros', kind: 'town', name: 'Ορεστιάδα', lon: 26.5297, lat: 41.5039 },
+  { id: 'node/1', area: 'Αλεξανδρούπολης', kind: 'city', name: 'Αλεξανδρούπολη', lon: 25.8743, lat: 40.8476 },
+  { id: 'node/2', area: 'Ορεστιάδας', kind: 'town', name: 'Ορεστιάδα', lon: 26.5297, lat: 41.5039 },
 ];
 
 const setup = () => {
@@ -167,5 +167,21 @@ describe('PlaceField', () => {
     // No crash, no suggestions, and nothing selected on the caller's behalf.
     expect(screen.queryByTestId('from-suggestions')).toBeNull();
     expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({ lon: expect.anything() }));
+  });
+
+  it('shows each suggestion its municipality, so two of the same name differ', async () => {
+    // Greece has dozens of Άγιος Γεώργιος. A list that shows the name alone is
+    // a list of identical rows, which is no more useful than no list at all.
+    (api.places as jest.Mock).mockResolvedValue({
+      places: [
+        { id: 'node/10', area: 'Ανατολικής Μάνης', kind: 'village', name: 'Άγιος Γεώργιος', lon: 22.4, lat: 36.7 },
+        { id: 'node/11', area: 'Γρεβενών', kind: 'village', name: 'Άγιος Γεώργιος', lon: 21.4, lat: 40.1 },
+      ],
+    });
+    setup();
+    await type('αγιος γεωργιος');
+
+    expect(within(screen.getByTestId('from-node/10')).getByText(/Ανατολικής Μάνης/)).toBeTruthy();
+    expect(within(screen.getByTestId('from-node/11')).getByText(/Γρεβενών/)).toBeTruthy();
   });
 });

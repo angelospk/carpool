@@ -22,9 +22,11 @@ export type MyRoute = {
 
 export type Place = {
   id: string;
-  region: string;
-  kind: 'city' | 'town' | 'village';
+  kind: 'city' | 'town' | 'village' | 'hamlet';
   name: string;
+  /** The municipality, which is what tells two Άγιος Γεώργιος apart. */
+  area: string;
+  area_en?: string;
   name_en?: string;
   lon: number;
   lat: number;

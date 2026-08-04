@@ -150,9 +150,13 @@ export function PlaceField({
               style={styles.row}
             >
               <Text style={styles.name}>{place.name}</Text>
-              {/* Two villages here share a name, so the kind is what tells
-                  otherwise identical rows apart. */}
-              <Text style={styles.kind}>{t(`places.${place.kind}`)}</Text>
+              {/* Dozens of Greek villages share a name. The municipality is
+                  what tells otherwise identical rows apart, and the kind is
+                  what says which of them is a city and which is five houses. */}
+              <Text style={styles.kind}>
+                {place.area ? `${place.area} · ` : ''}
+                {t(`places.${place.kind}`)}
+              </Text>
             </Pressable>
           ))}
         </View>
