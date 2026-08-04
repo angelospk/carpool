@@ -79,6 +79,8 @@ export type TripDetail = TripSummary & {
   weekday: number;
   /** The caller's own booking, absent for the driver. */
   booking_id: string | null;
+  /** The route ran into a ferry and was cut at the port. */
+  ends_at_port: boolean;
 };
 
 export type PastTrip = TripSummary & {
@@ -185,7 +187,10 @@ export const api = {
     oneoff_date?: string;
     depart_earliest: string;
     depart_latest: string;
-  }) => request<{ template_id: string; route_km: number }>('/v1/routes', { method: 'POST', body }),
+  }) => request<{ template_id: string; route_km: number; ends_at_port: boolean }>('/v1/routes', {
+      method: 'POST',
+      body,
+    }),
 
   createRequest: (body: {
     origin_lon: number;

@@ -44,8 +44,10 @@ type CreateRouteTemplateParams struct {
 	RouteMin         int
 	Seats            int
 	PricingMode      domain.PricingMode
-	OSRMDataVersion  string
-	Schedule         domain.Schedule
+	// EndsAtPort marks a route the router cut short at a ferry terminal.
+	EndsAtPort      bool
+	OSRMDataVersion string
+	Schedule        domain.Schedule
 }
 
 // CreateRouteTemplate stores a template and its schedule in one transaction: a
@@ -61,18 +63,18 @@ func CreateRouteTemplate(ctx context.Context, pool *pgxpool.Pool, p CreateRouteT
 	err = tx.QueryRow(ctx, `
 		INSERT INTO route_templates (
 			driver_id, origin, destination, origin_label, destination_label,
-			route_geom, route_km, route_min, seats, pricing_mode, osrm_data_version)
+			route_geom, route_km, route_min, seats, pricing_mode, osrm_data_version, ends_at_port)
 		VALUES ($1,
 			ST_SetSRID(ST_MakePoint($2, $3), 4326),
 			ST_SetSRID(ST_MakePoint($4, $5), 4326),
 			$6, $7,
-			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13)
+			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13, $14)
 		RETURNING id`,
 		p.DriverID,
 		p.Origin.Lon, p.Origin.Lat,
 		p.Destination.Lon, p.Destination.Lat,
 		p.OriginLabel, p.DestinationLabel,
-		p.RouteWKT, p.RouteKm, p.RouteMin, p.Seats, string(p.PricingMode), p.OSRMDataVersion,
+		p.RouteWKT, p.RouteKm, p.RouteMin, p.Seats, string(p.PricingMode), p.OSRMDataVersion, p.EndsAtPort,
 	).Scan(&templateID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("store: inserting route template: %w", err)

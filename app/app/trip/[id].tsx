@@ -20,6 +20,7 @@ import {
 import { RouteGlyph, decodeRoute } from '../../src/components/RouteGlyph';
 import { RepeatCard } from '../../src/components/RepeatCard';
 import { SocialLinks } from '../../src/components/SocialLink';
+import { PortNotice } from '../../src/components/PortNotice';
 import { colors, radius, space, type } from '../../src/design/tokens';
 import { athensDay, athensTime } from '../../src/design/format';
 
@@ -135,6 +136,8 @@ export default function TripScreen() {
                   </View>
 
                   <RouteSpine from={trip.data.origin_label} to={trip.data.destination_label} />
+
+                  <PortNotice endsAtPort={trip.data.ends_at_port} />
 
                   <View style={styles.stats}>
                     <SeatPips

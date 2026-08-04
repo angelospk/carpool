@@ -106,10 +106,10 @@ func (m *Materializer) reconcile(ctx context.Context, templateID uuid.UUID) erro
 	// this a single run could commit a horizon spanning two revisions.
 	var tmpl templateSnapshot
 	err = tx.QueryRow(ctx, `
-		SELECT revision, seats, route_km, route_min, pricing_mode, ST_AsText(route_geom)
+		SELECT revision, seats, route_km, route_min, pricing_mode, ends_at_port, ST_AsText(route_geom)
 		FROM route_templates WHERE id = $1 AND active
 		FOR UPDATE`, templateID).Scan(
-		&tmpl.revision, &tmpl.seats, &tmpl.routeKm, &tmpl.routeMin, &tmpl.pricingMode, &tmpl.routeWKT)
+		&tmpl.revision, &tmpl.seats, &tmpl.routeKm, &tmpl.routeMin, &tmpl.pricingMode, &tmpl.endsAtPort, &tmpl.routeWKT)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil // deactivated between listing and locking
 	}
@@ -154,6 +154,7 @@ type templateSnapshot struct {
 	routeKm     float64
 	routeMin    int
 	pricingMode string
+	endsAtPort  bool
 	routeWKT    string
 }
 
@@ -169,9 +170,9 @@ func (m *Materializer) upsert(
 			INSERT INTO trip_occurrences (
 				template_id, service_date, depart_earliest, depart_latest,
 				seats_total, seats_free, template_revision,
-				route_geom, route_km, route_min, pricing_mode)
+				route_geom, route_km, route_min, pricing_mode, ends_at_port)
 			VALUES ($1, $2::date, $3, $4,
-			        $5, $5, $6, ST_GeomFromText($7, 4326), $8, $9, $10)
+			        $5, $5, $6, ST_GeomFromText($7, 4326), $8, $9, $10, $12)
 			ON CONFLICT (template_id, service_date) DO UPDATE
 			SET depart_earliest   = EXCLUDED.depart_earliest,
 			    depart_latest     = EXCLUDED.depart_latest,
@@ -185,11 +186,12 @@ func (m *Materializer) upsert(
 			    route_km          = EXCLUDED.route_km,
 			    route_min         = EXCLUDED.route_min,
 			    pricing_mode      = EXCLUDED.pricing_mode,
+			    ends_at_port      = EXCLUDED.ends_at_port,
 			    updated_at        = now()
 			WHERE `+mutablePredicate("$11"),
 			templateID, p.ServiceDate.String(), p.DepartEarliest, p.DepartLatest,
 			tmpl.seats, tmpl.revision, tmpl.routeWKT, tmpl.routeKm, tmpl.routeMin, tmpl.pricingMode,
-			now)
+			now, tmpl.endsAtPort)
 		if err != nil {
 			return fmt.Errorf("jobs: upserting occurrence %s: %w", p.ServiceDate, err)
 		}

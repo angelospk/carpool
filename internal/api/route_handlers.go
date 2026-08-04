@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -77,6 +78,14 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	shaped, err := d.Router.RouteWithShape(ctx, []geo.Point{origin, destination})
+	if errors.Is(err, geo.ErrSeaCrossingOnly) {
+		// Somewhere you sail to from a place you sail from. There is nothing to
+		// share a car for, and quoting a trip of no kilometres would be worse
+		// than saying so.
+		writeError(w, http.StatusBadRequest, "sea_crossing",
+			"that journey is a ferry crossing, so there is no drive to share")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "routing_failed",
 			"could not compute a driving route between those points")
@@ -95,6 +104,7 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		Seats:            body.Seats,
 		PricingMode:      mode,
 		OSRMDataVersion:  d.OSRMDataVersion,
+		EndsAtPort:       shaped.SeaCrossing,
 		Schedule:         schedule,
 	})
 	if err != nil {
@@ -114,14 +124,18 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 			// The scheduled run will pick it up; publishing still succeeded.
 			writeJSON(w, http.StatusCreated, map[string]any{
 				"template_id": templateID, "materialized": false,
+				"ends_at_port": shaped.SeaCrossing,
 			})
 			return
 		}
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"template_id":  templateID,
-		"route_km":     shaped.DistanceMeters / 1000,
+		"template_id": templateID,
+		"route_km":    shaped.DistanceMeters / 1000,
+		// The app needs this to explain a route that stops somewhere the driver
+		// did not type. Without it the trip just looks wrong.
+		"ends_at_port": shaped.SeaCrossing,
 		"materialized": true,
 	})
 }

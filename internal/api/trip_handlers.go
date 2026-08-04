@@ -106,6 +106,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		"depart_latest":     trip.DepartLatest,
 		"status":            trip.Status,
 		"route_km":          trip.RouteKm,
+		"ends_at_port":      trip.EndsAtPort,
 		"origin_label":      trip.OriginLabel,
 		"destination_label": trip.DestLabel,
 		"route_polyline":    trip.RoutePolyline,

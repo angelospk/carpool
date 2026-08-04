@@ -150,7 +150,9 @@
     "repeatWeekFull": "No seat on {{dates}}",
     "send": "Send",
     "socialSelfDeclared": "Self-declared — we have not verified it",
-    "title": "Trip"
+    "title": "Trip",
+    "portTitle": "The trip ends at the port",
+    "portBody": "The rest of the way is by boat. The ferry ticket is not part of the price and is arranged separately."
   },
   "user": {
     "block": "Block",
