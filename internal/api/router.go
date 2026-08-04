@@ -52,6 +52,10 @@ type Deps struct {
 	// driver does not get to say.
 	Drivers *drivers.Service
 
+	// PhoneChange moves an account to another number, which is a change of
+	// credential rather than of profile: see internal/auth/phone_change.go.
+	PhoneChange *auth.PhoneChangeService
+
 	// Router snaps published routes to the road network.
 	Router *geo.OSRM
 	// Materializer runs immediately after a route is published so it is
@@ -122,6 +126,11 @@ func NewRouter(deps Deps) http.Handler {
 			// the pool directly, so there is no collaborator to guard on.
 			r.Get("/me/routes", deps.handleMyRoutes)
 			r.Delete("/me/routes/{id}", deps.handleRetireRoute)
+
+			if deps.PhoneChange != nil {
+				r.Post("/me/phone/request", deps.handleRequestPhoneChange)
+				r.Post("/me/phone/confirm", deps.handleConfirmPhoneChange)
+			}
 
 			r.Put("/me/photo", deps.handlePutPhoto)
 			r.Delete("/me/photo", deps.handleDeletePhoto)

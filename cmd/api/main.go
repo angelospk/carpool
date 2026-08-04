@@ -137,13 +137,15 @@ func run() error {
 	materializer := jobs.NewMaterializer(pool, clk, athens)
 	start(ctx, &workers, "occurrence materializer", materializeInterval, materializer.Run)
 
+	sessions := auth.NewSessionService(pool, clk, issuer)
+
 	srv := api.NewServer(cfg.HTTPAddr, api.NewRouter(api.Deps{
 		Ready:    pool.Ping,
 		Pool:     pool,
 		Clock:    clk,
 		Issuer:   issuer,
 		OTP:      auth.NewOTPService(pool, clk, sms),
-		Sessions: auth.NewSessionService(pool, clk, issuer),
+		Sessions: sessions,
 		Asks:     askSvc,
 		Standing: standing.NewService(pool, clk),
 		Bookings: bookings.NewService(pool, clk),
@@ -151,6 +153,10 @@ func run() error {
 		DevMode:  cfg.DevMode,
 		Account:  account.NewService(pool, clk),
 		Drivers:  drivers.NewService(pool, clk),
+		// Keyed on the JWT secret: the phone-change codes are stored as an HMAC
+		// rather than a bare hash, and this is the key that makes a leaked
+		// table useless without it.
+		PhoneChange: auth.NewPhoneChangeService(pool, clk, sms, sessions, []byte(cfg.JWTSecret)),
 
 		Router:          router,
 		Materializer:    materializer,

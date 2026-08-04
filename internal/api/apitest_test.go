@@ -67,21 +67,23 @@ func newHarnessWith(t *testing.T, devMode bool) *harness {
 	c := clock.NewFake(time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC))
 	sms := &auth.FakeSMS{}
 	issuer := auth.NewTokenIssuer(testSecret, c)
+	sessions := auth.NewSessionService(pool, c, issuer)
 
 	router := api.NewRouter(api.Deps{
-		DevMode:  devMode,
-		Ready:    pool.Ping,
-		Pool:     pool,
-		Clock:    c,
-		Issuer:   issuer,
-		OTP:      auth.NewOTPService(pool, c, sms),
-		Sessions: auth.NewSessionService(pool, c, issuer),
-		Asks:     asks.NewService(pool, c, nil),
-		Standing: standing.NewService(pool, c),
-		Bookings: bookings.NewService(pool, c),
-		Invites:  invites.NewService(pool, c, false),
-		Account:  account.NewService(pool, c),
-		Drivers:  drivers.NewService(pool, c),
+		DevMode:     devMode,
+		Ready:       pool.Ping,
+		Pool:        pool,
+		Clock:       c,
+		Issuer:      issuer,
+		OTP:         auth.NewOTPService(pool, c, sms),
+		Sessions:    sessions,
+		PhoneChange: auth.NewPhoneChangeService(pool, c, sms, sessions, []byte(testSecret)),
+		Asks:        asks.NewService(pool, c, nil),
+		Standing:    standing.NewService(pool, c),
+		Bookings:    bookings.NewService(pool, c),
+		Invites:     invites.NewService(pool, c, false),
+		Account:     account.NewService(pool, c),
+		Drivers:     drivers.NewService(pool, c),
 	})
 
 	return &harness{t: t, router: router, pool: pool, clock: c, sms: sms, regionID: regionID}
@@ -137,8 +139,10 @@ func (h *harness) errorCode(rec *httptest.ResponseRecorder) string {
 func (h *harness) signUp(phone, name string) (accessToken, refreshToken string) {
 	h.t.Helper()
 
+	// 204 normally, 200 with the code in the body on a DEV_MODE harness. Both
+	// mean a code was sent; the fake SMS is where this reads it either way.
 	rec := h.do(http.MethodPost, "/v1/auth/otp/request", map[string]any{"phone": phone}, "")
-	if rec.Code != http.StatusNoContent {
+	if rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
 		h.t.Fatalf("otp/request: status %d, body %s", rec.Code, rec.Body.String())
 	}
 
