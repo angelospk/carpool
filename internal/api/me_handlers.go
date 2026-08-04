@@ -126,15 +126,19 @@ func (d Deps) handleListRegions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"regions": out})
 }
 
-// avatarURL prefers the uploaded photo and falls back to the legacy column,
-// which a couple of accounts still carry from before uploads existed and which
-// nothing can set any more.
-func avatarURL(id uuid.UUID, version, legacy *string) *string {
-	if version != nil {
-		url := "/v1/users/" + id.String() + "/photo?v=" + *version
-		return &url
+// avatarURL is the address of an uploaded photo, or nothing.
+//
+// The legacy photo_url column is deliberately not a fallback. It holds URLs on
+// origins the user chose, from before uploads existed, and serving one means
+// every other user's device fetches an address somebody else controls, which
+// tells that somebody who looked and when. Nothing can set it any more; the
+// people who have one get an avatar again when they upload.
+func avatarURL(id uuid.UUID, version *string) *string {
+	if version == nil {
+		return nil
 	}
-	return legacy
+	url := "/v1/users/" + id.String() + "/photo?v=" + *version
+	return &url
 }
 
 func socialURL(compose func(string) string, handle *string) *string {
@@ -150,7 +154,7 @@ func userResponse(u store.User) map[string]any {
 		"id":             u.ID,
 		"phone":          u.Phone,
 		"name":           u.Name,
-		"photo_url":      avatarURL(u.ID, u.PhotoVersion, u.PhotoURL),
+		"photo_url":      avatarURL(u.ID, u.PhotoVersion),
 		"gender":         u.Gender,
 		"home_region_id": u.HomeRegionID,
 		"women_only":     u.WomenOnly,

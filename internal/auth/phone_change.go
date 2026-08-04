@@ -90,8 +90,13 @@ func (s *PhoneChangeService) Request(ctx context.Context, userID uuid.UUID, newP
 	now := s.clock.Now()
 
 	var currentPhone string
-	if err := s.pool.QueryRow(ctx,
-		`SELECT phone FROM users WHERE id = $1 AND status = 'active'`, userID).Scan(&currentPhone); err != nil {
+	err := s.pool.QueryRow(ctx,
+		`SELECT phone FROM users WHERE id = $1 AND status = 'active'`, userID).Scan(&currentPhone)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Deleted or suspended between issuing the token and using it.
+		return uuid.Nil, "", ErrChallengeFailed
+	}
+	if err != nil {
 		return uuid.Nil, "", fmt.Errorf("auth: reading the account: %w", err)
 	}
 	if currentPhone == newPhone {
@@ -111,17 +116,34 @@ func (s *PhoneChangeService) Request(ctx context.Context, userID uuid.UUID, newP
 		return uuid.Nil, "", ErrPhoneTaken
 	}
 
-	if err := s.withinLimits(ctx, userID, newPhone, now); err != nil {
-		return uuid.Nil, "", err
+	code, errCode := newCode()
+	if errCode != nil {
+		return uuid.Nil, "", errCode
 	}
 
-	code, err := newCode()
+	// Counting and inserting in one transaction under a lock on the account.
+	// Counted outside it, two requests arriving together both see the same
+	// count, both pass, and the limit that exists to stop this endpoint being
+	// used to send SMS at will is a suggestion.
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		return uuid.Nil, "", fmt.Errorf("auth: beginning: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Keyed on the user rather than a row lock, because what is being
+	// serialised is a count over rows that do not exist yet.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`,
+		"phone_change:"+userID.String()); err != nil {
+		return uuid.Nil, "", fmt.Errorf("auth: locking: %w", err)
+	}
+
+	if err := s.withinLimits(ctx, tx, userID, newPhone, now); err != nil {
 		return uuid.Nil, "", err
 	}
 
 	var id uuid.UUID
-	err = s.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		WITH superseded AS (
 			-- A resend replaces its predecessor rather than adding to it, so
 			-- there is never a set of live codes to guess against.
@@ -134,6 +156,10 @@ func (s *PhoneChangeService) Request(ctx context.Context, userID uuid.UUID, newP
 		userID, currentPhone, newPhone, s.digest(newPhone, code), now, now.Add(PhoneChangeTTL)).Scan(&id)
 	if err != nil {
 		return uuid.Nil, "", fmt.Errorf("auth: storing the challenge: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, "", fmt.Errorf("auth: committing: %w", err)
 	}
 
 	if err := s.sms.Send(ctx, newPhone, code+" is your carpool verification code. It expires in 10 minutes."); err != nil {
@@ -156,11 +182,18 @@ func (s *PhoneChangeService) Confirm(ctx context.Context, userID, challengeID uu
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Told apart on purpose: a database that is down is not a wrong code, and
+	// reporting it as one sends somebody to check their SMS while the server is
+	// on fire.
 	var currentPhone string
-	if err := tx.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`SELECT phone FROM users WHERE id = $1 AND status = 'active' FOR UPDATE`, userID).
-		Scan(&currentPhone); err != nil {
+		Scan(&currentPhone)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return TokenPair{}, ErrChallengeFailed
+	}
+	if err != nil {
+		return TokenPair{}, fmt.Errorf("auth: reading the account: %w", err)
 	}
 
 	var (
@@ -264,11 +297,11 @@ func (s *PhoneChangeService) Confirm(ctx context.Context, userID, challengeID uu
 	return pair, nil
 }
 
-func (s *PhoneChangeService) withinLimits(ctx context.Context, userID uuid.UUID, target string, now time.Time) error {
+func (s *PhoneChangeService) withinLimits(ctx context.Context, q querier, userID uuid.UUID, target string, now time.Time) error {
 	since := now.Add(-time.Hour)
 
 	var byUser, byTarget int
-	if err := s.pool.QueryRow(ctx, `
+	if err := q.QueryRow(ctx, `
 		SELECT count(*) FILTER (WHERE user_id = $1),
 		       count(*) FILTER (WHERE new_phone = $2)
 		  FROM phone_change_challenges

@@ -35,6 +35,7 @@ type harness struct {
 	clock    *clock.Fake
 	sms      *auth.FakeSMS
 	regionID uuid.UUID
+	devMode  bool
 }
 
 func newHarness(t *testing.T) *harness { return newHarnessWith(t, false) }
@@ -86,7 +87,7 @@ func newHarnessWith(t *testing.T, devMode bool) *harness {
 		Drivers:     drivers.NewService(pool, c),
 	})
 
-	return &harness{t: t, router: router, pool: pool, clock: c, sms: sms, regionID: regionID}
+	return &harness{t: t, router: router, pool: pool, clock: c, sms: sms, regionID: regionID, devMode: devMode}
 }
 
 // do issues a request against the router. token may be empty.
@@ -139,11 +140,16 @@ func (h *harness) errorCode(rec *httptest.ResponseRecorder) string {
 func (h *harness) signUp(phone, name string) (accessToken, refreshToken string) {
 	h.t.Helper()
 
-	// 204 normally, 200 with the code in the body on a DEV_MODE harness. Both
-	// mean a code was sent; the fake SMS is where this reads it either way.
+	// 200 with the code in the body on a DEV_MODE harness, 204 otherwise, and
+	// exactly one of the two. Accepting either regardless of mode would let the
+	// rule that keeps the code out of production responses break unnoticed.
+	want := http.StatusNoContent
+	if h.devMode {
+		want = http.StatusOK
+	}
 	rec := h.do(http.MethodPost, "/v1/auth/otp/request", map[string]any{"phone": phone}, "")
-	if rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
-		h.t.Fatalf("otp/request: status %d, body %s", rec.Code, rec.Body.String())
+	if rec.Code != want {
+		h.t.Fatalf("otp/request: status %d, want %d, body %s", rec.Code, want, rec.Body.String())
 	}
 
 	rec = h.do(http.MethodPost, "/v1/auth/otp/verify", map[string]any{

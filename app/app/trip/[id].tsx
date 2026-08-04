@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useTranslation } from 'react-i18next';
@@ -62,7 +62,18 @@ export default function TripScreen() {
   // The trip has set off when its earliest departure is behind us. Compared
   // against the device clock, which is the only one the screen has; the server
   // decides for real and answers not_departed if this is optimistic.
-  const departed = trip.data ? new Date(trip.data.depart_earliest) <= new Date() : false;
+  //
+  // Re-evaluated on a timer as well as on render, because somebody sitting on
+  // this screen at 07:29 waiting to set off would otherwise still be offered
+  // cancel at 07:31 and no way to confirm.
+  const [now, setNow] = useState(() => Date.now());
+  const departAt = trip.data ? new Date(trip.data.depart_earliest).getTime() : null;
+  useEffect(() => {
+    if (departAt === null || departAt <= now) return;
+    const timer = setTimeout(() => setNow(Date.now()), departAt - now + 1000);
+    return () => clearTimeout(timer);
+  }, [departAt, now]);
+  const departed = departAt !== null && departAt <= now;
   const hasCompany =
     trip.data?.role === 'driver' ? (trip.data.passengers.length ?? 0) > 0 : true;
 
@@ -71,6 +82,9 @@ export default function TripScreen() {
     onSuccess: () => {
       setNotice(t('trip.cancelled'));
       void trip.refetch();
+      // The routes screen counts upcoming departures per route, and one of them
+      // just stopped being upcoming.
+      void queryClient.invalidateQueries({ queryKey: ['my-routes'] });
     },
     onError: (e) =>
       setNotice(

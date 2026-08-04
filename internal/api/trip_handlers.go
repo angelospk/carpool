@@ -92,7 +92,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 	passengers := make([]map[string]any, 0, len(trip.Passengers))
 	for _, p := range trip.Passengers {
 		passengers = append(passengers, map[string]any{
-			"id": p.UserID, "name": p.Name, "photo_url": p.PhotoURL,
+			"id": p.UserID, "name": p.Name, "photo_url": avatarURL(p.UserID, p.PhotoVersion),
 			"facebook_url":  socialURL(domain.FacebookURL, p.FacebookHandle),
 			"instagram_url": socialURL(domain.InstagramURL, p.InstagramHandle),
 			"rating":        p.Rating, "price_eur": p.PriceEUR, "seats": p.Seats,
@@ -114,7 +114,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		"booking_id":        trip.BookingID,
 		"driver": map[string]any{
 			"id": trip.Driver.UserID, "name": trip.Driver.Name,
-			"photo_url": trip.Driver.PhotoURL, "rating": trip.Driver.Rating,
+			"photo_url": avatarURL(trip.Driver.UserID, trip.Driver.PhotoVersion), "rating": trip.Driver.Rating,
 			"facebook_url":  socialURL(domain.FacebookURL, trip.Driver.FacebookHandle),
 			"instagram_url": socialURL(domain.InstagramURL, trip.Driver.InstagramHandle),
 			"car_model":     trip.Driver.CarModel, "car_color": trip.Driver.CarColor,

@@ -8,6 +8,7 @@
 // upcoming trips is shown next to the button, and those are cancelled one at a
 // time from the trip itself.
 
+import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -15,8 +16,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type MyRoute } from '../../src/api/endpoints';
 import { Button, Card, Hint, Screen, SectionHeader, Title } from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
-
-const DAYS = ['', 'Δε', 'Τρ', 'Τε', 'Πε', 'Πα', 'Σα', 'Κυ'];
 
 export default function MyRoutesScreen() {
   const { t } = useTranslation();
@@ -27,9 +26,17 @@ export default function MyRoutesScreen() {
     queryFn: () => api.myRoutes(),
   });
 
+  const [error, setError] = useState<string | null>(null);
+
   const retire = useMutation({
     mutationFn: (id: string) => api.retireRoute(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['my-routes'] }),
+    onSuccess: () => {
+      setError(null);
+      void queryClient.invalidateQueries({ queryKey: ['my-routes'] });
+    },
+    // Without this, a retire that failed looked exactly like one that worked
+    // until the list redrew with the route still in it.
+    onError: () => setError(t('common.error')),
   });
 
   const confirmRetire = (route: MyRoute) => {
@@ -49,6 +56,13 @@ export default function MyRoutesScreen() {
         <Title>{t('profile.routes')}</Title>
 
         {routes.isLoading ? <Hint>{t('common.loading')}</Hint> : null}
+        {routes.isError ? (
+          <View style={styles.failed}>
+            <Hint>{t('common.error')}</Hint>
+            <Button testID="routes-retry" label={t('common.retry')} onPress={() => void routes.refetch()} />
+          </View>
+        ) : null}
+        {error ? <Hint>{error}</Hint> : null}
         {routes.data?.routes.length === 0 ? <Hint>{t('profile.noRoutes')}</Hint> : null}
 
         {routes.data?.routes.map((r) => (
@@ -68,7 +82,7 @@ export default function MyRoutesScreen() {
                 </Text>
                 <Text style={styles.meta}>
                   {r.kind === 'recurring'
-                    ? r.weekdays.map((d) => DAYS[d]).join(' ')
+                    ? r.weekdays.map((d) => t(`weekdaysShort.${d}`)).join(' ')
                     : (r.oneoff_date ?? '')}
                 </Text>
               </View>
@@ -104,5 +118,6 @@ const styles = StyleSheet.create({
   where: { flex: 1, gap: 2 },
   route: { ...type.body, color: colors.ink },
   meta: { ...type.caption, color: colors.muted },
+  failed: { gap: space.sm },
   upcoming: { ...type.caption, color: colors.muted, marginBottom: space.sm },
 });

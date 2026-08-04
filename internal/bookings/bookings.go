@@ -62,13 +62,35 @@ func (s *Service) Cancel(ctx context.Context, bookingID, userID uuid.UUID) error
 		status                string
 		departs               time.Time
 	)
+	// The occurrence is locked before the booking, and CancelOccurrence does the
+	// same, because the two paths touch the same two rows. Locking the booking
+	// first here — which is what this did — meant a passenger giving back a seat
+	// while the driver called off the departure took the rows in opposite orders
+	// and the pair deadlocked.
+	var occurrenceID uuid.UUID
+	if err := tx.QueryRow(ctx,
+		`SELECT occurrence_id FROM bookings WHERE id = $1`, bookingID).Scan(&occurrenceID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("bookings: finding the trip: %w", err)
+	}
+
 	err = tx.QueryRow(ctx, `
-		SELECT b.passenger_id, t.driver_id, b.status, o.depart_earliest
-		FROM bookings b
-		JOIN trip_occurrences o ON o.id = b.occurrence_id
-		JOIN route_templates  t ON t.id = o.template_id
-		WHERE b.id = $1 FOR UPDATE OF b`, bookingID).
-		Scan(&passengerID, &driverID, &status, &departs)
+		SELECT t.driver_id, o.depart_earliest
+		  FROM trip_occurrences o
+		  JOIN route_templates t ON t.id = o.template_id
+		 WHERE o.id = $1 FOR UPDATE OF o`, occurrenceID).Scan(&driverID, &departs)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("bookings: loading the trip: %w", err)
+	}
+
+	err = tx.QueryRow(ctx,
+		`SELECT passenger_id, status FROM bookings WHERE id = $1 FOR UPDATE`, bookingID).
+		Scan(&passengerID, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}

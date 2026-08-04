@@ -156,10 +156,12 @@ func TestRetiringAnUnknownRouteIsNotFound(t *testing.T) {
 	h := newHarness(t)
 	token, _ := driverWithRoute(t, h, "+306900000608")
 
+	// Both are 404, not one 404 and one 400. Saying which kind of wrong an id is
+	// tells a caller nothing they can act on, and accepting either answer here
+	// would let that drift without anything noticing.
 	for _, id := range []string{"not-a-uuid", "11111111-1111-1111-1111-111111111111"} {
-		rec := h.do(http.MethodDelete, "/v1/me/routes/"+id, nil, token)
-		if rec.Code != http.StatusNotFound && rec.Code != http.StatusBadRequest {
-			t.Errorf("id %q gave %d", id, rec.Code)
+		if rec := h.do(http.MethodDelete, "/v1/me/routes/"+id, nil, token); rec.Code != http.StatusNotFound {
+			t.Errorf("id %q gave %d, want 404", id, rec.Code)
 		}
 	}
 }

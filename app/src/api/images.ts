@@ -10,7 +10,7 @@
 // faces over and over, and the address of a photo changes when the photo does,
 // so an entry can never be stale.
 
-import { currentBaseUrl } from './client';
+import { currentBaseUrl, refreshOnce } from './client';
 import { getTokens } from '../state/tokens';
 
 const cache = new Map<string, Promise<string | null>>();
@@ -30,6 +30,15 @@ export function photoSource(path: string | null | undefined): Promise<string | n
   if (hit) return hit;
 
   const pending = load(path).catch(() => null);
+
+  // A failure is not cached. The address of a photo changes when the photo
+  // does, so a successful entry can never be stale; a failed one is a moment in
+  // time — an expired token, a lost connection — and keeping it means the face
+  // never appears again for the rest of the session.
+  void pending.then((result) => {
+    if (result === null && cache.get(path) === pending) cache.delete(path);
+  });
+
   if (cache.size >= MAX_ENTRIES) {
     // Oldest first, which for avatars is close enough to least-used and costs
     // nothing to maintain.
@@ -41,13 +50,21 @@ export function photoSource(path: string | null | undefined): Promise<string | n
 }
 
 async function load(path: string): Promise<string | null> {
-  const tokens = await getTokens();
-  if (!tokens?.accessToken) return null;
+  const fetchOnce = async () => {
+    const tokens = await getTokens();
+    if (!tokens?.accessToken) return null;
+    return await fetch(`${currentBaseUrl()}${path}`, {
+      headers: { Authorization: `Bearer ${tokens.accessToken}` },
+    });
+  };
 
-  const res = await fetch(`${currentBaseUrl()}${path}`, {
-    headers: { Authorization: `Bearer ${tokens.accessToken}` },
-  });
-  if (!res.ok) return null;
+  let res = await fetchOnce();
+  // Shares the client's single in-flight refresh, so a screen full of avatars
+  // whose token has just expired asks for one refresh rather than one each.
+  if (res?.status === 401 && (await refreshOnce())) {
+    res = await fetchOnce();
+  }
+  if (!res || !res.ok) return null;
 
   const blob = await res.blob();
   return await new Promise<string | null>((resolve) => {

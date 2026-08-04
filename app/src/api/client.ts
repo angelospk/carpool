@@ -149,7 +149,8 @@ async function refreshTokens(): Promise<boolean> {
 }
 
 /** Ensures at most one refresh runs at a time, whatever else is in flight. */
-function refreshOnce(): Promise<boolean> {
+/** Shared by every caller so a screen full of expired requests refreshes once. */
+export function refreshOnce(): Promise<boolean> {
   if (!refreshing) {
     refreshing = refreshTokens().finally(() => {
       refreshing = null;
@@ -160,21 +161,38 @@ function refreshOnce(): Promise<boolean> {
 
 /** Sends raw bytes rather than JSON, for the one endpoint that takes an image. */
 export async function requestRaw<T>(path: string, body: Blob): Promise<T> {
-  const tokens = await getTokens();
-  let res: Response;
-  try {
-    res = await fetch(`${baseUrl}${path}`, {
-      method: 'PUT',
-      headers: tokens?.accessToken ? { Authorization: `Bearer ${tokens.accessToken}` } : {},
-      body,
-    });
-  } catch (cause) {
-    throw new NetworkError(cause);
+  const send = async (): Promise<Response> => {
+    const tokens = await getTokens();
+    try {
+      return await fetch(`${baseUrl}${path}`, {
+        method: 'PUT',
+        headers: tokens?.accessToken ? { Authorization: `Bearer ${tokens.accessToken}` } : {},
+        body,
+      });
+    } catch (cause) {
+      throw new NetworkError(cause);
+    }
+  };
+
+  let res = await send();
+  // The same refresh-and-retry as request(). Without it, choosing a photo more
+  // than fifteen minutes after the last request fails once for no reason a
+  // person could act on. The Blob is re-readable, so the retry is safe.
+  if (res.status === 401) {
+    if (await refreshOnce()) {
+      res = await send();
+    }
   }
+
   if (!res.ok) {
     const envelope = await res.json().catch(() => null);
     const error = envelope?.error ?? {};
-    throw new ApiError(res.status, error.code ?? 'unknown', error.message ?? 'the request failed');
+    throw new ApiError(
+      res.status,
+      error.code ?? 'unknown',
+      error.message ?? 'the request failed',
+      error.details,
+    );
   }
   return (await res.json()) as T;
 }

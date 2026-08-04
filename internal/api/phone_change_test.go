@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 type challenge struct {
@@ -175,21 +177,47 @@ func TestTheOldSessionsStopWorking(t *testing.T) {
 	if rec.Code == http.StatusOK {
 		t.Error("a refresh token from before the change still works")
 	}
+
+	// The access token from before the change is NOT revoked, and that is the
+	// documented behaviour rather than an oversight: an access token carries no
+	// server-side state to revoke, so its blast radius is its fifteen minutes.
+	// Pinned here so that changing the policy has to change this test too.
+	if rec := h.do(http.MethodGet, "/v1/me", nil, token); rec.Code != http.StatusOK {
+		t.Errorf("the old access token stopped working immediately (status %d); if that is "+
+			"now intended, auth.AccessTokenTTL and this test disagree", rec.Code)
+	}
 }
 
 func TestSignInFollowsTheNumber(t *testing.T) {
 	h := newHarnessWith(t, true)
 	token, _ := h.signUp("+306900000917", "Γιώργος")
-	_, ch := requestChange(h, token, "+306900000918")
-	h.do(http.MethodPost, "/v1/me/phone/confirm", map[string]any{
-		"challenge_id": ch.ChallengeID, "code": ch.DevCode,
-	}, token)
 
-	// The old number is now nobody's, so asking for a code there starts a new
-	// account rather than reaching the old one.
-	rec := h.do(http.MethodPost, "/v1/auth/otp/request", map[string]any{"phone": "+306900000918"}, "")
-	if rec.Code != http.StatusOK && rec.Code != http.StatusNoContent {
-		t.Errorf("signing in on the new number: %d", rec.Code)
+	var original struct {
+		ID string `json:"id"`
+	}
+	h.decode(h.do(http.MethodGet, "/v1/me", nil, token), &original)
+
+	_, ch := requestChange(h, token, "+306900000918")
+	if rec := h.do(http.MethodPost, "/v1/me/phone/confirm", map[string]any{
+		"challenge_id": ch.ChallengeID, "code": ch.DevCode,
+	}, token); rec.Code != http.StatusOK {
+		t.Fatalf("confirm: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Signing in on the new number reaches the same account, which is the whole
+	// point: the person moved, their trips and ratings did not.
+	newToken, _ := h.signUp("+306900000918", "Γιώργος")
+
+	var me struct {
+		ID    string `json:"id"`
+		Phone string `json:"phone"`
+	}
+	h.decode(h.do(http.MethodGet, "/v1/me", nil, newToken), &me)
+	if me.Phone != "+306900000918" {
+		t.Errorf("signing in on the new number reached %s", me.Phone)
+	}
+	if me.ID != original.ID {
+		t.Errorf("it reached a different account: %s, was %s", me.ID, original.ID)
 	}
 }
 
@@ -210,8 +238,14 @@ func TestTheCodeIsNotHandedBackOutsideDevMode(t *testing.T) {
 
 func TestChangingANumberNeedsASession(t *testing.T) {
 	h := newHarness(t)
-	rec := h.do(http.MethodPost, "/v1/me/phone/request", map[string]any{"phone": "+306900000921"}, "")
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status %d, want 401", rec.Code)
+	if rec := h.do(http.MethodPost, "/v1/me/phone/request",
+		map[string]any{"phone": "+306900000921"}, ""); rec.Code != http.StatusUnauthorized {
+		t.Errorf("request: status %d, want 401", rec.Code)
+	}
+	// Both halves, not just the first: a challenge id is a uuid somebody could
+	// hold, and confirming without a session would be the whole flow bypassed.
+	if rec := h.do(http.MethodPost, "/v1/me/phone/confirm",
+		map[string]any{"challenge_id": uuid.NewString(), "code": "123456"}, ""); rec.Code != http.StatusUnauthorized {
+		t.Errorf("confirm: status %d, want 401", rec.Code)
 	}
 }

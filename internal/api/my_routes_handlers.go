@@ -126,7 +126,12 @@ func (d Deps) handleRetireRoute(w http.ResponseWriter, r *http.Request) {
 		var exists bool
 		if err := d.Pool.QueryRow(r.Context(),
 			`SELECT EXISTS (SELECT 1 FROM route_templates WHERE id = $1 AND driver_id = $2)`,
-			routeID, userID).Scan(&exists); err != nil || !exists {
+			routeID, userID).Scan(&exists); err != nil {
+			// A failed query is not a missing route. Reporting it as one tells
+			// a driver their route is gone when it is not.
+			writeError(w, http.StatusInternalServerError, "internal", "could not retire the route")
+			return
+		} else if !exists {
 			writeError(w, http.StatusNotFound, "not_found", "no such route")
 			return
 		}

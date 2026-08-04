@@ -149,3 +149,28 @@ func TestADepartedTripCannotBeCalledOff(t *testing.T) {
 		t.Errorf("status %d, want 409", rec.Code)
 	}
 }
+
+func TestCancellingFromBothSidesAtOnceDoesNotDeadlock(t *testing.T) {
+	// The two paths touch the same two rows. Locking them in opposite orders,
+	// which is what they did, means a passenger giving back a seat while the
+	// driver calls off the departure blocks both until Postgres kills one.
+	h := newHarness(t)
+	driver, passenger, tripID, bookingID := bookedTrip(t, h, "+306900001011", "+306900001012")
+
+	done := make(chan int, 2)
+	go func() { done <- h.do(http.MethodDelete, "/v1/trips/"+tripID, nil, driver).Code }()
+	go func() { done <- h.do(http.MethodDelete, "/v1/bookings/"+bookingID, nil, passenger).Code }()
+
+	for range 2 {
+		select {
+		case code := <-done:
+			// Either order is fine; what must not happen is one waiting on the
+			// other. A 500 here is the deadlock being reported.
+			if code >= 500 {
+				t.Errorf("status %d", code)
+			}
+		case <-time.After(20 * time.Second):
+			t.Fatal("one of the two cancellations never returned")
+		}
+	}
+}

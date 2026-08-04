@@ -69,12 +69,21 @@ func TestNormaliseNamePutsTheSameNameIntoTheSameString(t *testing.T) {
 	// The same name typed on two keyboards arrives as two byte sequences. If
 	// they are stored differently, one of them silently fails any comparison
 	// and counts a different length.
-	precomposed, err1 := NormaliseName("Ünal")
-	decomposed, err2 := NormaliseName("Ünal") // U + combining diaeresis
+	precomposed, err1 := NormaliseName("\u00dcnal") // Ü as one code point
+	decomposed, err2 := NormaliseName("U\u0308nal") // U + combining diaeresis
 	if err1 != nil || err2 != nil {
 		t.Fatalf("errors: %v %v", err1, err2)
 	}
 	if precomposed != decomposed {
 		t.Errorf("the same name normalised to %q and %q", precomposed, decomposed)
+	}
+
+	// Composed rather than decomposed, which the equality above cannot tell
+	// apart: both forms compare equal to each other either way. It matters
+	// because an accent stored as its own code point counts as a character, so
+	// a decomposed name reaches the length limit at half the letters.
+	accented := strings.Repeat("ά", maxNameRunes)
+	if _, err := NormaliseName(accented); err != nil {
+		t.Errorf("a name of %d accented letters was refused: %v", maxNameRunes, err)
 	}
 }

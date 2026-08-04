@@ -28,10 +28,13 @@ ALTER TABLE users
 -- a name, and guessing at those writes somebody else's identity into a profile.
 WITH parsed AS (
   SELECT id,
+         -- Case-insensitive: a scheme or host somebody typed in capitals is
+         -- the same address, and matching it case-sensitively silently leaves
+         -- the row unconverted.
          lower((regexp_match(social_url,
-           '^https://(?:www\.|m\.|web\.)?(facebook|instagram)\.com/([A-Za-z0-9._-]{1,60})/?$'))[1]) AS platform,
+           '^https://(?:www\.|m\.|web\.)?(facebook|instagram)\.com/([A-Za-z0-9._-]{1,60})/?$', 'i'))[1]) AS platform,
          (regexp_match(social_url,
-           '^https://(?:www\.|m\.|web\.)?(facebook|instagram)\.com/([A-Za-z0-9._-]{1,60})/?$'))[2] AS handle
+           '^https://(?:www\.|m\.|web\.)?(facebook|instagram)\.com/([A-Za-z0-9._-]{1,60})/?$', 'i'))[2] AS handle
     FROM users
    WHERE social_url IS NOT NULL
 )

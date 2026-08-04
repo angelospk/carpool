@@ -40,5 +40,10 @@ CREATE INDEX phone_change_by_user ON phone_change_challenges (user_id, created_a
 -- SMS budget.
 CREATE INDEX phone_change_by_target ON phone_change_challenges (new_phone, created_at DESC);
 
+-- The rate-limit count filters on created_at first and then counts by user and
+-- by target in one pass, so neither index above leads with the column it
+-- actually narrows on.
+CREATE INDEX phone_change_recent ON phone_change_challenges (created_at DESC);
+
 -- +goose Down
 DROP TABLE phone_change_challenges;

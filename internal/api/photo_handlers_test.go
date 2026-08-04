@@ -7,6 +7,7 @@ import (
 	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -199,5 +200,31 @@ func TestAPhotoURLCannotBeSetByHand(t *testing.T) {
 	h.decode(h.do(http.MethodGet, "/v1/me", nil, token), &out)
 	if out.PhotoURL != nil {
 		t.Errorf("photo_url ended up as %q", *out.PhotoURL)
+	}
+}
+
+func TestALegacyPhotoURLIsNotServedToAnybody(t *testing.T) {
+	// A couple of accounts carry a photo_url from before uploads existed,
+	// pointing at whatever origin its owner typed. Handing that to every other
+	// user's device means somebody else's server learns who looked and when,
+	// which is the whole reason uploads replaced it.
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000808", "Γιώργος")
+	h.mustExec(`UPDATE users SET photo_url = 'https://attacker.example/track.jpg' WHERE phone = $1`,
+		"+306900000808")
+
+	var out struct {
+		PhotoURL *string `json:"photo_url"`
+	}
+	h.decode(h.do(http.MethodGet, "/v1/me", nil, token), &out)
+	if out.PhotoURL != nil {
+		t.Errorf("a legacy remote URL was served: %q", *out.PhotoURL)
+	}
+
+	// And once they upload, they have an avatar again, at our own address.
+	h.upload(http.MethodPut, "/v1/me/photo", aJPEG(t, 200, 200), token)
+	h.decode(h.do(http.MethodGet, "/v1/me", nil, token), &out)
+	if out.PhotoURL == nil || !strings.HasPrefix(*out.PhotoURL, "/v1/users/") {
+		t.Errorf("after uploading, photo_url is %v", out.PhotoURL)
 	}
 }
