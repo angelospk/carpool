@@ -49,7 +49,10 @@ services:
 
   osrm:
     image: ghcr.io/project-osrm/osrm-backend:latest
-    command: osrm-routed --algorithm mld --port 5000 /data/evros-buffered.osrm
+    # The whole country, not the Evros extract this started as: a driver posting
+    # Alexandroupoli to Thessaloniki cannot be routed by a prefecture. Costs
+    # 1.1 GB resident and 2 GB on disk, both measured.
+    command: osrm-routed --algorithm mld --port 5000 /data/greece-latest.osrm
     ports:
       - "5000:5000"
     volumes:
