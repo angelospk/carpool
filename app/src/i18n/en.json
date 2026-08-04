@@ -64,7 +64,16 @@
     "none": "No such place",
     "town": "town",
     "village": "village",
-    "hamlet": "settlement"
+    "hamlet": "settlement",
+    "whereExactly": "Where exactly?",
+    "noMeetingPoints": "No recorded spot here — agree one between you.",
+    "point": {
+      "bus_station": "bus station",
+      "train_station": "station",
+      "port": "port",
+      "fuel": "petrol station",
+      "parking": "car park"
+    }
   },
   "profile": {
     "car": "Your car",

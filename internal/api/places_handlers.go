@@ -59,3 +59,25 @@ func (d Deps) handlePlaces(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"places": found})
 }
+
+// handleMeetingPoints answers "where exactly" once a town has been chosen.
+//
+// The settlement is named in a query parameter rather than in the path because
+// a place id is "node/139260064", and a path segment with a slash in it is a
+// route nobody can read six months later.
+func (d Deps) handleMeetingPoints(w http.ResponseWriter, r *http.Request) {
+	place := strings.TrimSpace(r.URL.Query().Get("place"))
+	if place == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "place is required")
+		return
+	}
+
+	found := places.PointsFor(place)
+	if found == nil {
+		// Not an error and not a 404. Four settlements in five have no landmark
+		// anybody would recognise, and that is an ordinary answer the app has
+		// something to say about, not a failure.
+		found = []places.MeetingPoint{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"points": found})
+}

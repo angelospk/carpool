@@ -4,7 +4,17 @@
 // A map picker replaces this without changing the shape it produces — which is
 // the reason the parsing lives here rather than inside a screen.
 
-export type Pin = { lon: number; lat: number; label: string };
+export type Pin = {
+  lon: number;
+  lat: number;
+  label: string;
+  /**
+   * The settlement this came from, when it came from the list. Absent for a
+   * coordinate somebody typed, which belongs to no settlement and so has no
+   * meeting points to offer.
+   */
+  id?: string;
+};
 
 const PATTERN = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*(.*)$/;
 

@@ -61,6 +61,9 @@ describe('PlaceField', () => {
       lon: 25.8743,
       lat: 40.8476,
       label: 'Αλεξανδρούπολη',
+      // Carried so the field below can offer that settlement's meeting points.
+      // A typed coordinate has no id, which is how the two are told apart.
+      id: 'node/1',
     });
   });
 

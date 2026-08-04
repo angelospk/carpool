@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""Build the meeting-point list at internal/places/data/meeting-points.csv.
+
+    python3 scripts/harvest-meeting-points.py            # rebuild and diff
+    python3 scripts/harvest-meeting-points.py --update   # write the dataset
+
+"Where exactly?" is the question a pickup point has to answer, and a settlement
+centre does not answer it. A village node in OSM is a label position: it can sit
+in a field. Two people who have agreed on "Feres" still have to agree on where
+in Feres, and they do it over the phone, badly.
+
+So each settlement gets a small number of named landmarks a driver can be told
+to wait at. They are ranked by how findable they are rather than how close they
+are: everybody in a Greek village knows the petrol station, and a car can
+actually stop there.
+
+What is deliberately NOT here is a fallback. An earlier plan put a synthetic
+"Κέντρο <village>" at the settlement node wherever nothing was tagged, which is
+exactly the wrong thing: it is a coordinate with a confident name on it, and the
+one promise a meeting point makes is that it can be found. A settlement with no
+landmark gets none, and the app says so.
+
+Rejected on purpose:
+
+- Bus stops and platforms. There are 17,000 of them and a bus stop is not
+  somewhere a car waits.
+- Anything with access=private, customers or no. A gated car park is not a
+  place to meet a stranger.
+- Anything unnamed. "The parking" is not a landmark.
+
+Output: © OpenStreetMap contributors, ODbL.
+"""
+import argparse
+import csv
+import io
+import math
+import pathlib
+import sys
+import tempfile
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+OUT = ROOT / "internal/places/data/meeting-points.csv"
+PLACES = ROOT / "internal/places/data/greece.csv"
+DEFAULT_PBF = ROOT / "osrm-data/greece-latest.osm.pbf"
+
+FIELDS = ["place_id", "osm_id", "kind", "name", "name_en", "lon", "lat"]
+
+# Ranked by how findable the thing is, not by how close. Everybody in a Greek
+# village can point at the petrol station; nobody can point at car park #3.
+KINDS = [
+    ("bus_station", ["n/amenity=bus_station", "w/amenity=bus_station"]),
+    ("train_station", ["n/railway=station", "n/railway=halt", "w/railway=station"]),
+    ("port", ["n/amenity=ferry_terminal", "w/amenity=ferry_terminal"]),
+    ("fuel", ["n/amenity=fuel", "w/amenity=fuel"]),
+    ("parking", ["n/amenity=parking", "w/amenity=parking"]),
+]
+
+# How many landmarks a settlement of each kind is worth listing. A city needs
+# more than one because "the petrol station" is ambiguous in Thessaloniki; a
+# village needs one because there is one.
+PER_KIND = {"city": 3, "town": 2, "village": 1, "hamlet": 1}
+
+# How far a landmark can be from the settlement centre and still be that
+# settlement's. Generous for a city, tight for a hamlet, because a hamlet three
+# kilometres from a petrol station does not have a petrol station.
+RADIUS_KM = {"city": 6.0, "town": 4.0, "village": 2.5, "hamlet": 2.0}
+
+# Access values that mean "not for you". A gated car park is not a place to meet
+# a stranger, and offering it is worse than offering nothing.
+CLOSED_ACCESS = {"private", "customers", "no", "permit", "residents"}
+
+
+def load_settlements() -> list[dict]:
+    with PLACES.open(encoding="utf-8") as fh:
+        return list(csv.DictReader(fh))
+
+
+def haversine_km(lon1, lat1, lon2, lat2) -> float:
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = p2 - p1
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def build(pbf: pathlib.Path, features) -> tuple[list[dict], dict]:
+    settlements = load_settlements()
+
+    # A coarse grid so each landmark is only compared with nearby settlements.
+    # A degree is about 111 km, so a tenth of a degree is a cell of roughly ten
+    # kilometres — comfortably wider than the largest radius above.
+    cell = 0.1
+    grid: dict[tuple[int, int], list[dict]] = {}
+    for s in settlements:
+        s["lon_f"], s["lat_f"] = float(s["lon"]), float(s["lat"])
+        grid.setdefault((int(s["lon_f"] / cell), int(s["lat_f"] / cell)), []).append(s)
+
+    def nearby(lon, lat):
+        cx, cy = int(lon / cell), int(lat / cell)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                yield from grid.get((cx + dx, cy + dy), ())
+
+    # place_id -> list of (rank, distance, row)
+    found: dict[str, list] = {}
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = pathlib.Path(td)
+        for rank, (kind, filters) in enumerate(KINDS):
+            work = tmp / kind
+            work.mkdir()
+            for f in features(pbf, work, filters, "point"):
+                p = f.get("properties", {})
+                name = p.get("name")
+                coords = f.get("geometry", {}).get("coordinates")
+                if not name or not coords:
+                    continue
+                if p.get("access", "") in CLOSED_ACCESS:
+                    continue
+
+                lon, lat = coords[0], coords[1]
+                best, best_km = None, None
+                for s in nearby(lon, lat):
+                    km = haversine_km(lon, lat, s["lon_f"], s["lat_f"])
+                    if km > RADIUS_KM.get(s["kind"], 2.0):
+                        continue
+                    if best_km is None or km < best_km:
+                        best, best_km = s, km
+                if best is None:
+                    continue
+
+                place_id = f"{best['osm_type']}/{best['osm_id']}"
+                found.setdefault(place_id, []).append((rank, best_km, {
+                    "place_id": place_id,
+                    "osm_id": str(f.get("id", ""))[1:],
+                    "kind": kind,
+                    "name": name,
+                    "name_en": p.get("name:en", ""),
+                    "lon": f"{lon:.6f}",
+                    "lat": f"{lat:.6f}",
+                }))
+
+    by_kind = {s["osm_type"] + "/" + s["osm_id"]: s["kind"] for s in settlements}
+    rows = []
+    for place_id, candidates in found.items():
+        candidates.sort(key=lambda c: (c[0], c[1], c[2]["osm_id"]))
+        limit = PER_KIND.get(by_kind.get(place_id, "village"), 1)
+        rows.extend(c[2] for c in candidates[:limit])
+
+    rows.sort(key=lambda r: (r["place_id"], r["kind"], r["osm_id"]))
+
+    covered = len(found)
+    stats = {
+        "settlements": len(settlements),
+        "covered": covered,
+        "bare": len(settlements) - covered,
+        "points": len(rows),
+    }
+    return rows, stats
+
+
+def render(rows: list[dict]) -> str:
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=FIELDS, lineterminator="\n")
+    w.writeheader()
+    w.writerows(rows)
+    return buf.getvalue()
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--pbf", type=pathlib.Path, default=DEFAULT_PBF)
+    ap.add_argument("--update", action="store_true")
+    args = ap.parse_args()
+
+    if not args.pbf.exists():
+        sys.exit(f"{args.pbf} not found")
+    if not PLACES.exists():
+        sys.exit(f"{PLACES} not found; run harvest-places.py first")
+
+    # Reuses the osmium plumbing rather than repeating it, so both datasets are
+    # read out of the same extract in the same way.
+    spec = import_module_from(ROOT / "scripts/harvest-places.py")
+    rows, stats = build(args.pbf, spec.features)
+
+    print(f"{stats['points']} meeting points for {stats['covered']} of "
+          f"{stats['settlements']} settlements; {stats['bare']} have none", file=sys.stderr)
+
+    rendered = render(rows)
+    if args.update:
+        OUT.write_text(rendered, encoding="utf-8")
+        print(f"wrote {OUT}", file=sys.stderr)
+        return 0
+
+    current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
+    if current == rendered:
+        print("dataset is current", file=sys.stderr)
+        return 0
+    print("dataset is stale; rerun with --update", file=sys.stderr)
+    return 1
+
+
+def import_module_from(path: pathlib.Path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("harvest_places", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

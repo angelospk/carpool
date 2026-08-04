@@ -6,7 +6,7 @@ import PublishScreen from '../(tabs)/publish';
 import { api } from '../../src/api/endpoints';
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { publishRoute: jest.fn(), places: jest.fn() },
+  api: { publishRoute: jest.fn(), places: jest.fn(), meetingPoints: jest.fn() },
 }));
 
 function wrap(node: ReactNode) {
@@ -39,6 +39,7 @@ async function fillRoute() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  (api.meetingPoints as jest.Mock).mockResolvedValue([]);
   (api.publishRoute as jest.Mock).mockResolvedValue({
     template_id: 't1',
     route_km: 17,
@@ -85,4 +86,61 @@ test('a driver can say no intermediate stops at all', async () => {
   await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
   const body = (api.publishRoute as jest.Mock).mock.calls[0][0];
   expect(body.allow_stops).toBe(false);
+});
+
+// A chosen landmark is what the trip is actually published with. Publishing the
+// settlement centre instead would make the whole list decorative.
+test('a chosen landmark becomes the coordinate and the label', async () => {
+  (api.meetingPoints as jest.Mock).mockResolvedValue([
+    {
+      id: 'node/9',
+      place_id: 'node/Αλεξανδρούπολη',
+      kind: 'fuel',
+      name: 'Shell Εγνατίας',
+      lon: 25.9,
+      lat: 40.86,
+    },
+  ]);
+  await fillRoute();
+
+  fireEvent.press(await screen.findByTestId('publish-origin-point-node/9'));
+  fireEvent.press(screen.getByTestId('publish-submit'));
+
+  await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
+  const body = (api.publishRoute as jest.Mock).mock.calls[0][0];
+  expect(body.origin_lon).toBe(25.9);
+  expect(body.origin_label).toBe('Αλεξανδρούπολη, Shell Εγνατίας');
+  // The other end was left as the town, and stays the town.
+  expect(body.destination_label).toBe('Αλεξανδρούπολη');
+});
+
+// Choosing a landmark and then changing the town would otherwise leave the
+// petrol station of one place attached to another — the same failure the place
+// field itself had, one level up.
+test('changing the town lets go of the landmark chosen in it', async () => {
+  (api.meetingPoints as jest.Mock).mockResolvedValue([
+    {
+      id: 'node/9',
+      place_id: 'node/Αλεξανδρούπολη',
+      kind: 'fuel',
+      name: 'Shell Εγνατίας',
+      lon: 25.9,
+      lat: 40.86,
+    },
+  ]);
+  await fillRoute();
+  fireEvent.press(await screen.findByTestId('publish-origin-point-node/9'));
+
+  // Somewhere else entirely.
+  (api.places as jest.Mock).mockResolvedValue({ places: [pin('Ορεστιάδα', 26.53, 41.5)] });
+  fireEvent.changeText(screen.getByTestId('publish-origin-input'), 'ορεστ');
+  await waitFor(() => screen.getByTestId('publish-origin-node/Ορεστιάδα'));
+  fireEvent.press(screen.getByTestId('publish-origin-node/Ορεστιάδα'));
+
+  fireEvent.press(screen.getByTestId('publish-submit'));
+  await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
+
+  const body = (api.publishRoute as jest.Mock).mock.calls[0][0];
+  expect(body.origin_lon).toBe(26.53);
+  expect(body.origin_label).toBe('Ορεστιάδα');
 });

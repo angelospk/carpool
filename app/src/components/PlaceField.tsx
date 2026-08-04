@@ -125,7 +125,7 @@ export function PlaceField({
     setText(place.name);
     setSuggestions(null);
     setSearched(false);
-    onChange({ lon: place.lon, lat: place.lat, label: place.name });
+    onChange({ lon: place.lon, lat: place.lat, label: place.name, id: place.id });
   };
 
   return (

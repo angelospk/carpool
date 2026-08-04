@@ -31,6 +31,17 @@ export type Place = {
   lon: number;
   lat: number;
 };
+export type MeetingPoint = {
+  id: string;
+  place_id: string;
+  /** bus_station, train_station, port, fuel or parking. */
+  kind: string;
+  name: string;
+  name_en?: string;
+  lon: number;
+  lat: number;
+};
+
 export type Me = {
   id: string;
   phone: string;
@@ -170,6 +181,13 @@ export const api = {
   cancelTrip: (id: string) => request<void>(`/v1/trips/${id}`, { method: 'DELETE' }),
 
   myRoutes: () => request<{ routes: MyRoute[] }>('/v1/me/routes'),
+
+  /** Where exactly, once a settlement has been chosen. Often empty: four in
+      five settlements have no landmark anybody would recognise. */
+  meetingPoints: (placeId: string) =>
+    request<{ points: MeetingPoint[] }>(
+      `/v1/places/points?place=${encodeURIComponent(placeId)}`,
+    ).then((r) => r.points),
 
   retireRoute: (id: string) => request<void>(`/v1/me/routes/${id}`, { method: 'DELETE' }),
 

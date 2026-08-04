@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 
-import { api } from '../../src/api/endpoints';
+import { api, type MeetingPoint } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import {
   Button,
@@ -19,6 +19,7 @@ import {
 import { colors, space, type } from '../../src/design/tokens';
 import { type Pin } from '../../src/design/pin';
 import { PlaceField } from '../../src/components/PlaceField';
+import { MeetingPointField } from '../../src/components/MeetingPointField';
 
 const WEEKDAYS = [
   { iso: 1, label: 'Δε' },
@@ -41,6 +42,12 @@ export default function PublishScreen() {
   const [latest, setLatest] = useState('08:00');
   const [seats, setSeats] = useState(3);
 
+  // Where exactly, once the town is settled. Kept next to the place it belongs
+  // to rather than in a section of its own: "Alexandroupoli, at the KTEL" is
+  // one answer, not two.
+  const [fromPoint, setFromPoint] = useState<MeetingPoint | null>(null);
+  const [toPoint, setToPoint] = useState<MeetingPoint | null>(null);
+
   // null means "whatever I set on my profile". The form only sends a detour
   // once it has been touched, so a driver who never opens this keeps their own
   // default rather than having the screen's idea of one imposed on them.
@@ -52,12 +59,15 @@ export default function PublishScreen() {
   const publish = useMutation({
     mutationFn: () =>
       api.publishRoute({
-        origin_lon: (from as Pin).lon,
-        origin_lat: (from as Pin).lat,
-        destination_lon: (to as Pin).lon,
-        destination_lat: (to as Pin).lat,
-        origin_label: (from as Pin).label,
-        destination_label: (to as Pin).label,
+        // The landmark when one was chosen, the settlement otherwise. This is
+        // the whole point of offering them: "Φέρες" is a town and "Φέρες, στο
+        // βενζινάδικο" is somewhere a car can stop.
+        origin_lon: fromPoint?.lon ?? (from as Pin).lon,
+        origin_lat: fromPoint?.lat ?? (from as Pin).lat,
+        destination_lon: toPoint?.lon ?? (to as Pin).lon,
+        destination_lat: toPoint?.lat ?? (to as Pin).lat,
+        origin_label: label(from as Pin, fromPoint),
+        destination_label: label(to as Pin, toPoint),
         seats,
         kind: 'recurring',
         weekdays,
@@ -87,15 +97,33 @@ export default function PublishScreen() {
             testID="publish-origin"
             label={t('search.from')}
             value={from}
-            onChange={setFrom}
+            onChange={(p) => {
+              setFrom(p);
+              setFromPoint(null);
+            }}
             placeholder={t('search.placeholder')}
+          />
+          <MeetingPointField
+            testID="publish-origin-point"
+            place={from}
+            value={fromPoint}
+            onChange={setFromPoint}
           />
           <PlaceField
             testID="publish-destination"
             label={t('search.to')}
             value={to}
-            onChange={setTo}
+            onChange={(p) => {
+              setTo(p);
+              setToPoint(null);
+            }}
             placeholder={t('search.placeholder')}
+          />
+          <MeetingPointField
+            testID="publish-destination-point"
+            place={to}
+            value={toPoint}
+            onChange={setToPoint}
           />
         </Card>
 
@@ -210,3 +238,9 @@ const styles = StyleSheet.create({
 // column default rather than pretending to know their profile: the moment they
 // change it the real value is sent, and until then nothing is.
 const defaultDetourKm = 10;
+
+// "Φέρες, ΚΤΕΛ Έβρου" rather than either alone: the town is what somebody
+// recognises in a list and the landmark is what they drive to.
+function label(pin: Pin, point: MeetingPoint | null): string {
+  return point ? `${pin.label}, ${point.name}` : pin.label;
+}

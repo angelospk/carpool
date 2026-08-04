@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"carpool/internal/api"
@@ -104,5 +105,45 @@ func TestPlacesNeedsASession(t *testing.T) {
 	rec := h.do(http.MethodGet, "/v1/places?q=alexandr", nil, "")
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status %d, want 401", rec.Code)
+	}
+}
+
+func TestMeetingPointsForACity(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000601", "Νίκος")
+
+	rec := h.do(http.MethodGet, "/v1/places/points?place=node%2F139260064", nil, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Points []struct {
+			ID, Name, Kind string
+			Lon, Lat       float64
+		} `json:"points"`
+	}
+	h.decode(rec, &out)
+
+	if len(out.Points) == 0 {
+		t.Fatal("Αλεξανδρούπολη has nowhere to wait")
+	}
+	if out.Points[0].Name == "" || out.Points[0].Kind == "" || out.Points[0].Lat == 0 {
+		t.Errorf("incomplete meeting point: %+v", out.Points[0])
+	}
+}
+
+// Four settlements in five have no landmark anybody would recognise. That is an
+// ordinary answer the app has something to say about, so it is an empty list
+// rather than a 404 — and rather than an invented one.
+func TestASettlementWithNoMeetingPointsAnswersEmpty(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000602", "Μαρία")
+
+	rec := h.do(http.MethodGet, "/v1/places/points?place=node%2F1", nil, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200 with an empty list", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"points":[]`) {
+		t.Errorf("body = %s, want an empty list", rec.Body.String())
 	}
 }
