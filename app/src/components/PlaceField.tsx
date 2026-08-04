@@ -67,6 +67,10 @@ export function PlaceField({
   useEffect(() => {
     const query = text.trim();
     if (!query) {
+      // Bumped for the same reason as selecting: clearing the field ends every
+      // question it had outstanding, and without this a slower answer lands
+      // afterwards and opens a list of suggestions over an empty box.
+      asked.current++;
       setSuggestions(null);
       setSearched(false);
       return;

@@ -137,6 +137,22 @@ describe('PlaceField', () => {
     expect(screen.queryByTestId('from-suggestions')).toBeNull();
   });
 
+  it('does not fill an emptied field with an answer to what used to be in it', async () => {
+    // Clearing the field ends the question it was asking. Without that, the
+    // slower answer lands afterwards and opens a list over an empty box.
+    let resolveSlow!: (v: unknown) => void;
+    (api.places as jest.Mock).mockReturnValueOnce(new Promise((r) => (resolveSlow = r)));
+
+    setup();
+    await type('αλεξ');
+    fireEvent.changeText(screen.getByTestId('from-input'), '');
+    await act(async () => {
+      resolveSlow({ places: evros });
+    });
+
+    expect(screen.queryByTestId('from-suggestions')).toBeNull();
+  });
+
   it('says when it found nothing, rather than showing an empty box', async () => {
     (api.places as jest.Mock).mockResolvedValue({ places: [] });
     setup();

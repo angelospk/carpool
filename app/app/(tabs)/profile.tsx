@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
@@ -49,33 +49,52 @@ export default function ProfileScreen() {
       ),
   });
 
+  // Read from the store rather than from `me`, which is whatever this render
+  // captured. Two mutations in flight would otherwise each write their own
+  // stale snapshot back, and the second would undo the first.
+  const patchMe = (change: { photo_url: string | null }) => {
+    const current = useSession.getState().me;
+    if (current) setMe({ ...current, ...change });
+  };
+
   const uploadPhoto = useMutation({
     mutationFn: async (file: Blob) => api.uploadPhoto(file),
     onSuccess: (res) => {
-      forgetPhoto(me?.photo_url);
-      if (me) setMe({ ...me, photo_url: res.photo_url });
+      forgetPhoto(useSession.getState().me?.photo_url);
+      patchMe({ photo_url: res.photo_url });
+      setError(null);
     },
-    onError: (e) =>
-      setError(e instanceof ApiError && e.code === 'too_large' ? t('profile.photoTooBig') : t('profile.photoInvalid')),
+    onError: (e) => {
+      // Only the two answers the server actually gives about the image are
+      // reported as being about the image. Offline, or a dead session, is not
+      // a problem with the photograph.
+      if (e instanceof ApiError && e.code === 'too_large') return setError(t('profile.photoTooBig'));
+      if (e instanceof ApiError && e.code === 'invalid_image') return setError(t('profile.photoInvalid'));
+      setError(t('common.error'));
+    },
   });
 
   const removePhoto = useMutation({
     mutationFn: () => api.removePhoto(),
     onSuccess: () => {
-      forgetPhoto(me?.photo_url);
-      if (me) setMe({ ...me, photo_url: null });
+      forgetPhoto(useSession.getState().me?.photo_url);
+      patchMe({ photo_url: null });
+      setError(null);
     },
+    onError: () => setError(t('common.error')),
   });
 
-  // Picking a file is the one thing the two platforms do completely
-  // differently, and the web build is where this gets tested, so it is the one
-  // wired up. On a device this needs a picker; until then the button says so
-  // rather than doing nothing.
+  // Choosing a file is the one thing the two platforms do completely
+  // differently. Web is wired up because that is where this gets tested; a
+  // device needs expo-image-picker, which is not a dependency yet.
+  //
+  // So on a device the controls are absent rather than present and inert. A
+  // button that opens an apology is worse than no button: it looks like a
+  // feature until it is pressed.
+  const canPickPhoto = Platform.OS === 'web';
+
   const pickPhoto = () => {
-    if (Platform.OS !== 'web') {
-      Alert.alert(t('profile.photo'), t('profile.photoOnWebOnly'));
-      return;
-    }
+    if (!canPickPhoto) return;
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/jpeg,image/png';
@@ -93,7 +112,7 @@ export default function ProfileScreen() {
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Card>
           <View style={styles.identity}>
-            <Pressable testID="photo-pick" onPress={pickPhoto}>
+            <Pressable testID="photo-pick" onPress={pickPhoto} disabled={!canPickPhoto}>
               <Avatar name={me?.name ?? '·'} photoUrl={me?.photo_url} size={64} />
             </Pressable>
             <View style={styles.who}>
@@ -102,10 +121,12 @@ export default function ProfileScreen() {
                 {me?.phone}
               </Text>
               <View style={styles.photoActions}>
-                <Text testID="photo-change" style={styles.link} onPress={pickPhoto}>
-                  {uploadPhoto.isPending ? t('common.loading') : t('profile.photoChange')}
-                </Text>
-                {me?.photo_url ? (
+                {canPickPhoto ? (
+                  <Text testID="photo-change" style={styles.link} onPress={pickPhoto}>
+                    {uploadPhoto.isPending ? t('common.loading') : t('profile.photoChange')}
+                  </Text>
+                ) : null}
+                {canPickPhoto && me?.photo_url ? (
                   <Text
                     testID="photo-remove"
                     style={styles.link}
