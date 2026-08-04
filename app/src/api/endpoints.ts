@@ -42,6 +42,18 @@ export type MeetingPoint = {
   lat: number;
 };
 
+/** A meeting point somebody suggested, and what became of it. */
+export type PointProposal = {
+  id: string;
+  place_id: string;
+  place_name: string;
+  name?: string;
+  kind?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reason?: string;
+  created_at: string;
+};
+
 export type Me = {
   id: string;
   phone: string;
@@ -188,6 +200,21 @@ export const api = {
     request<{ points: MeetingPoint[] }>(
       `/v1/places/points?place=${encodeURIComponent(placeId)}`,
     ).then((r) => r.points),
+
+  /** Suggests a spot. Nobody else sees it until somebody has looked at it. */
+  proposeMeetingPoint: (body: {
+    place_id: string;
+    name: string;
+    kind: string;
+    lon: number;
+    lat: number;
+    /** So a retry after a timeout is not a second suggestion. */
+    idempotency_key: string;
+  }) => request<PointProposal>('/v1/places/points', { method: 'POST', body }),
+
+  /** Somebody's own suggestions. Deliberately not part of the public list. */
+  myMeetingPointProposals: () =>
+    request<{ proposals: PointProposal[] }>('/v1/me/meeting-points').then((r) => r.proposals),
 
   retireRoute: (id: string) => request<void>(`/v1/me/routes/${id}`, { method: 'DELETE' }),
 

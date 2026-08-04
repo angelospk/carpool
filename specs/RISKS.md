@@ -354,6 +354,28 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
     Bulgaria" is a ticket office and the ΚΤΕΛ is the bus station is not in the
     tags. It needs a person.
 
+    Addressed 2026-08-05 rather than solved: a moderator can hide, rename or
+    add a point, and anybody can suggest one for review. What is still missing
+    is the person doing it. Nothing is curated yet, so Θεσσαλονίκη still shows
+    the ticket agencies until somebody sits down with the list.
+
+    Two things about the shape of it are worth keeping in mind. Reading the
+    corrections can fail, and when it does the answer is an error rather than
+    the raw harvested list, because falling back would put a point somebody
+    removed for a reason back in front of people. And a suggestion is not a
+    meeting point: it is invisible to everyone but its author until reviewed,
+    and cannot be attached to a ride in the meantime.
+
+17. **A suggested point carries no coordinate anybody chose.**
+    The proposal form sends the settlement's own coordinate with the name,
+    because there is no map to drop a pin on. A moderator sees "ΚΤΕΛ Φερών" and
+    has to know, or find out, where that is.
+
+    It is honest as far as it goes — the point does not claim to be anywhere
+    precise — but it means the reviewer is doing work the person suggesting it
+    could have done in one tap. This is the first thing the map should fix when
+    there is one.
+
 ## Deferred tech (parked, with triggers to revisit)
 
 | Deferred | Revisit when |

@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 
 import { api, type MeetingPoint } from '../api/endpoints';
 import { type Pin } from '../design/pin';
+import { ProposePoint } from './ProposePoint';
 import { colors, radius, space, type } from '../design/tokens';
 
 export function MeetingPointField({
@@ -34,18 +35,23 @@ export function MeetingPointField({
     enabled: !!place?.id,
   });
 
-  // No settlement means the query never ran, so there is nothing to show and
-  // nothing pending. There is no separate guard for it: one would be a line no
-  // test could tell the absence of.
+  // A coordinate somebody typed belongs to no settlement: nothing to look up,
+  // and nothing to suggest a spot for either, since a suggestion has to be
+  // filed against a place.
+  if (!place?.id) return null;
   if (points.isPending || !points.data) return null;
 
   // Nothing tagged anywhere near. Saying so is the point: the alternative is a
-  // list of one invented entry that sends somebody to a field.
+  // list of one invented entry that sends somebody to a field. The offer to
+  // suggest one is what turns that from a dead end into a question.
   if (!points.data?.length) {
     return (
-      <Text testID={testID ? `${testID}-none` : undefined} style={styles.none}>
-        {t('places.noMeetingPoints')}
-      </Text>
+      <View>
+        <Text testID={testID ? `${testID}-none` : undefined} style={styles.none}>
+          {t('places.noMeetingPoints')}
+        </Text>
+        <ProposePoint place={place} testID={testID ? `${testID}-propose` : undefined} />
+      </View>
     );
   }
 
@@ -66,6 +72,10 @@ export function MeetingPointField({
           </Pressable>
         );
       })}
+      {/* Offered even when the list is full: Θεσσαλονίκη's three entries are
+          all coach-ticket agencies, and somebody who knows that needs
+          somewhere to put it. */}
+      <ProposePoint place={place} testID={testID ? `${testID}-propose` : undefined} />
     </View>
   );
 }
