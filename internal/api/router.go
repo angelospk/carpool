@@ -118,6 +118,11 @@ func NewRouter(deps Deps) http.Handler {
 			}
 			r.Put("/me/push-token", deps.handlePutPushToken)
 
+			// A driver seeing and retiring their own routes. Reads and writes
+			// the pool directly, so there is no collaborator to guard on.
+			r.Get("/me/routes", deps.handleMyRoutes)
+			r.Delete("/me/routes/{id}", deps.handleRetireRoute)
+
 			// Guarded on its own collaborator: without it there is no way to
 			// become a driver at all, and a nil dereference would be a panic
 			// rather than an honest 404.
