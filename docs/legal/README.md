@@ -22,8 +22,31 @@ answered. Erasure anonymises rather than deletes, because a rating is somebody
 else's judgement and a report protected a third person; `internal/account`
 explains the reasoning. Correction is `PATCH /v1/me`, which already existed.
 
-**The chat retention promise is unimplemented.** Nothing deletes messages after
-twelve months. There is no retention job at all, for any table.
+**Retention: partly done.** `internal/jobs.Janitor` runs hourly and enforces
+four of the periods in §8. One-time codes and phone-change challenges go at six
+months; messages go at twelve, counted from the later of the trip's departure
+and the last thing anybody wrote; expired and revoked refresh tokens go a month
+after they stop working, which is a period the policy does not name because
+they are credentials rather than a record.
+
+Messages are deleted a thread at a time, not a message at a time. Half a
+conversation is worse than none — a dispute is read whole or not at all — so a
+thread's messages all share its anchor and one recent message keeps the older
+ones. That retains slightly more than a strict per-message reading would, which
+under a maximum-retention policy is the direction that needs saying out loud.
+
+What is still unenforced, and why each is a decision rather than a chore:
+
+- **Reports and blocks (36 months).** Deleting a block silently unblocks two
+  people. That is a safety behaviour, not housekeeping, and it needs somebody to
+  decide whether the block should outlive the record of it.
+- **Trips, requests and geometry (24 months).** Deleting an occurrence cascades
+  into its messages, which have their own and shorter clock; the order and the
+  foreign keys need working through before anything runs.
+- **Push tokens (24 months from last use)** and **invite codes (24 months from
+  last use).** Neither table records a last-used time yet, so the anchor the
+  policy names does not exist to sweep on.
+- **Vehicle details, ratings, technical logs.** Untouched.
 
 **The liability cap is blank and the service is free.** `[ΠΟΣΟ]` in §13 of the
 Terms needs a figure, and a cap on a free service is exactly the clause a lawyer

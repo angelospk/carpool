@@ -136,6 +136,7 @@ func run() error {
 	})
 	materializer := jobs.NewMaterializer(pool, clk, athens)
 	start(ctx, &workers, "occurrence materializer", materializeInterval, materializer.Run)
+	start(ctx, &workers, "retention janitor", retentionInterval, jobs.NewJanitor(pool, clk).Run)
 
 	sessions := auth.NewSessionService(pool, clk, issuer)
 
@@ -185,6 +186,10 @@ const (
 	outboxInterval      = 5 * time.Second
 	sweepInterval       = 30 * time.Second
 	materializeInterval = 15 * time.Minute
+	// Retention periods are measured in months, so an hour either way is
+	// nothing. What the cadence buys is that a restart does not leave the
+	// backlog for a day, since every loop also runs once on start.
+	retentionInterval = time.Hour
 )
 
 // start runs fn on a ticker until ctx is cancelled. A failing tick is logged

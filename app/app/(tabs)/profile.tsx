@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 
 import { api } from '../../src/api/endpoints';
 import { forgetPhoto } from '../../src/api/images';
+import { pickPhoto } from '../../src/photo/pick';
 import { ApiError } from '../../src/api/client';
 import { useSession } from '../../src/state/session';
 import { Avatar, Button, Card, Field, Row, Screen, SectionHeader } from '../../src/components/ui';
@@ -84,25 +85,16 @@ export default function ProfileScreen() {
     onError: () => setError(t('common.error')),
   });
 
-  // Choosing a file is the one thing the two platforms do completely
-  // differently. Web is wired up because that is where this gets tested; a
-  // device needs expo-image-picker, which is not a dependency yet.
-  //
-  // So on a device the controls are absent rather than present and inert. A
-  // button that opens an apology is worse than no button: it looks like a
-  // feature until it is pressed.
-  const canPickPhoto = Platform.OS === 'web';
-
-  const pickPhoto = () => {
-    if (!canPickPhoto) return;
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/jpeg,image/png';
-    input.onchange = () => {
-      const file = input.files?.[0];
-      if (file) uploadPhoto.mutate(file);
-    };
-    input.click();
+  // Both platforms can choose a photo. Which picker opens is decided by the
+  // import — src/photo/pick has a web and a native implementation and Metro
+  // resolves one — so nothing here needs to know where it is running.
+  const choosePhoto = () => {
+    if (uploadPhoto.isPending) return;
+    pickPhoto()
+      .then((file) => {
+        if (file) uploadPhoto.mutate(file);
+      })
+      .catch(() => setError(t('profile.photoFailed')));
   };
 
   const dirty = name !== null || facebook !== null || instagram !== null;
@@ -112,7 +104,7 @@ export default function ProfileScreen() {
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Card>
           <View style={styles.identity}>
-            <Pressable testID="photo-pick" onPress={pickPhoto} disabled={!canPickPhoto}>
+            <Pressable testID="photo-pick" onPress={choosePhoto}>
               <Avatar name={me?.name ?? '·'} photoUrl={me?.photo_url} size={64} />
             </Pressable>
             <View style={styles.who}>
@@ -121,12 +113,10 @@ export default function ProfileScreen() {
                 {me?.phone}
               </Text>
               <View style={styles.photoActions}>
-                {canPickPhoto ? (
-                  <Text testID="photo-change" style={styles.link} onPress={pickPhoto}>
-                    {uploadPhoto.isPending ? t('common.loading') : t('profile.photoChange')}
-                  </Text>
-                ) : null}
-                {canPickPhoto && me?.photo_url ? (
+                <Text testID="photo-change" style={styles.link} onPress={choosePhoto}>
+                  {uploadPhoto.isPending ? t('common.loading') : t('profile.photoChange')}
+                </Text>
+                {me?.photo_url ? (
                   <Text
                     testID="photo-remove"
                     style={styles.link}
