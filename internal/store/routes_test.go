@@ -115,3 +115,69 @@ func TestARouteThatRefusesStopsSaysSo(t *testing.T) {
 		t.Error("a driver who refused intermediate stops was stored as accepting them")
 	}
 }
+
+// A driver who had set a detour budget of zero had said, in the only way the
+// old schema allowed, that they wanted no detours. The column default is true,
+// so without a backfill the migration reverses what they had chosen — quietly,
+// on somebody else's account.
+func TestTheDetourMigrationKeepsWhatDriversHadAlreadyChosen(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.Fresh(t)
+
+	// Stop just before the migration under test, so the rows below are the
+	// rows a real deployment would be carrying when it runs.
+	if err := store.MigrateTo(ctx, pool, 15); err != nil {
+		t.Fatalf("MigrateTo(15): %v", err)
+	}
+
+	var regionID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO regions (name, boundary, fuel_price_eur)
+		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25.3 40.3, 26.7 40.3, 26.7 41.8, 25.3 41.8, 25.3 40.3))', 4326)), 1.8)
+		RETURNING id`).Scan(&regionID); err != nil {
+		t.Fatalf("seeding region: %v", err)
+	}
+
+	seed := func(phone string, budget int) uuid.UUID {
+		var id uuid.UUID
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO users (phone, name, home_region_id) VALUES ($1, 'Ο', $2) RETURNING id`,
+			phone, regionID).Scan(&id); err != nil {
+			t.Fatalf("seeding user: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO driver_profiles (user_id, car_model, car_plate, detour_budget_min)
+			VALUES ($1, 'Yaris', 'ABC-1234', $2)`, id, budget); err != nil {
+			t.Fatalf("seeding driver profile: %v", err)
+		}
+		return id
+	}
+	refuses := seed("+306900000001", 0)
+	accepts := seed("+306900000002", 20)
+
+	if err := store.Migrate(ctx, pool); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		id    uuid.UUID
+		allow bool
+		min   int
+	}{
+		{"a driver who wanted none", refuses, false, 0},
+		{"a driver who allowed twenty minutes", accepts, true, 20},
+	} {
+		var allow bool
+		var min int
+		if err := pool.QueryRow(ctx,
+			`SELECT default_allow_stops, detour_budget_min FROM driver_profiles WHERE user_id = $1`,
+			tc.id).Scan(&allow, &min); err != nil {
+			t.Fatalf("%s: reading back: %v", tc.name, err)
+		}
+		if allow != tc.allow || min != tc.min {
+			t.Errorf("%s: default_allow_stops=%v detour_budget_min=%d, want %v and %d",
+				tc.name, allow, min, tc.allow, tc.min)
+		}
+	}
+}

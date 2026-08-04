@@ -92,7 +92,11 @@ func load() {
 		lon, errLon := strconv.ParseFloat(row[col["lon"]], 64)
 		lat, errLat := strconv.ParseFloat(row[col["lat"]], 64)
 		if errLon != nil || errLat != nil {
-			continue
+			// Not skipped. A settlement dropped quietly is one nobody can be
+			// picked up from, and no test over the loaded list can see the
+			// difference between a row that was never harvested and one that
+			// was thrown away here.
+			panic("places: settlement with an unreadable coordinate: " + row[col["osm_id"]])
 		}
 		population, _ := strconv.Atoi(row[col["population"]])
 		p := Place{

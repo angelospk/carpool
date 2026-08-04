@@ -66,7 +66,7 @@
     "village": "village",
     "hamlet": "settlement",
     "whereExactly": "Where exactly?",
-    "noMeetingPoints": "No recorded spot here — agree one between you.",
+    "noMeetingPoints": "No meeting point is listed here — agree one between yourselves.",
     "point": {
       "bus_station": "bus station",
       "train_station": "station",
@@ -122,7 +122,9 @@
     "allowStops": "I accept stops",
     "detourKm": "Detour up to",
     "noStopsHint": "You will not be offered anyone who is not already on your route.",
-    "detourHint": "Extra kilometres over your own journey. There is a time limit too, because 15 km on the motorway is not 15 km on a mountain road."
+    "detourHint": "Extra kilometres over your own journey. There is a time limit too, because 15 km on the motorway is not 15 km on a mountain road.",
+    "detourFromProfile": "As set on your profile",
+    "detourChange": "Change it just for this trip"
   },
   "request": {
     "title": "Your request"

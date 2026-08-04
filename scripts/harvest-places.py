@@ -153,8 +153,19 @@ def load_areas(pbf, tmp) -> list[Area]:
 
 
 def population(raw: str) -> str:
-    """OSM population values are free text: "12.500", "~3000", "1,234"."""
-    digits = "".join(ch for ch in raw if ch.isdigit())
+    """OSM population values are free text: "12.500", "~3000", "1,234".
+
+    Only the first number is read. Joining every digit in the field turns
+    "3000 (2011)" into thirty million and makes a village the largest place in
+    Greece, which is the kind of thing that shows up as a strange search result
+    long after anybody would think to look here.
+    """
+    import re
+
+    m = re.search(r"\d[\d.,\s]*", raw)
+    if not m:
+        return "0"
+    digits = "".join(ch for ch in m.group(0) if ch.isdigit())
     return digits if digits else "0"
 
 

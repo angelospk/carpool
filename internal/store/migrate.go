@@ -22,6 +22,21 @@ const migrateLockID int64 = 0x6361_7270_6f6f_6c01
 // Migrate brings the database up to the latest schema version. It is safe to
 // call concurrently from multiple processes and is a no-op when already current.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	return migrate(ctx, pool, 0)
+}
+
+// MigrateTo applies migrations up to and including version, and no further.
+//
+// It exists so that a backfill can be tested for what it actually does. Several
+// migrations here expand, backfill and then contract, and the backfill is the
+// part that touches rows somebody already has; running the whole chain against
+// an empty database proves the schema compiles and nothing about the data.
+func MigrateTo(ctx context.Context, pool *pgxpool.Pool, version int64) error {
+	return migrate(ctx, pool, version)
+}
+
+// migrate applies every migration, or those up to version when it is non-zero.
+func migrate(ctx context.Context, pool *pgxpool.Pool, version int64) error {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("store: acquiring connection for migration: %w", err)
@@ -48,6 +63,12 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("store: setting goose dialect: %w", err)
 	}
 
+	if version > 0 {
+		if err := goose.UpToContext(ctx, db, "migrations", version); err != nil {
+			return fmt.Errorf("store: applying migrations up to %d: %w", version, err)
+		}
+		return nil
+	}
 	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
 		return fmt.Errorf("store: applying migrations: %w", err)
 	}

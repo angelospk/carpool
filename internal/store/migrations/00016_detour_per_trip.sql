@@ -34,17 +34,31 @@ ALTER TABLE route_templates
   ADD COLUMN detour_min integer NOT NULL DEFAULT 10
       CHECK (detour_min >= 0 AND detour_min <= 30);
 
+-- The same bounds as the template they are copied from. A snapshot that can
+-- hold a value its source could not is a snapshot that stops being a copy the
+-- first time anything writes to it directly.
 ALTER TABLE trip_occurrences
   ADD COLUMN allow_stops boolean NOT NULL DEFAULT true,
-  ADD COLUMN detour_km numeric(4,1) NOT NULL DEFAULT 10.0,
-  ADD COLUMN detour_min integer NOT NULL DEFAULT 10;
+  ADD COLUMN detour_km numeric(4,1) NOT NULL DEFAULT 10.0
+      CHECK (detour_km >= 0 AND detour_km <= 50),
+  ADD COLUMN detour_min integer NOT NULL DEFAULT 10
+      CHECK (detour_min >= 0 AND detour_min <= 30);
+
+-- A driver who had set a budget of zero had said, in the only way the old
+-- schema allowed, that they wanted no detours. The column default of true would
+-- quietly reverse that, so their default comes from what they had chosen rather
+-- than from what is convenient for new accounts.
+UPDATE driver_profiles
+   SET default_allow_stops = detour_budget_min > 0,
+       default_detour_km = CASE WHEN detour_budget_min > 0 THEN 10.0 ELSE 0.0 END;
 
 -- Existing routes inherit what their driver had been driving under, so nobody's
 -- published trip silently changes terms. The default above only covers rows
 -- created after this runs.
 UPDATE route_templates t
    SET detour_min = d.detour_budget_min,
-       allow_stops = d.detour_budget_min > 0
+       detour_km = d.default_detour_km,
+       allow_stops = d.default_allow_stops
   FROM driver_profiles d
  WHERE d.user_id = t.driver_id;
 

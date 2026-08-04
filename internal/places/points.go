@@ -67,10 +67,18 @@ func loadPoints() {
 		lon, errLon := strconv.ParseFloat(row[col["lon"]], 64)
 		lat, errLat := strconv.ParseFloat(row[col["lat"]], 64)
 		if errLon != nil || errLat != nil {
-			continue
+			// Skipping quietly would let a broken harvest lose meeting points
+			// one at a time with nothing to show for it. The file is embedded
+			// at build time, so this can only be a broken build.
+			panic("places: meeting point with an unreadable coordinate: " + row[col["osm_id"]])
 		}
 		p := MeetingPoint{
-			ID:      "node/" + row[col["osm_id"]],
+			// The type as well as the number. Only nodes are harvested today,
+			// for the same reason harvest-places.py takes only nodes -- the
+			// centre of a way's bounding box is not guaranteed to be anywhere a
+			// car can stop -- but an id without its type is not an identity,
+			// and the two spaces overlap.
+			ID:      row[col["osm_type"]] + "/" + row[col["osm_id"]],
 			PlaceID: row[col["place_id"]],
 			Kind:    row[col["kind"]],
 			Name:    row[col["name"]],

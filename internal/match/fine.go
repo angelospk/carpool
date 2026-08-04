@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 
 	"time"
 
@@ -114,6 +115,18 @@ type Budget struct {
 // orderings, so brute force is both simple and cheap; that is exactly why the
 // cap exists.
 func BestInsertion(ctx context.Context, router Router, itin Itinerary, pickup, dropoff geo.Point) (Insertion, error) {
+	// An unbounded budget: every ordering is eligible and the cheapest wins.
+	return BestInsertionWithin(ctx, router, itin, pickup, dropoff,
+		Budget{AllowStops: true, Km: math.Inf(1), Min: math.MaxInt32})
+}
+
+// BestInsertionWithin is BestInsertion confined to what the driver agreed to.
+//
+// The budget shapes the choice rather than judging it afterwards. Picking the
+// cheapest ordering and then asking whether it fits throws away an ordering
+// that would have worked: the passenger is told no by a driver who could have
+// taken them, and nothing anywhere says why.
+func BestInsertionWithin(ctx context.Context, router Router, itin Itinerary, pickup, dropoff geo.Point, budget Budget) (Insertion, error) {
 	if parties(itin) >= MaxConcurrentParties {
 		return Insertion{}, ErrPartyCapReached
 	}
@@ -172,6 +185,9 @@ func BestInsertion(ctx context.Context, router Router, itin Itinerary, pickup, d
 				TotalDetourKm: (routed.DistanceMeters - alone.DistanceMeters) / 1000,
 				NewStops:      newStops,
 				Waypoints:     trial.waypoints(),
+			}
+			if !ins.WithinBudget(budget) {
+				continue
 			}
 			if best == nil || ins.DetourMin < best.DetourMin {
 				cp := ins

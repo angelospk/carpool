@@ -43,16 +43,23 @@ OUT = ROOT / "internal/places/data/meeting-points.csv"
 PLACES = ROOT / "internal/places/data/greece.csv"
 DEFAULT_PBF = ROOT / "osrm-data/greece-latest.osm.pbf"
 
-FIELDS = ["place_id", "osm_id", "kind", "name", "name_en", "lon", "lat"]
+FIELDS = ["place_id", "osm_type", "osm_id", "rank", "kind", "name", "name_en", "lon", "lat"]
 
 # Ranked by how findable the thing is, not by how close. Everybody in a Greek
 # village can point at the petrol station; nobody can point at car park #3.
+#
+# Nodes only, for the same reason harvest-places.py takes only nodes: the centre
+# of a way's bounding box is not guaranteed to sit inside the feature, let alone
+# somewhere a car can stop. It does cost coverage — plenty of petrol stations
+# are mapped as a building outline — and that is the trade being made, not an
+# oversight. The osm_type column is written anyway, because an id without its
+# type is not an identity if ways are ever added.
 KINDS = [
-    ("bus_station", ["n/amenity=bus_station", "w/amenity=bus_station"]),
-    ("train_station", ["n/railway=station", "n/railway=halt", "w/railway=station"]),
-    ("port", ["n/amenity=ferry_terminal", "w/amenity=ferry_terminal"]),
-    ("fuel", ["n/amenity=fuel", "w/amenity=fuel"]),
-    ("parking", ["n/amenity=parking", "w/amenity=parking"]),
+    ("bus_station", ["n/amenity=bus_station"]),
+    ("train_station", ["n/railway=station", "n/railway=halt"]),
+    ("port", ["n/amenity=ferry_terminal"]),
+    ("fuel", ["n/amenity=fuel"]),
+    ("parking", ["n/amenity=parking"]),
 ]
 
 # How many landmarks a settlement of each kind is worth listing. A city needs
@@ -131,9 +138,21 @@ def build(pbf: pathlib.Path, features) -> tuple[list[dict], dict]:
                     continue
 
                 place_id = f"{best['osm_type']}/{best['osm_id']}"
+                # osmium renders a type_id as "n441183" or "w88213": one
+                # letter, then the number. Both are harvested -- a petrol
+                # station is as often a building outline as a point -- and an
+                # id without its type is not an identity, because the two
+                # spaces overlap.
+                raw = str(f.get("id", ""))
                 found.setdefault(place_id, []).append((rank, best_km, {
                     "place_id": place_id,
-                    "osm_id": str(f.get("id", ""))[1:],
+                    "osm_type": {"n": "node", "w": "way", "r": "relation"}.get(raw[:1], "node"),
+                    "osm_id": raw[1:],
+                    # Carried into the file because the CSV order is not the
+                    # ranking: sorting the rows for a reproducible diff would
+                    # otherwise silently reorder them by kind, alphabetically,
+                    # and put the port after the car park.
+                    "rank": str(rank),
                     "kind": kind,
                     "name": name,
                     "name_en": p.get("name:en", ""),
@@ -148,7 +167,9 @@ def build(pbf: pathlib.Path, features) -> tuple[list[dict], dict]:
         limit = PER_KIND.get(by_kind.get(place_id, "village"), 1)
         rows.extend(c[2] for c in candidates[:limit])
 
-    rows.sort(key=lambda r: (r["place_id"], r["kind"], r["osm_id"]))
+    # Sorted for a reproducible diff, but on the rank first so the file order
+    # is the order the app shows them in.
+    rows.sort(key=lambda r: (r["place_id"], int(r["rank"]), r["osm_id"]))
 
     covered = len(found)
     stats = {

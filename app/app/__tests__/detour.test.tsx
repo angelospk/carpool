@@ -65,7 +65,7 @@ test('publishing without touching the detour sends nothing about it', async () =
 test('a detour set on the form is sent with the trip', async () => {
   await fillRoute();
 
-  fireEvent.press(screen.getByTestId('detour-km-plus'));
+  fireEvent.press(screen.getByTestId('detour-override'));
   fireEvent.press(screen.getByTestId('detour-km-plus'));
   fireEvent.press(screen.getByTestId('publish-submit'));
 
@@ -80,6 +80,7 @@ test('a detour set on the form is sent with the trip', async () => {
 test('a driver can say no intermediate stops at all', async () => {
   await fillRoute();
 
+  fireEvent.press(screen.getByTestId('detour-override'));
   fireEvent.press(screen.getByTestId('detour-allow'));
   fireEvent.press(screen.getByTestId('publish-submit'));
 
@@ -143,4 +144,15 @@ test('changing the town lets go of the landmark chosen in it', async () => {
   const body = (api.publishRoute as jest.Mock).mock.calls[0][0];
   expect(body.origin_lon).toBe(26.53);
   expect(body.origin_label).toBe('Ορεστιάδα');
+});
+
+// The screen does not know what this driver's profile says. Showing "on, 10 km"
+// would be telling them something about their own settings that may not be
+// true, so until they take it over it says where the answer comes from.
+test('an untouched detour shows where it comes from, not a figure', async () => {
+  await fillRoute();
+
+  expect(screen.getByTestId('detour-override')).toBeTruthy();
+  expect(screen.queryByTestId('detour-km')).toBeNull();
+  expect(screen.queryByTestId('detour-allow')).toBeNull();
 });

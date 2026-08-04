@@ -2,6 +2,7 @@ package match_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -156,4 +157,64 @@ func TestEveryStopCostsTimeEvenWhenTheRouteDoesNotChange(t *testing.T) {
 	if got.WithinBudget(match.Budget{AllowStops: true, Km: 100, Min: 3}) {
 		t.Error("two stops fitted a three-minute budget; the dwell is not being counted")
 	}
+}
+
+// The ordering that costs the driver least is not always the one that fits what
+// they agreed to. Choosing the cheapest and then testing it against the budget
+// throws away an ordering that would have worked, and the passenger is told no
+// by a driver who could have taken them.
+func TestAnOrderingThatFitsIsPreferredToOneThatDoesNot(t *testing.T) {
+	// The first ordering tried is the expensive one; a later one is cheap
+	// enough. Answers depend on the position of the new pickup, so the two
+	// orderings differ.
+	r := &orderingRouter{}
+	itin := plainItinerary()
+	itin.Stops = []match.Stop{
+		{Point: geo.Point{Lon: 25.0, Lat: 40.8}, Kind: match.StopPickup, PartyID: "a"},
+		{Point: geo.Point{Lon: 24.0, Lat: 40.7}, Kind: match.StopDropoff, PartyID: "a"},
+	}
+
+	budget := match.Budget{AllowStops: true, Km: 12, Min: 60}
+	got, err := match.BestInsertionWithin(context.Background(), r, itin,
+		geo.Point{Lon: 24.5, Lat: 40.75}, geo.Point{Lon: 23.5, Lat: 40.7}, budget)
+	if err != nil {
+		t.Fatalf("BestInsertionWithin: %v", err)
+	}
+	if !got.WithinBudget(budget) {
+		t.Errorf("returned an insertion of %.1f km against a %.1f km budget, when one fitted",
+			got.TotalDetourKm, budget.Km)
+	}
+}
+
+// Nothing fits. The answer is that this driver cannot take them, not the
+// cheapest thing that still breaks the promise.
+func TestNoOrderingWithinBudgetIsRefused(t *testing.T) {
+	r := &stepRouter{baseKm: 100, baseMin: 100, perStop: 20}
+	_, err := match.BestInsertionWithin(context.Background(), r, plainItinerary(),
+		geo.Point{Lon: 25.0, Lat: 40.8}, geo.Point{Lon: 24.0, Lat: 40.7},
+		match.Budget{AllowStops: true, Km: 5, Min: 60})
+	if !errors.Is(err, match.ErrNoViableInsertion) {
+		t.Fatalf("error = %v, want ErrNoViableInsertion", err)
+	}
+}
+
+// orderingRouter answers by where the new pickup sits: putting it first is
+// expensive, putting it later is not. Driver-only routes stay cheap so the
+// baseline is stable.
+type orderingRouter struct{}
+
+func (orderingRouter) Route(_ context.Context, w []geo.Point) (geo.Route, error) {
+	km := 100.0
+	if len(w) > 2 {
+		km += 2 * float64(len(w)-2)
+		// The new pickup is at 24.5. Immediately after the origin it is a
+		// doubling-back that costs dearly.
+		if w[1].Lon == 24.5 {
+			km += 40
+		}
+	}
+	return geo.Route{
+		DistanceMeters: km * 1000,
+		Duration:       time.Duration(km) * time.Minute,
+	}, nil
 }

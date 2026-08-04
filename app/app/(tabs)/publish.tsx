@@ -168,43 +168,57 @@ export default function PublishScreen() {
 
         {/* How far out of the way, for this trip. It is a question about today:
             the long run to Thessaloniki has room in it and the Monday commute
-            has none, which is why the answer is not kept on the profile. */}
+            has none, which is why the answer is not kept on the profile.
+
+            Untouched, it says so rather than showing a figure. The screen does
+            not know what this driver's profile says, and inventing a plausible
+            "10 km, stops on" would be telling them something about their own
+            settings that may not be true. */}
         <SectionHeader title={t('publish.detour')} />
         <Card>
-          <Pressable
-            testID="detour-allow"
-            onPress={() => setAllowStops((a) => (a === false ? true : false))}
-            style={styles.seats}
-          >
-            <Text style={styles.seatsLabel}>{t('publish.allowStops')}</Text>
-            <Text style={styles.toggle}>
-              {allowStops === false ? t('common.off') : t('common.on')}
-            </Text>
-          </Pressable>
-
-          {allowStops === false ? (
-            <Text style={styles.hint}>{t('publish.noStopsHint')}</Text>
+          {allowStops === null && detourKm === null ? (
+            <Pressable testID="detour-override" onPress={() => setAllowStops(true)}>
+              <Text style={styles.seatsLabel}>{t('publish.detourFromProfile')}</Text>
+              <Text style={styles.hint}>{t('publish.detourChange')}</Text>
+            </Pressable>
           ) : (
             <>
-              <View style={styles.divider} />
-              <View style={styles.seats}>
-                <Text style={styles.seatsLabel}>{t('publish.detourKm')}</Text>
-                <Stepper
-                  testID="detour-km"
-                  value={detourKm ?? defaultDetourKm}
-                  // Choosing a distance is agreeing to stops. Sending the
-                  // distance alone would leave a driver whose profile says no
-                  // stops setting a detour that can never be taken.
-                  onChange={(v) => {
-                    setDetourKm(v);
-                    setAllowStops(true);
-                  }}
-                  min={0}
-                  max={50}
-                  step={5}
-                />
-              </View>
-              <Text style={styles.hint}>{t('publish.detourHint')}</Text>
+              <Pressable
+                testID="detour-allow"
+                onPress={() => setAllowStops((a) => a === false)}
+                style={styles.seats}
+              >
+                <Text style={styles.seatsLabel}>{t('publish.allowStops')}</Text>
+                <Text style={styles.toggle}>
+                  {allowStops === false ? t('common.off') : t('common.on')}
+                </Text>
+              </Pressable>
+
+              {allowStops === false ? (
+                <Text style={styles.hint}>{t('publish.noStopsHint')}</Text>
+              ) : (
+                <>
+                  <View style={styles.divider} />
+                  <View style={styles.seats}>
+                    <Text style={styles.seatsLabel}>{t('publish.detourKm')}</Text>
+                    <Stepper
+                      testID="detour-km"
+                      value={detourKm ?? defaultDetourKm}
+                      // Choosing a distance is agreeing to stops. Sending the
+                      // distance alone would leave a driver whose profile says
+                      // no stops setting a detour that can never be taken.
+                      onChange={(v) => {
+                        setDetourKm(v);
+                        setAllowStops(true);
+                      }}
+                      min={0}
+                      max={50}
+                      step={5}
+                    />
+                  </View>
+                  <Text style={styles.hint}>{t('publish.detourHint')}</Text>
+                </>
+              )}
             </>
           )}
         </Card>
@@ -234,9 +248,9 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: colors.line, marginVertical: space.sm },
 });
 
-// What the stepper starts at before the driver touches it. It matches the
-// column default rather than pretending to know their profile: the moment they
-// change it the real value is sent, and until then nothing is.
+// Where the stepper starts once a driver has said they want to set a figure for
+// this trip. Until then nothing is shown and nothing is sent, so this is never
+// mistaken for what their profile holds.
 const defaultDetourKm = 10;
 
 // "Φέρες, ΚΤΕΛ Έβρου" rather than either alone: the town is what somebody

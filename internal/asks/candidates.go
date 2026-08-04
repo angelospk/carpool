@@ -84,14 +84,14 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 		c := byID[cand.ID]
 
 		insertion, price, basis, err := s.evaluate(ctx, c, req)
-		if errors.Is(err, match.ErrPartyCapReached) || errors.Is(err, geo.ErrNoRoute) {
-			continue // this occurrence cannot take them; try the next
+		if errors.Is(err, match.ErrPartyCapReached) || errors.Is(err, geo.ErrNoRoute) ||
+			errors.Is(err, match.ErrNoViableInsertion) {
+			// No room, no road, or no ordering inside what this driver agreed
+			// to. All three mean the same thing here: try the next occurrence.
+			continue
 		}
 		if err != nil {
 			return uuid.Nil, err
-		}
-		if !insertion.WithinBudget(c.Budget) {
-			continue
 		}
 
 		askID, err := s.createAsk(ctx, req, c, insertion, price, basis)
@@ -172,7 +172,10 @@ func (s *Service) evaluate(ctx context.Context, c match.Candidate, req request) 
 		return match.Insertion{}, 0, domain.Basis{}, err
 	}
 
-	insertion, err := match.BestInsertion(ctx, s.router, itin, req.Origin, req.Destination)
+	// Within what this trip's driver agreed to, rather than the cheapest of all
+	// orderings tested against it afterwards: an ordering that fits is worth
+	// more to both of them than the one that costs the driver least.
+	insertion, err := match.BestInsertionWithin(ctx, s.router, itin, req.Origin, req.Destination, c.Budget)
 	if err != nil {
 		return match.Insertion{}, 0, domain.Basis{}, err
 	}
