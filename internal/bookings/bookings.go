@@ -130,3 +130,108 @@ func (s *Service) Cancel(ctx context.Context, bookingID, userID uuid.UUID) error
 	}
 	return nil
 }
+
+// CancelOccurrence is a driver calling off one departure.
+//
+// Distinct from retiring a route, which stops future departures being offered
+// and leaves arranged ones alone. This is the opposite act: tomorrow morning is
+// not happening, and the people expecting a seat in it need telling now.
+//
+// Every booking is cancelled through the same status the passenger-facing path
+// uses, so a passenger sees "cancelled by the driver" and gets the same push,
+// rather than a second kind of cancellation that the rest of the app has never
+// heard of.
+func (s *Service) CancelOccurrence(ctx context.Context, occurrenceID, userID uuid.UUID) error {
+	now := s.clock.Now()
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("bookings: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var (
+		driverID uuid.UUID
+		status   string
+		departs  time.Time
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT t.driver_id, o.status, o.depart_earliest
+		FROM trip_occurrences o
+		JOIN route_templates t ON t.id = o.template_id
+		WHERE o.id = $1 FOR UPDATE OF o`, occurrenceID).Scan(&driverID, &status, &departs)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("bookings: loading the trip: %w", err)
+	}
+	// Not ErrNotYours: a passenger asking to cancel somebody else's departure
+	// should not learn that it exists.
+	if userID != driverID {
+		return ErrNotFound
+	}
+	if status == "cancelled" {
+		return nil // already called off; asking twice is not a failure
+	}
+	if !departs.After(now) {
+		// Once it has set off, calling it off is not what happened. The trip is
+		// confirmed or not, and that is a different question.
+		return ErrDeparted
+	}
+
+	rows, err := tx.Query(ctx, `
+		WITH released AS (
+			UPDATE bookings SET status = 'cancelled_by_driver', updated_at = now()
+			 WHERE occurrence_id = $1 AND status = 'confirmed'
+			RETURNING id, passenger_id
+		)
+		SELECT id, passenger_id FROM released`, occurrenceID)
+	if err != nil {
+		return fmt.Errorf("bookings: cancelling the bookings: %w", err)
+	}
+	type cancelled struct{ booking, passenger uuid.UUID }
+	var affected []cancelled
+	for rows.Next() {
+		var c cancelled
+		if err := rows.Scan(&c.booking, &c.passenger); err != nil {
+			rows.Close()
+			return fmt.Errorf("bookings: reading the cancelled bookings: %w", err)
+		}
+		affected = append(affected, c)
+	}
+	rows.Close()
+	if rows.Err() != nil {
+		return fmt.Errorf("bookings: reading the cancelled bookings: %w", rows.Err())
+	}
+
+	// The seats are not given back. The departure is gone, so there is nothing
+	// left to take a seat in, and leaving seats_free where it was keeps the
+	// row honest about what was booked when it was called off.
+	if _, err := tx.Exec(ctx, `
+		UPDATE trip_occurrences SET status = 'cancelled', updated_at = now()
+		 WHERE id = $1`, occurrenceID); err != nil {
+		return fmt.Errorf("bookings: cancelling the trip: %w", err)
+	}
+
+	for _, c := range affected {
+		payload, err := json.Marshal(map[string]any{
+			"event": "booking_cancelled", "recipient_id": c.passenger, "booking_id": c.booking,
+		})
+		if err != nil {
+			return fmt.Errorf("bookings: encoding the notification: %w", err)
+		}
+		if err := outbox.Enqueue(ctx, tx, outbox.Message{
+			Kind:           "push",
+			Payload:        payload,
+			IdempotencyKey: "booking_cancelled:" + c.booking.String(),
+		}, now); err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("bookings: commit: %w", err)
+	}
+	return nil
+}

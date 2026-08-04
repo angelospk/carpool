@@ -124,10 +124,15 @@
     "when": "When"
   },
   "trip": {
+    "cancel": "Cancel trip",
+    "cancelConfirm": "This trip will not happen.",
+    "cancelWithPassengers": "This trip will not happen. {{count}} passengers will be told.",
+    "cancelled": "The trip was cancelled",
     "chat": "Chat",
     "confirm": "The ride happened",
     "driver": "Driver",
     "messagePlaceholder": "Write a message…",
+    "notCancellable": "The trip has already set off",
     "notDeparted": "You can confirm once the trip sets off",
     "passengers": "Passengers",
     "plate": "Plate",

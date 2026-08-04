@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"carpool/internal/bookings"
 	"carpool/internal/domain"
 	"carpool/internal/store"
 )
@@ -334,4 +335,32 @@ func (d Deps) now() time.Time {
 		return d.Clock.Now()
 	}
 	return time.Now()
+}
+
+// handleCancelTrip is a driver calling off one departure. Retiring a route
+// stops future ones being offered; this is the other act, and the people
+// expecting a seat tomorrow are told.
+func (d Deps) handleCancelTrip(w http.ResponseWriter, r *http.Request) {
+	userID, tripID, role, ok := d.tripParams(w, r)
+	if !ok {
+		return
+	}
+	// Checked here as well as in the service, so a passenger gets the same 404
+	// as a stranger rather than a different shape of refusal.
+	if role != store.RoleDriver {
+		writeError(w, http.StatusNotFound, "not_found", "no such trip")
+		return
+	}
+
+	err := d.Bookings.CancelOccurrence(r.Context(), tripID, userID)
+	switch {
+	case errors.Is(err, bookings.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "no such trip")
+	case errors.Is(err, bookings.ErrDeparted):
+		writeError(w, http.StatusConflict, "departed", "the trip has already set off")
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "the trip could not be cancelled")
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }

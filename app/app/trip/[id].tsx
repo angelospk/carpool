@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -56,6 +56,25 @@ export default function TripScreen() {
         e instanceof ApiError && e.code === 'not_departed'
           ? t('trip.notDeparted')
           : t('common.error'),
+      ),
+  });
+
+  // The trip has set off when its earliest departure is behind us. Compared
+  // against the device clock, which is the only one the screen has; the server
+  // decides for real and answers not_departed if this is optimistic.
+  const departed = trip.data ? new Date(trip.data.depart_earliest) <= new Date() : false;
+  const hasCompany =
+    trip.data?.role === 'driver' ? (trip.data.passengers.length ?? 0) > 0 : true;
+
+  const cancel = useMutation({
+    mutationFn: () => api.cancelTrip(id),
+    onSuccess: () => {
+      setNotice(t('trip.cancelled'));
+      void trip.refetch();
+    },
+    onError: (e) =>
+      setNotice(
+        e instanceof ApiError && e.code === 'departed' ? t('trip.notCancellable') : t('common.error'),
       ),
   });
 
@@ -157,25 +176,60 @@ export default function TripScreen() {
                   </Text>
                 ) : null}
 
-                <View style={styles.actions}>
-                  <View style={styles.action}>
-                    <Button
-                      testID="trip-confirm"
-                      label={t('trip.confirm')}
-                      onPress={() => confirm.mutate()}
-                      disabled={confirm.isPending}
-                    />
+                {/* Which questions belong here depends on when it is and who
+                    is asking. Before the trip has set off, whether it happened
+                    is not a question anybody can answer, and a driver with an
+                    empty car has nothing to rate; what they need is a way to
+                    call it off. Asking all four things at all times is how a
+                    driver ended up being asked to rate a trip nobody had taken
+                    yet. */}
+                {departed ? (
+                  <View style={styles.actions}>
+                    <View style={styles.action}>
+                      <Button
+                        testID="trip-confirm"
+                        label={t('trip.confirm')}
+                        onPress={() => confirm.mutate()}
+                        disabled={confirm.isPending}
+                      />
+                    </View>
+                    {/* Nobody to rate in an empty car. */}
+                    {hasCompany ? (
+                      <View style={styles.action}>
+                        <Button
+                          testID="trip-rate"
+                          label={`${t('trip.rate')} ★`}
+                          variant="secondary"
+                          onPress={() => rate.mutate(5)}
+                          disabled={rate.isPending}
+                        />
+                      </View>
+                    ) : null}
                   </View>
-                  <View style={styles.action}>
-                    <Button
-                      testID="trip-rate"
-                      label={`${t('trip.rate')} ★`}
-                      variant="secondary"
-                      onPress={() => rate.mutate(5)}
-                      disabled={rate.isPending}
-                    />
-                  </View>
-                </View>
+                ) : trip.data.role === 'driver' ? (
+                  <Button
+                    testID="trip-cancel"
+                    label={t('trip.cancel')}
+                    variant="danger"
+                    disabled={cancel.isPending}
+                    onPress={() =>
+                      Alert.alert(
+                        t('trip.cancel'),
+                        trip.data.passengers.length > 0
+                          ? t('trip.cancelWithPassengers', { count: trip.data.passengers.length })
+                          : t('trip.cancelConfirm'),
+                        [
+                          { text: t('common.cancel'), style: 'cancel' },
+                          {
+                            text: t('trip.cancel'),
+                            style: 'destructive',
+                            onPress: () => cancel.mutate(),
+                          },
+                        ],
+                      )
+                    }
+                  />
+                ) : null}
 
                 <Text style={styles.chatLabel}>{t('trip.chat')}</Text>
               </View>

@@ -179,6 +179,9 @@ func NewRouter(deps Deps) http.Handler {
 			r.Route("/trips/{id}", func(r chi.Router) {
 				r.Get("/", deps.handleGetTrip)
 				r.Post("/confirm", deps.handleConfirmTrip)
+				if deps.Bookings != nil {
+					r.Delete("/", deps.handleCancelTrip)
+				}
 				r.Post("/rate", deps.handleRateTrip)
 				r.Get("/messages", deps.handleListMessages)
 				r.Post("/messages", deps.handlePostMessage)

@@ -162,6 +162,9 @@ export const api = {
       body: { challenge_id: challengeId, code },
     }),
 
+  /** A driver calling off one departure. Retiring a route is the other act. */
+  cancelTrip: (id: string) => request<void>(`/v1/trips/${id}`, { method: 'DELETE' }),
+
   myRoutes: () => request<{ routes: MyRoute[] }>('/v1/me/routes'),
 
   retireRoute: (id: string) => request<void>(`/v1/me/routes/${id}`, { method: 'DELETE' }),
