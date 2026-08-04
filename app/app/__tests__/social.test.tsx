@@ -1,36 +1,49 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import { Linking } from 'react-native';
 
-import { SocialLink } from '../../src/components/SocialLink';
+import { SocialLinks } from '../../src/components/SocialLink';
+
+const fb = 'https://facebook.com/giannis.k';
+const ig = 'https://instagram.com/giannis.k';
 
 test('a profile link is shown as the claim it is, not as a check we made', () => {
-  render(<SocialLink url="https://www.facebook.com/giannis.k" />);
+  render(<SocialLinks facebook={fb} instagram={null} />);
 
-  expect(screen.getByText('facebook.com/giannis.k')).toBeTruthy();
+  expect(screen.getByTestId('social-facebook')).toBeTruthy();
   // The caveat is the point: nobody verified this profile belongs to them, and
   // a bare link would read as if somebody had.
   expect(screen.getByText(/επαληθε/)).toBeTruthy();
 });
 
-test('the www prefix is dropped so the handle is what you read', () => {
-  render(<SocialLink url="https://m.facebook.com/giannis.k" />);
+test('the handle is what you read, not the address', () => {
+  // Two links to two platforms differ by one word in the middle of a URL. The
+  // handle plus an icon is what tells them apart at a glance.
+  render(<SocialLinks facebook={fb} instagram={ig} />);
 
-  expect(screen.queryByText(/m\.facebook\.com/)).toBeNull();
-  expect(screen.getByText('facebook.com/giannis.k')).toBeTruthy();
+  expect(screen.getAllByText('@giannis.k')).toHaveLength(2);
+  expect(screen.queryByText(/facebook\.com\//)).toBeNull();
 });
 
-test('no link means no row at all', () => {
-  const view = render(<SocialLink url={null} />);
+test('only the links that exist get a row', () => {
+  render(<SocialLinks facebook={null} instagram={ig} />);
+
+  expect(screen.queryByTestId('social-facebook')).toBeNull();
+  expect(screen.getByTestId('social-instagram')).toBeTruthy();
+});
+
+test('no links means no rows at all', () => {
+  const view = render(<SocialLinks facebook={null} instagram={null} />);
 
   expect(view.toJSON()).toBeNull();
 });
 
-test('tapping it opens that profile and nothing else', async () => {
+test('tapping one opens that profile and nothing else', async () => {
   const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
 
-  render(<SocialLink url="https://instagram.com/giannis.k" />);
-  fireEvent.press(screen.getByTestId('social-link'));
+  render(<SocialLinks facebook={fb} instagram={ig} />);
+  fireEvent.press(screen.getByTestId('social-instagram'));
 
-  await waitFor(() => expect(open).toHaveBeenCalledWith('https://instagram.com/giannis.k'));
+  await waitFor(() => expect(open).toHaveBeenCalledWith(ig));
+  expect(open).not.toHaveBeenCalledWith(fb);
   open.mockRestore();
 });

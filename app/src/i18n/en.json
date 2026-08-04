@@ -48,6 +48,17 @@
     "againAsked": "The driver has been asked",
     "againNone": "No next trip with a free seat"
   },
+  "phone": {
+    "code": "Code",
+    "codeHint": "Enter the code that arrived on the new number.",
+    "current": "Currently: {{phone}}",
+    "hint": "We will text a code to the new number.",
+    "newNumber": "New number",
+    "sameNumber": "That is already your number",
+    "signsOutOthers": "This signs you out on your other devices.",
+    "title": "Change number",
+    "unavailable": "That number cannot be used"
+  },
   "places": {
     "city": "city",
     "none": "No such place",
@@ -57,15 +68,32 @@
   "profile": {
     "car": "Your car",
     "detourBudget": "Maximum detour",
+    "handleInvalid": "That is not a username",
     "language": "Language",
+    "name": "Name",
+    "nameInvalid": "That name cannot be used",
+    "noRoutes": "You have not published any routes",
     "notifyRadius": "Notification radius",
+    "phone": "Phone",
+    "photo": "Photo",
+    "photoChange": "Change photo",
+    "photoInvalid": "That is not a JPEG or PNG",
+    "photoOnWebOnly": "From a browser for now",
+    "photoRemove": "Remove",
+    "photoTooBig": "That photo is too large",
+    "retire": "Retire",
+    "retireConfirm": "This route will no longer be offered.",
+    "retireWithTrips": "This route will no longer be offered. Its {{count}} scheduled trips stay: cancel those separately if you need to.",
+    "routes": "My routes",
     "settings": "Settings",
     "signOut": "Sign out",
-    "title": "Your profile",
-    "womenOnly": "Women only",
     "social": "Facebook or Instagram profile",
-    "socialHint": "Optional. Only people you travel with can see it.",
-    "socialInvalid": "Give a facebook.com or instagram.com link"
+    "socialHint": "Just the username, not the whole link. Not verified.",
+    "socialInvalid": "Give a facebook.com or instagram.com link",
+    "title": "Your profile",
+    "upcomingTrips": "{{count}} scheduled trips",
+    "womenOnly": "Women only",
+    "you": "You"
   },
   "publish": {
     "departWindow": "Departure time",
@@ -77,6 +105,7 @@
     "route": "Route",
     "schedule": "Schedule",
     "seats": "Seats",
+    "seatsN": "{{count}} seats",
     "title": "Publish a route",
     "until": "Until"
   },

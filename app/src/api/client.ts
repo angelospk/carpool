@@ -158,6 +158,27 @@ function refreshOnce(): Promise<boolean> {
   return refreshing;
 }
 
+/** Sends raw bytes rather than JSON, for the one endpoint that takes an image. */
+export async function requestRaw<T>(path: string, body: Blob): Promise<T> {
+  const tokens = await getTokens();
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}${path}`, {
+      method: 'PUT',
+      headers: tokens?.accessToken ? { Authorization: `Bearer ${tokens.accessToken}` } : {},
+      body,
+    });
+  } catch (cause) {
+    throw new NetworkError(cause);
+  }
+  if (!res.ok) {
+    const envelope = await res.json().catch(() => null);
+    const error = envelope?.error ?? {};
+    throw new ApiError(res.status, error.code ?? 'unknown', error.message ?? 'the request failed');
+  }
+  return (await res.json()) as T;
+}
+
 export async function request<T>(path: string, options: Options = {}): Promise<T> {
   const send = async (): Promise<Response> => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };

@@ -1,9 +1,24 @@
 // Typed wrappers over the REST surface. Keeping the shapes here means a server
 // contract change breaks the build rather than a screen at runtime.
 
-import { request } from './client';
+import { request, requestRaw } from './client';
 
 export type Region = { id: string; name: string; fuel_price_eur: number };
+
+export type MyRoute = {
+  id: string;
+  origin_label: string;
+  destination_label: string;
+  route_km: number;
+  seats: number;
+  pricing_mode: string;
+  kind: string;
+  weekdays: number[];
+  oneoff_date?: string;
+  depart_earliest: string;
+  depart_latest: string;
+  upcoming_trips: number;
+};
 
 export type Place = {
   id: string;
@@ -21,7 +36,10 @@ export type Me = {
   photo_url: string | null;
   home_region_id: string;
   women_only: boolean;
-  social_url: string | null;
+  facebook_handle: string | null;
+  instagram_handle: string | null;
+  facebook_url: string | null;
+  instagram_url: string | null;
 };
 
 export type TripSummary = {
@@ -43,7 +61,8 @@ export type Participant = {
   photo_url: string | null;
   rating: number | null;
   /** Where they say they can also be found. Self-declared, never verified. */
-  social_url: string | null;
+  facebook_url: string | null;
+  instagram_url: string | null;
   car_model?: string | null;
   car_color?: string | null;
   car_plate?: string | null;
@@ -120,8 +139,32 @@ export const api = {
     request<void>('/v1/auth/logout', { method: 'POST', body: { refresh_token: refreshToken } }),
 
   me: () => request<Me>('/v1/me'),
-  updateMe: (patch: Partial<Pick<Me, 'name' | 'photo_url' | 'women_only' | 'social_url'>>) =>
-    request<Me>('/v1/me', { method: 'PATCH', body: patch }),
+  updateMe: (
+    patch: Partial<Pick<Me, 'name' | 'women_only' | 'facebook_handle' | 'instagram_handle'>>,
+  ) => request<Me>('/v1/me', { method: 'PATCH', body: patch }),
+
+  /** Uploads a photo. The server re-encodes it; this sends the bytes as they are. */
+  uploadPhoto: (bytes: Blob) => requestRaw<{ photo_url: string }>('/v1/me/photo', bytes),
+
+  removePhoto: () => request<void>('/v1/me/photo', { method: 'DELETE' }),
+
+  /** Sends a code to a new number and returns the challenge to quote back. */
+  requestPhoneChange: (phone: string) =>
+    request<{ challenge_id: string; dev_code?: string }>('/v1/me/phone/request', {
+      method: 'POST',
+      body: { phone },
+    }),
+
+  /** Confirms the change. The number comes from the challenge, never from here. */
+  confirmPhoneChange: (challengeId: string, code: string) =>
+    request<{ access_token: string; refresh_token: string }>('/v1/me/phone/confirm', {
+      method: 'POST',
+      body: { challenge_id: challengeId, code },
+    }),
+
+  myRoutes: () => request<{ routes: MyRoute[] }>('/v1/me/routes'),
+
+  retireRoute: (id: string) => request<void>(`/v1/me/routes/${id}`, { method: 'DELETE' }),
 
   registerPushToken: (token: string, platform: 'ios' | 'android') =>
     request<void>('/v1/me/push-token', { method: 'PUT', body: { token, platform } }),

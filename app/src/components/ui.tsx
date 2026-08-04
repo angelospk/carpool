@@ -14,9 +14,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { colors, initials, lift, radius, space, tileColor, type } from '../design/tokens';
+import { photoSource } from '../api/images';
 
 export { colors };
 
@@ -198,8 +199,25 @@ export function Avatar({
   size?: number;
 }) {
   const shape = { width: size, height: size, borderRadius: size / 2 };
-  if (photoUrl) {
-    return <Image source={{ uri: photoUrl }} style={[styles.avatar, shape]} />;
+
+  // Photos live behind the session, so the bytes are fetched rather than handed
+  // to <Image> as a URL. Until they arrive, and if they never do, the initials
+  // stand in: a face that fails to load should look like no face, not like a
+  // broken image.
+  const [uri, setUri] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setUri(null);
+    void photoSource(photoUrl).then((u) => {
+      if (alive) setUri(u);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [photoUrl]);
+
+  if (uri) {
+    return <Image source={{ uri }} style={[styles.avatar, shape]} />;
   }
   return (
     <View style={[styles.avatar, shape, { backgroundColor: tileColor(name) }]}>
