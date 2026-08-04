@@ -189,6 +189,9 @@ export const api = {
     oneoff_date?: string;
     depart_earliest: string;
     depart_latest: string;
+    /** Omitted means "use my profile defaults". */
+    allow_stops?: boolean;
+    detour_km?: number;
   }) => request<{ template_id: string; route_km: number; ends_at_port: boolean }>('/v1/routes', {
       method: 'POST',
       body,

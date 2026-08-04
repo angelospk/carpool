@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"time"
+
 	"carpool/internal/geo"
 )
 
@@ -57,13 +59,51 @@ type Router interface {
 	Route(ctx context.Context, waypoints []geo.Point) (geo.Route, error)
 }
 
+// StopDwell is what pulling over, waiting and pulling out again costs, per
+// stop. A pickup exactly on the route changes the road distance by nothing and
+// still takes real minutes out of the driver's day; counting it as free is how
+// a driver ends up agreeing to four "free" stops.
+const StopDwell = 2 * time.Minute
+
 // Insertion is the cheapest way to fit a new passenger into an itinerary.
 type Insertion struct {
-	// DetourMin and DetourKm are the increments over the driver's current plan.
+	// DetourMin and DetourKm are what this passenger adds to the plan as it
+	// stands. This is what the driver is being asked to accept right now.
 	DetourMin float64
 	DetourKm  float64
+
+	// TotalDetourMin and TotalDetourKm are measured from the driver travelling
+	// alone, and are what a budget is judged against.
+	//
+	// Judging the marginal figure instead is the bug this exists for: three
+	// passengers each costing eight minutes all pass an eight-minute budget,
+	// and the driver arrives twenty-four minutes late having agreed to eight.
+	TotalDetourMin float64
+	TotalDetourKm  float64
+
+	// NewStops counts the waypoints this insertion adds beyond the driver's own
+	// endpoints, which is what a driver refusing intermediate stops is refusing.
+	NewStops int
+
 	// Waypoints is the resulting itinerary, driver origin first.
 	Waypoints []geo.Point
+}
+
+// Budget is what a driver agreed to for one trip.
+type Budget struct {
+	// AllowStops is whether they want intermediate stops at all. It is not the
+	// same as a zero budget: stopping costs time even where the map says the
+	// detour is nothing.
+	AllowStops bool
+	// Km is the extra road distance they will drive, which is the figure they
+	// actually chose. Km is the increase in road distance over their own
+	// journey, not how far off the line the pickup sits.
+	Km float64
+	// Min is the time limit over the same journey. It exists because the two do
+	// not track each other: fifteen kilometres on the Egnatia is nine minutes
+	// and fifteen up a mountain road is thirty-five, and a driver who said
+	// fifteen kilometres did not agree to thirty-five minutes.
+	Min int
 }
 
 // BestInsertion finds the cheapest valid way to add a pickup and dropoff to an
@@ -84,6 +124,17 @@ func BestInsertion(ctx context.Context, router Router, itin Itinerary, pickup, d
 	baseline, err := router.Route(ctx, itin.waypoints())
 	if err != nil {
 		return Insertion{}, fmt.Errorf("match: routing the current itinerary: %w", err)
+	}
+
+	// The driver's own journey, with nobody aboard. Every budget is judged
+	// against this rather than against the itinerary as it stands, so that
+	// passengers cannot each spend the whole allowance.
+	alone := baseline
+	if len(itin.Stops) > 0 {
+		alone, err = router.Route(ctx, []geo.Point{itin.Origin, itin.Destination})
+		if err != nil {
+			return Insertion{}, fmt.Errorf("match: routing the driver's own journey: %w", err)
+		}
 	}
 
 	newStops := []Stop{
@@ -112,10 +163,15 @@ func BestInsertion(ctx context.Context, router Router, itin Itinerary, pickup, d
 				return Insertion{}, fmt.Errorf("match: routing a candidate itinerary: %w", err)
 			}
 
+			newStops := len(candidate)
 			ins := Insertion{
 				DetourMin: (routed.Duration - baseline.Duration).Minutes(),
 				DetourKm:  (routed.DistanceMeters - baseline.DistanceMeters) / 1000,
-				Waypoints: trial.waypoints(),
+				TotalDetourMin: (routed.Duration - alone.Duration).Minutes() +
+					float64(newStops)*StopDwell.Minutes(),
+				TotalDetourKm: (routed.DistanceMeters - alone.DistanceMeters) / 1000,
+				NewStops:      newStops,
+				Waypoints:     trial.waypoints(),
 			}
 			if best == nil || ins.DetourMin < best.DetourMin {
 				cp := ins
@@ -135,12 +191,27 @@ func BestInsertion(ctx context.Context, router Router, itin Itinerary, pickup, d
 	if best.DetourKm < 0 {
 		best.DetourKm = 0
 	}
+	if best.TotalDetourKm < 0 {
+		best.TotalDetourKm = 0
+	}
+	if best.TotalDetourMin < 0 {
+		best.TotalDetourMin = 0
+	}
 	return *best, nil
 }
 
-// WithinBudget reports whether a detour fits the driver's stated budget.
-func (i Insertion) WithinBudget(budgetMin int) bool {
-	return i.DetourMin <= float64(budgetMin)
+// WithinBudget reports whether an insertion fits what the driver agreed to.
+//
+// Both limits are checked, and both against the total rather than the
+// increment, for the reasons on Budget and Insertion above.
+func (i Insertion) WithinBudget(b Budget) bool {
+	if !b.AllowStops && i.NewStops > 0 {
+		return false
+	}
+	if i.TotalDetourKm > b.Km {
+		return false
+	}
+	return i.TotalDetourMin <= float64(b.Min)
 }
 
 // waypoints renders an itinerary as an ordered coordinate list.

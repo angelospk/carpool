@@ -106,10 +106,12 @@ func (m *Materializer) reconcile(ctx context.Context, templateID uuid.UUID) erro
 	// this a single run could commit a horizon spanning two revisions.
 	var tmpl templateSnapshot
 	err = tx.QueryRow(ctx, `
-		SELECT revision, seats, route_km, route_min, pricing_mode, ends_at_port, ST_AsText(route_geom)
+		SELECT revision, seats, route_km, route_min, pricing_mode, ends_at_port,
+		       allow_stops, detour_km, detour_min, ST_AsText(route_geom)
 		FROM route_templates WHERE id = $1 AND active
 		FOR UPDATE`, templateID).Scan(
-		&tmpl.revision, &tmpl.seats, &tmpl.routeKm, &tmpl.routeMin, &tmpl.pricingMode, &tmpl.endsAtPort, &tmpl.routeWKT)
+		&tmpl.revision, &tmpl.seats, &tmpl.routeKm, &tmpl.routeMin, &tmpl.pricingMode, &tmpl.endsAtPort,
+		&tmpl.allowStops, &tmpl.detourKm, &tmpl.detourMin, &tmpl.routeWKT)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil // deactivated between listing and locking
 	}
@@ -155,6 +157,9 @@ type templateSnapshot struct {
 	routeMin    int
 	pricingMode string
 	endsAtPort  bool
+	allowStops  bool
+	detourKm    float64
+	detourMin   int
 	routeWKT    string
 }
 
@@ -170,9 +175,10 @@ func (m *Materializer) upsert(
 			INSERT INTO trip_occurrences (
 				template_id, service_date, depart_earliest, depart_latest,
 				seats_total, seats_free, template_revision,
-				route_geom, route_km, route_min, pricing_mode, ends_at_port)
+				route_geom, route_km, route_min, pricing_mode, ends_at_port,
+				allow_stops, detour_km, detour_min)
 			VALUES ($1, $2::date, $3, $4,
-			        $5, $5, $6, ST_GeomFromText($7, 4326), $8, $9, $10, $12)
+			        $5, $5, $6, ST_GeomFromText($7, 4326), $8, $9, $10, $12, $13, $14, $15)
 			ON CONFLICT (template_id, service_date) DO UPDATE
 			SET depart_earliest   = EXCLUDED.depart_earliest,
 			    depart_latest     = EXCLUDED.depart_latest,
@@ -187,11 +193,14 @@ func (m *Materializer) upsert(
 			    route_min         = EXCLUDED.route_min,
 			    pricing_mode      = EXCLUDED.pricing_mode,
 			    ends_at_port      = EXCLUDED.ends_at_port,
+			    allow_stops       = EXCLUDED.allow_stops,
+			    detour_km         = EXCLUDED.detour_km,
+			    detour_min        = EXCLUDED.detour_min,
 			    updated_at        = now()
 			WHERE `+mutablePredicate("$11"),
 			templateID, p.ServiceDate.String(), p.DepartEarliest, p.DepartLatest,
 			tmpl.seats, tmpl.revision, tmpl.routeWKT, tmpl.routeKm, tmpl.routeMin, tmpl.pricingMode,
-			now, tmpl.endsAtPort)
+			now, tmpl.endsAtPort, tmpl.allowStops, tmpl.detourKm, tmpl.detourMin)
 		if err != nil {
 			return fmt.Errorf("jobs: upserting occurrence %s: %w", p.ServiceDate, err)
 		}

@@ -14,6 +14,7 @@ import (
 	"carpool/internal/domain"
 	"carpool/internal/geo"
 	"carpool/internal/jobs"
+	"carpool/internal/match"
 	"carpool/internal/store"
 	"carpool/internal/store/testdb"
 )
@@ -196,6 +197,7 @@ func (f *janitorFixture) seedThread(departed time.Time, messages ...time.Time) u
 		Seats:            3,
 		PricingMode:      domain.PricingFormula,
 		OSRMDataVersion:  "test",
+		Detour:           match.Budget{AllowStops: true, Km: 10, Min: 10},
 		Schedule: domain.Schedule{
 			Kind:           domain.ScheduleRecurring,
 			Weekdays:       []time.Weekday{time.Monday},

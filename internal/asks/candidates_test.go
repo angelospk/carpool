@@ -145,14 +145,44 @@ func TestAskNextSkipsADriverWhoseDetourBudgetIsTooSmall(t *testing.T) {
 	f := newFixture(t)
 	mustExec(t, f, `DELETE FROM asks`)
 	mustExec(t, f, `UPDATE ride_requests SET status = 'open'`)
-	// No detour is tolerated at all, and the pickup lies off the driver's line.
-	mustExec(t, f, `UPDATE driver_profiles SET detour_budget_min = 0`)
+	// The budget is read from the occurrence, not the profile: the profile is
+	// only what fills in a new route. Setting it there would change nothing,
+	// which is the whole point of moving it.
+	mustExec(t, f, `UPDATE trip_occurrences SET detour_min = 0, detour_km = 0`)
 	mustExec(t, f, `UPDATE ride_requests SET origin = ST_SetSRID(ST_MakePoint(25.82, 40.858), 4326)`)
 
 	_, err := f.matcher().AskNext(context.Background(), f.requestID)
 
 	if !errors.Is(err, asks.ErrNoCandidates) {
 		t.Fatalf("error = %v, want ErrNoCandidates when the detour exceeds the budget", err)
+	}
+}
+
+// The profile is a default for creating a route, not a live setting. A driver
+// who tightens it should not silently change the terms of a trip somebody may
+// already be looking at.
+func TestTighteningTheProfileDoesNotChangeAPublishedTrip(t *testing.T) {
+	f := newFixture(t)
+	mustExec(t, f, `DELETE FROM asks`)
+	mustExec(t, f, `UPDATE ride_requests SET status = 'open'`)
+	mustExec(t, f, `UPDATE driver_profiles SET detour_budget_min = 0, default_detour_km = 0, default_allow_stops = false`)
+
+	if _, err := f.matcher().AskNext(context.Background(), f.requestID); err != nil {
+		t.Fatalf("AskNext: %v, want the published trip to keep its own terms", err)
+	}
+}
+
+// Refusing intermediate stops has to mean no, not "none that cost anything".
+func TestADriverWhoRefusedStopsIsNotAsked(t *testing.T) {
+	f := newFixture(t)
+	mustExec(t, f, `DELETE FROM asks`)
+	mustExec(t, f, `UPDATE ride_requests SET status = 'open'`)
+	mustExec(t, f, `UPDATE trip_occurrences SET allow_stops = false`)
+
+	_, err := f.matcher().AskNext(context.Background(), f.requestID)
+
+	if !errors.Is(err, asks.ErrNoCandidates) {
+		t.Fatalf("error = %v, want ErrNoCandidates when the driver takes no stops", err)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"carpool/internal/domain"
 	"carpool/internal/geo"
 	"carpool/internal/jobs"
+	"carpool/internal/match"
 	"carpool/internal/store"
 	"carpool/internal/store/testdb"
 )
@@ -80,6 +81,7 @@ func newFixture(t *testing.T, weekdays ...time.Weekday) *fixture {
 		Seats:            3,
 		PricingMode:      domain.PricingFormula,
 		OSRMDataVersion:  "test",
+		Detour:           match.Budget{AllowStops: true, Km: 10, Min: 10},
 		Schedule: domain.Schedule{
 			Kind:           domain.ScheduleRecurring,
 			Weekdays:       weekdays,
@@ -649,5 +651,40 @@ func TestMaterializeDoesNotCancelATripThatAlreadyDepartedToday(t *testing.T) {
 	}
 	if status != "scheduled" {
 		t.Fatalf("a trip that already departed is now %q; history must not be rewritten", status)
+	}
+}
+
+// A driver who edits how far they will go out of their way expects that to
+// reach the trips they have already published. The template is where the answer
+// is edited and the occurrence is where matching reads it, so a template edit
+// that does not reach the occurrences changes nothing at all.
+func TestEditingTheDetourReachesOccurrencesNobodyHasBookedYet(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE route_templates SET allow_stops = false, detour_km = 3.5, detour_min = 4 WHERE id = $1`,
+		f.templateID); err != nil {
+		t.Fatalf("editing the template: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var allow bool
+	var km float64
+	var min int
+	if err := f.pool.QueryRow(ctx, `
+		SELECT allow_stops, detour_km, detour_min FROM trip_occurrences
+		WHERE template_id = $1 ORDER BY service_date LIMIT 1`, f.templateID).
+		Scan(&allow, &km, &min); err != nil {
+		t.Fatalf("reading the occurrence: %v", err)
+	}
+	if allow || km != 3.5 || min != 4 {
+		t.Errorf("occurrence carries allow_stops=%v km=%v min=%v, want the edited template's terms",
+			allow, km, min)
 	}
 }

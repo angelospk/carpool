@@ -1,13 +1,17 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"carpool/internal/domain"
+	"github.com/google/uuid"
+
 	"carpool/internal/geo"
+	"carpool/internal/match"
 	"carpool/internal/store"
 )
 
@@ -21,6 +25,13 @@ type routeBody struct {
 	DestinationLabel string  `json:"destination_label"`
 	Seats            int     `json:"seats"`
 	PricingMode      string  `json:"pricing_mode"`
+
+	// Absent means "use my defaults", which is what the wizard sends when it
+	// has not asked. A pointer rather than a zero value because false and 0 are
+	// both meaningful answers here.
+	AllowStops *bool    `json:"allow_stops"`
+	DetourKm   *float64 `json:"detour_km"`
+	DetourMin  *int     `json:"detour_min"`
 
 	Kind           string   `json:"kind"` // oneoff | recurring
 	OneOffDate     string   `json:"oneoff_date"`
@@ -68,6 +79,20 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// What this driver will go out of their way, for this trip. Their profile
+	// holds the defaults; the answer that binds is the one stored on the route
+	// and snapshotted onto every occurrence of it.
+	detour, err := d.detourFor(r.Context(), userID, body)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not read your driver profile")
+		return
+	}
+	if detour.Km < 0 || detour.Km > maxDetourKm || detour.Min < 0 || detour.Min > maxDetourMin {
+		writeError(w, http.StatusBadRequest, "invalid_request",
+			"the detour you will accept is outside the range this service allows")
+		return
+	}
+
 	origin := geo.Point{Lon: body.OriginLon, Lat: body.OriginLat}
 	destination := geo.Point{Lon: body.DestinationLon, Lat: body.DestinationLat}
 
@@ -105,6 +130,7 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		PricingMode:      mode,
 		OSRMDataVersion:  d.OSRMDataVersion,
 		EndsAtPort:       shaped.SeaCrossing,
+		Detour:           detour,
 		Schedule:         schedule,
 	})
 	if err != nil {
@@ -217,3 +243,35 @@ func today() domain.Date {
 type errInvalid string
 
 func (e errInvalid) Error() string { return string(e) }
+
+// The widest detour the service will store, whatever a client sends. Fifty
+// kilometres is already a long way to go for somebody else's convenience, and
+// half an hour is the cap the schema had before any of this was per-trip.
+const (
+	maxDetourKm  = 50.0
+	maxDetourMin = 30
+)
+
+// detourFor resolves what the driver agreed to for this route, filling in from
+// their profile whatever the request did not say.
+func (d Deps) detourFor(ctx context.Context, driverID uuid.UUID, body routeBody) (match.Budget, error) {
+	var out match.Budget
+	err := d.Pool.QueryRow(ctx,
+		`SELECT default_allow_stops, default_detour_km, detour_budget_min
+		   FROM driver_profiles WHERE user_id = $1`, driverID).
+		Scan(&out.AllowStops, &out.Km, &out.Min)
+	if err != nil {
+		return match.Budget{}, err
+	}
+
+	if body.AllowStops != nil {
+		out.AllowStops = *body.AllowStops
+	}
+	if body.DetourKm != nil {
+		out.Km = *body.DetourKm
+	}
+	if body.DetourMin != nil {
+		out.Min = *body.DetourMin
+	}
+	return out, nil
+}

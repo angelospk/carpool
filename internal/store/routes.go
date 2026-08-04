@@ -1,6 +1,7 @@
 package store
 
 import (
+	"carpool/internal/match"
 	"context"
 	"errors"
 	"fmt"
@@ -45,7 +46,16 @@ type CreateRouteTemplateParams struct {
 	Seats            int
 	PricingMode      domain.PricingMode
 	// EndsAtPort marks a route the router cut short at a ferry terminal.
-	EndsAtPort      bool
+	EndsAtPort bool
+	// Detour is what the driver will go out of their way, for this route. It
+	// lives here rather than on their profile because "today I have time" is a
+	// statement about today.
+	//
+	// A struct rather than three loose fields, and not optional: a bool whose
+	// zero value means "take nobody" is a caller that forgets one line and
+	// publishes a route no passenger can ever be matched to, with nothing to
+	// show for it in any log.
+	Detour          match.Budget
 	OSRMDataVersion string
 	Schedule        domain.Schedule
 }
@@ -63,18 +73,20 @@ func CreateRouteTemplate(ctx context.Context, pool *pgxpool.Pool, p CreateRouteT
 	err = tx.QueryRow(ctx, `
 		INSERT INTO route_templates (
 			driver_id, origin, destination, origin_label, destination_label,
-			route_geom, route_km, route_min, seats, pricing_mode, osrm_data_version, ends_at_port)
+			route_geom, route_km, route_min, seats, pricing_mode, osrm_data_version, ends_at_port,
+			allow_stops, detour_km, detour_min)
 		VALUES ($1,
 			ST_SetSRID(ST_MakePoint($2, $3), 4326),
 			ST_SetSRID(ST_MakePoint($4, $5), 4326),
 			$6, $7,
-			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13, $14)
+			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		RETURNING id`,
 		p.DriverID,
 		p.Origin.Lon, p.Origin.Lat,
 		p.Destination.Lon, p.Destination.Lat,
 		p.OriginLabel, p.DestinationLabel,
 		p.RouteWKT, p.RouteKm, p.RouteMin, p.Seats, string(p.PricingMode), p.OSRMDataVersion, p.EndsAtPort,
+		p.Detour.AllowStops, p.Detour.Km, p.Detour.Min,
 	).Scan(&templateID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("store: inserting route template: %w", err)

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 
@@ -40,6 +40,12 @@ export default function PublishScreen() {
   const [earliest, setEarliest] = useState('07:30');
   const [latest, setLatest] = useState('08:00');
   const [seats, setSeats] = useState(3);
+
+  // null means "whatever I set on my profile". The form only sends a detour
+  // once it has been touched, so a driver who never opens this keeps their own
+  // default rather than having the screen's idea of one imposed on them.
+  const [allowStops, setAllowStops] = useState<boolean | null>(null);
+  const [detourKm, setDetourKm] = useState<number | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
 
 
@@ -57,6 +63,8 @@ export default function PublishScreen() {
         weekdays,
         depart_earliest: earliest,
         depart_latest: latest,
+        ...(allowStops !== null ? { allow_stops: allowStops } : {}),
+        ...(detourKm !== null ? { detour_km: detourKm } : {}),
       }),
     onSuccess: (r) => setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`),
     onError: (e) =>
@@ -130,6 +138,49 @@ export default function PublishScreen() {
           </View>
         </Card>
 
+        {/* How far out of the way, for this trip. It is a question about today:
+            the long run to Thessaloniki has room in it and the Monday commute
+            has none, which is why the answer is not kept on the profile. */}
+        <SectionHeader title={t('publish.detour')} />
+        <Card>
+          <Pressable
+            testID="detour-allow"
+            onPress={() => setAllowStops((a) => (a === false ? true : false))}
+            style={styles.seats}
+          >
+            <Text style={styles.seatsLabel}>{t('publish.allowStops')}</Text>
+            <Text style={styles.toggle}>
+              {allowStops === false ? t('common.off') : t('common.on')}
+            </Text>
+          </Pressable>
+
+          {allowStops === false ? (
+            <Text style={styles.hint}>{t('publish.noStopsHint')}</Text>
+          ) : (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.seats}>
+                <Text style={styles.seatsLabel}>{t('publish.detourKm')}</Text>
+                <Stepper
+                  testID="detour-km"
+                  value={detourKm ?? defaultDetourKm}
+                  // Choosing a distance is agreeing to stops. Sending the
+                  // distance alone would leave a driver whose profile says no
+                  // stops setting a detour that can never be taken.
+                  onChange={(v) => {
+                    setDetourKm(v);
+                    setAllowStops(true);
+                  }}
+                  min={0}
+                  max={50}
+                  step={5}
+                />
+              </View>
+              <Text style={styles.hint}>{t('publish.detourHint')}</Text>
+            </>
+          )}
+        </Card>
+
         {outcome ? <Hint>{outcome}</Hint> : null}
 
         <Button
@@ -150,4 +201,12 @@ const styles = StyleSheet.create({
   times: { flexDirection: 'row', gap: space.sm },
   seats: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   seatsLabel: { ...type.body, color: colors.ink },
+  toggle: { ...type.label, color: colors.primary },
+  hint: { ...type.caption, color: colors.muted, marginTop: space.xs },
+  divider: { height: 1, backgroundColor: colors.line, marginVertical: space.sm },
 });
+
+// What the stepper starts at before the driver touches it. It matches the
+// column default rather than pretending to know their profile: the moment they
+// change it the real value is sent, and until then nothing is.
+const defaultDetourKm = 10;

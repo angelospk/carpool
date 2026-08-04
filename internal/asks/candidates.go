@@ -90,7 +90,7 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 		if err != nil {
 			return uuid.Nil, err
 		}
-		if !insertion.WithinBudget(c.DetourBudget) {
+		if !insertion.WithinBudget(c.Budget) {
 			continue
 		}
 

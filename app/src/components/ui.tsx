@@ -356,18 +356,21 @@ export function Field({
   );
 }
 
-/** Seats, as a control rather than a number pad. */
+/** Seats and the like, as a control rather than a number pad. */
 export function Stepper({
   value,
   onChange,
   min = 1,
   max = 6,
+  step = 1,
   testID,
 }: {
   value: number;
   onChange: (v: number) => void;
   min?: number;
   max?: number;
+  /** How far one press moves. Kilometres are not chosen one at a time. */
+  step?: number;
   testID?: string;
 }) {
   return (
@@ -376,7 +379,7 @@ export function Stepper({
         testID={testID ? `${testID}-minus` : undefined}
         accessibilityRole="button"
         accessibilityLabel="−"
-        onPress={() => onChange(Math.max(min, value - 1))}
+        onPress={() => onChange(Math.max(min, value - step))}
         style={styles.stepperButton}
       >
         <Text style={styles.stepperGlyph}>−</Text>
@@ -386,7 +389,7 @@ export function Stepper({
         testID={testID ? `${testID}-plus` : undefined}
         accessibilityRole="button"
         accessibilityLabel="+"
-        onPress={() => onChange(Math.min(max, value + 1))}
+        onPress={() => onChange(Math.min(max, value + step))}
         style={styles.stepperButton}
       >
         <Text style={styles.stepperGlyph}>+</Text>
