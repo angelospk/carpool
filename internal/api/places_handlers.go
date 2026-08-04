@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"carpool/internal/places"
+	"carpool/internal/store"
 )
 
 // How many settlements one query can return. A suggestion list nobody scrolls
@@ -72,7 +73,15 @@ func (d Deps) handleMeetingPoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	found := places.PointsFor(place)
+	// The harvested list with every approved correction applied. A failure here
+	// is a failure: falling back to the raw list would put a point somebody
+	// removed for a reason back in front of people.
+	found, err := store.MeetingPointsFor(r.Context(), d.Pool, place)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable",
+			"could not read the meeting points for that place")
+		return
+	}
 	if found == nil {
 		// Not an error and not a 404. Four settlements in five have no landmark
 		// anybody would recognise, and that is an ordinary answer the app has

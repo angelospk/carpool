@@ -309,29 +309,50 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
     Discovered because `scripts/seed-demo.sh` could not publish the second
     route, and the handler was throwing the reason away. It now logs it.
 
-15. **The place list stops at the prefecture line, and the obvious destination
-    is on the other side of it.** `internal/places` holds 153 settlements
-    harvested inside the Evros boundary: one city, six towns, the rest
-    villages.
+15. **The place list stopped at the prefecture line — fixed 2026-08-04.**
+    `internal/places` held 153 settlements harvested inside the Evros boundary,
+    so Κομοτηνή could not be typed even though Αλεξανδρούπολη → Κομοτηνή is the
+    demo seed's own example route.
 
-    | Kind | Names |
-    | --- | --- |
-    | city | Αλεξανδρούπολη |
-    | town | Φέρες, Σουφλί, Τυχερό, Διδυμότειχο, Ορεστιάδα, Νέα Βύσσα |
+    It is now every city, town, village and hamlet in Greece: 12,442 of them,
+    harvested from the same OSM extract the router runs on. The router itself
+    was switched from a buffered Evros extract to the whole country at the same
+    time, because a place list that can name Θεσσαλονίκη in front of a router
+    that cannot reach it is worse than either problem alone.
 
-    Κομοτηνή is not in it, because Κομοτηνή is in Ροδόπη. Neither is
-    Θεσσαλονίκη, or the airport at Καβάλα. Yet Αλεξανδρούπολη → Κομοτηνή is the
-    example route in the demo seed, and it is a drive people actually make: the
-    nearest large town westward, a hospital, a university.
+    What the jump cost, recorded because none of it was obvious beforehand:
 
-    So the field cannot express a trip out of the prefecture, while the app is
-    perfectly able to price and match one. A boundary drawn for administration
-    is being used as the edge of where people go.
+    - Hamlets had to be included and ranked last. Leaving out 4,832 of them
+      means nobody living in one can say where they are; ranking them level
+      with cities makes the search complete and useless in the same breath.
+    - The tie-break had to become population. It had been name length, which
+      put Αλεξάνδρεια ahead of Αλεξανδρούπολη for "alexandr" — not a fact about
+      either place.
+    - A two-character floor had to be introduced. One character is a sample of
+      the dataset rather than a search. Three would have been wrong: the
+      shortest Greek place names are exactly three letters, so Κως would have
+      had to be typed in full before appearing.
+    - Each settlement carries its municipality, because Greece has dozens of
+      Άγιος Γεώργιος.
 
-    Not fixed, because widening it is a decision with several answers: harvest
-    the neighbouring prefectures too, harvest everything above a population
-    threshold nationally, or keep the pilot's list and add a handful of named
-    exceptions. The last is the smallest and the least honest.
+16. **Automatic meeting points are good in villages and poor in cities.**
+    2,922 landmarks are harvested from OSM — the ΚΤΕΛ, the station, the port,
+    the petrol station — covering every city, nine towns in ten and a quarter
+    of villages. Where a settlement has nothing tagged it gets nothing, which
+    is deliberate: a synthetic "centre of village" is a coordinate wearing a
+    confident name, and being findable is the only promise a meeting point
+    makes.
+
+    The failure is at the other end. Θεσσαλονίκη's three points come out as
+    "Arda Tur Bulgaria", "Τ.Σ. Ν.Σ. ΣΤΑΘΜΟΣ" and "Ν.Σ. ΣΤΑΘΜΟΣ" — coach-ticket
+    agencies tagged `amenity=bus_station`. Αλεξανδρούπολη gets urban bus-line
+    termini rather than the ΚΤΕΛ. OSM is dense in cities and the density is
+    what hurts: more things carry the tag, and few of them are the landmark
+    anybody means.
+
+    No automated ranking fixes this, because the information that "Arda Tur
+    Bulgaria" is a ticket office and the ΚΤΕΛ is the bus station is not in the
+    tags. It needs a person.
 
 ## Deferred tech (parked, with triggers to revisit)
 

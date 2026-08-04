@@ -148,6 +148,18 @@ func NewRouter(deps Deps) http.Handler {
 			// the binary, so this handler cannot be half-wired.
 			r.Get("/places", deps.handlePlaces)
 			r.Get("/places/points", deps.handleMeetingPoints)
+			r.Post("/places/points", deps.handleProposeMeetingPoint)
+			r.Get("/me/meeting-points", deps.handleMyMeetingPointProposals)
+
+			// Moderation. The check is a database read on every request, so a
+			// revoked moderator stops being one at once rather than when their
+			// access token expires.
+			r.Route("/moderation", func(r chi.Router) {
+				r.Use(deps.requireModerator)
+				r.Get("/meeting-points", deps.handlePendingMeetingPoints)
+				r.Post("/meeting-points/{id}/approve", deps.handleDecideMeetingPoint(true))
+				r.Post("/meeting-points/{id}/reject", deps.handleDecideMeetingPoint(false))
+			})
 
 			if deps.Router != nil {
 				r.Post("/routes", deps.handleCreateRoute)

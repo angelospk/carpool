@@ -17,24 +17,34 @@ import (
 
 func driverAndPool(t *testing.T) (*pgxpool.Pool, uuid.UUID) {
 	t.Helper()
-	ctx := context.Background()
 	pool := testdb.Fresh(t)
-	if err := store.Migrate(ctx, pool); err != nil {
+	if err := store.Migrate(context.Background(), pool); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
+	return seedDriver(t, pool, "+306900000001")
+}
 
+// seedDriver puts a region, a user and a driver profile in an already-migrated
+// database, and returns the pool and the driver.
+func seedDriver(t *testing.T, pool *pgxpool.Pool, phone string) (*pgxpool.Pool, uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+
+	// Upserted rather than inserted: a test that seeds a second driver in the
+	// same database would otherwise trip over the unique name.
 	var regionID uuid.UUID
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO regions (name, boundary, fuel_price_eur)
 		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25.3 40.3, 26.7 40.3, 26.7 41.8, 25.3 41.8, 25.3 40.3))', 4326)), 1.8)
+		ON CONFLICT (name) DO UPDATE SET updated_at = now()
 		RETURNING id`).Scan(&regionID); err != nil {
 		t.Fatalf("seeding region: %v", err)
 	}
 
 	var driverID uuid.UUID
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO users (phone, name, home_region_id) VALUES ('+306900000001', 'Οδηγός', $1) RETURNING id`,
-		regionID).Scan(&driverID); err != nil {
+		`INSERT INTO users (phone, name, home_region_id) VALUES ($1, 'Οδηγός', $2) RETURNING id`,
+		phone, regionID).Scan(&driverID); err != nil {
 		t.Fatalf("seeding user: %v", err)
 	}
 	if _, err := pool.Exec(ctx,

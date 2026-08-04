@@ -104,3 +104,23 @@ func AllPoints() []MeetingPoint {
 	pointsOnce.Do(loadPoints)
 	return allPoints
 }
+
+// ByID returns one settlement. It exists because anything validating a proposal
+// has to know what the place actually is: how far from its centre a coordinate
+// may plausibly be depends on whether it is a city or five houses.
+func ByID(id string) (Place, bool) {
+	once.Do(load)
+	byIDOnce.Do(func() {
+		byID = make(map[string]Place, len(index))
+		for _, e := range index {
+			byID[e.Place.ID] = e.Place
+		}
+	})
+	p, ok := byID[id]
+	return p, ok
+}
+
+var (
+	byIDOnce sync.Once
+	byID     map[string]Place
+)
