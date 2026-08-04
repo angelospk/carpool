@@ -10,7 +10,7 @@
 // rather than leaving the button spinning forever.
 
 import { pickPhoto } from '../pick.web';
-import { MAX_SIDE, QUALITY } from '../limits';
+import { MAX_SIDE, MAX_UPLOAD_BYTES, QUALITY, TooBigError } from '../limits';
 
 type FakeInput = {
   type: string;
@@ -140,6 +140,59 @@ test('the canvas is filled before the image is drawn, so transparency is not bla
   await pickPhoto();
 
   expect(filled).toEqual({ style: '#ffffff', width: 100, height: 100 });
+});
+
+test('a browser that fires nothing at all still settles when focus comes back', async () => {
+  // The dialog was dismissed, and this browser has neither a change event nor
+  // a cancel one. Focus returning to the window is the only thing left to go
+  // on, and without it the button reads "loading" for the rest of the session.
+  jest.useFakeTimers();
+  try {
+    onOpen = () => window.dispatchEvent(new Event('focus'));
+    const pending = pickPhoto();
+    jest.runAllTimers();
+    await expect(pending).resolves.toBeNull();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test('a file chosen just after focus returns is still the answer', async () => {
+  // Choosing a file also returns focus to the window, and the change event
+  // arrives a moment later. Treating that focus as a cancellation would throw
+  // away the photo the person just picked.
+  jest.useFakeTimers();
+  try {
+    bitmapSize = { width: 100, height: 100 };
+    const file = jpeg();
+    onOpen = () => {
+      window.dispatchEvent(new Event('focus'));
+      input.files = [file];
+      input.onchange?.();
+    };
+
+    const pending = pickPhoto();
+    jest.runAllTimers();
+
+    await expect(pending).resolves.not.toBeNull();
+    expect(drawn).toEqual({ width: 100, height: 100 });
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test('an undecodable file too big for the server is refused here', async () => {
+  // Sending three megabytes up a phone connection to be told no is a slow way
+  // of finding out. The answer is the same one the server would have given.
+  (globalThis as { createImageBitmap?: unknown }).createImageBitmap = jest.fn(async () => {
+    throw new Error('not an image');
+  });
+  const huge = new File([new Uint8Array(MAX_UPLOAD_BYTES + 1)], 'big.heic', {
+    type: 'image/heic',
+  });
+  choose(huge);
+
+  await expect(pickPhoto()).rejects.toBeInstanceOf(TooBigError);
 });
 
 test('an image the browser cannot decode is sent as it is', async () => {

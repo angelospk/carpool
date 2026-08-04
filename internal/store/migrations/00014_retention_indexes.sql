@@ -13,9 +13,10 @@
 
 CREATE INDEX otp_codes_created ON otp_codes (created_at);
 
--- Two partial indexes rather than one on both columns: the janitor asks the two
+-- Two indexes rather than one over both columns: the janitor asks the two
 -- questions separately, because an OR across two nullable timestamps cannot use
--- either index. revoked_at is null for most rows, so its index stays small.
+-- either index. Only the second is partial — every row has an expires_at, while
+-- revoked_at is null for most, so excluding those keeps that index small.
 CREATE INDEX refresh_tokens_expiry ON refresh_tokens (expires_at);
 CREATE INDEX refresh_tokens_revoked ON refresh_tokens (revoked_at) WHERE revoked_at IS NOT NULL;
 

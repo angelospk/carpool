@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import { api } from '../../src/api/endpoints';
 import { forgetPhoto } from '../../src/api/images';
 import { pickPhoto } from '../../src/photo/pick';
+import { TooBigError } from '../../src/photo/limits';
 import { ApiError } from '../../src/api/client';
 import { useSession } from '../../src/state/session';
 import { Avatar, Button, Card, Field, Row, Screen, SectionHeader } from '../../src/components/ui';
@@ -94,7 +95,10 @@ export default function ProfileScreen() {
       .then((file) => {
         if (file) uploadPhoto.mutate(file);
       })
-      .catch(() => setError(t('profile.photoFailed')));
+      // A photo the browser could not shrink and the server will not take is a
+      // problem with the photo, and gets the same answer as if it had been sent
+      // and refused.
+      .catch((e) => setError(t(e instanceof TooBigError ? 'profile.photoTooBig' : 'profile.photoFailed')));
   };
 
   const dirty = name !== null || facebook !== null || instagram !== null;

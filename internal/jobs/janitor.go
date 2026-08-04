@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -41,6 +42,9 @@ const DefaultBatchSize = 1000
 // for an entire run. What is left over is picked up on the next tick, an hour
 // later, which is soon enough for a retention window measured in months.
 const maxBatchesPerRule = 200
+
+// unlockTimeout bounds the advisory unlock on the way out.
+const unlockTimeout = 5 * time.Second
 
 // Janitor deletes data whose retention period has passed.
 type Janitor struct {
@@ -166,18 +170,38 @@ func (j *Janitor) Run(ctx context.Context) error {
 		return nil // another replica is already sweeping
 	}
 	defer func() {
-		// A fresh context: the one above may be cancelled, and the lock has to
-		// come off the session before it goes back into the pool holding it.
-		if _, err := conn.Exec(context.WithoutCancel(ctx),
-			`SELECT pg_advisory_unlock($1, $2)`, JanitorLockNamespace, JanitorLockID); err != nil {
-			slog.Error("releasing the janitor lock", "error", err)
+		// A fresh context, because the one above may be cancelled and the lock
+		// has to come off the session before it goes back into the pool still
+		// holding it. Bounded, because an unresponsive connection would
+		// otherwise hang shutdown here instead of failing.
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), unlockTimeout)
+		defer cancel()
+
+		var released bool
+		err := conn.QueryRow(unlockCtx, `SELECT pg_advisory_unlock($1, $2)`,
+			JanitorLockNamespace, JanitorLockID).Scan(&released)
+		if err == nil && released {
+			return
+		}
+
+		// The lock is still held by this session and there is no way to ask it
+		// again, so the session has to go: a session-level lock dies with its
+		// backend. Left in the pool it would be a connection that silently
+		// stops every future run.
+		slog.Error("releasing the janitor lock; dropping the connection", "error", err, "released", released)
+		if closeErr := conn.Conn().Close(unlockCtx); closeErr != nil {
+			slog.Error("closing the janitor connection", "error", closeErr)
 		}
 	}()
 
 	now := j.clock.Now()
 	var errs []error
 	for _, r := range rules() {
-		deleted, err := j.sweep(ctx, r, now)
+		// On the connection already held, not back through the pool. Asking for
+		// a second connection while holding one makes the job depend on the
+		// pool being larger than one, and a deployment that sets
+		// pool_max_conns=1 would hang here forever rather than fail.
+		deleted, err := j.sweep(ctx, conn, r, now)
 		if deleted > 0 {
 			slog.Info("retention sweep", "rule", r.name, "deleted", deleted)
 		}
@@ -195,7 +219,7 @@ func (j *Janitor) Run(ctx context.Context) error {
 
 // sweep deletes in batches until a batch removes nothing, the run is cancelled,
 // or the per-rule ceiling is reached.
-func (j *Janitor) sweep(ctx context.Context, r rule, now any) (int64, error) {
+func (j *Janitor) sweep(ctx context.Context, conn *pgxpool.Conn, r rule, now any) (int64, error) {
 	size := j.BatchSize
 	if size <= 0 {
 		size = DefaultBatchSize
@@ -206,7 +230,7 @@ func (j *Janitor) sweep(ctx context.Context, r rule, now any) (int64, error) {
 	// check would be code no test can distinguish the absence of.
 	var total int64
 	for range maxBatchesPerRule {
-		tag, err := j.pool.Exec(ctx, r.sql, now, size)
+		tag, err := conn.Exec(ctx, r.sql, now, size)
 		if err != nil {
 			return total, err
 		}

@@ -20,3 +20,19 @@ export const MAX_SIDE = 512;
 
 /** JPEG quality for the re-encode. The server re-encodes again at 82. */
 export const QUALITY = 0.85;
+
+/**
+ * The most the server will accept, matching its own MaxUpload.
+ *
+ * It is only consulted when the reduction above could not be done at all. Bytes
+ * that are certain to be refused are worth refusing here, on a phone
+ * connection, rather than after they have been sent.
+ */
+export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Thrown when a chosen file cannot be made into something the server would
+ * take. It lives here rather than in either picker so the screen can test for
+ * it without importing a platform.
+ */
+export class TooBigError extends Error {}
