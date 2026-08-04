@@ -54,15 +54,18 @@ the API returns it and the app fills the field in, so there is nothing to look
 up. Type the number in full including `+30`. The field starts at `+30` and the
 button stays dead until the whole E.164 number is there.
 
-Two things will look odd while you click around. Every sign-in asks for your
-name again, because the app collects the name and region before it calls verify
-rather than after. And pickup points are typed as `"25.8743, 40.8476
-Αλεξανδρούπολη"` until the picker is built.
+One thing will look odd while you click around: every sign-in asks for your name
+again, because the app collects the name and region before it calls verify
+rather than after.
+
+Pickup points are typed as town names now, in Greek or Latin letters, with or
+without accents. The list covers the Evros prefecture and stops at its boundary,
+which is a real limit rather than a rounding: Κομοτηνή is in Ροδόπη. RISKS 15.
 
 To stop everything:
 
 ```bash
-pkill -f bin/api; pkill -f http.server
+pkill -f bin/api; pkill -f serve-web.py
 docker compose -f docker-compose.dev.yml down
 ```
 
@@ -154,6 +157,56 @@ prefills it. There is deliberately no fixed test code like `0000`, because a
 fixed code would exercise a path production never runs. Outside DEV_MODE the
 response stays empty and a test asserts it, since otherwise knowing a phone
 number would be enough to take an account.
+
+### Type a town name instead of a coordinate
+
+Both ends of a route were typed as `25.8743, 40.8476 Αλεξανδρούπολη`, which is
+not something a person does twice. 153 settlements harvested from OSM against
+the Evros relation rather than a bounding box, since a box around this
+prefecture reaches into Turkey and Bulgaria.
+
+The matching is the substance. Greek romanisation has an ISO standard, a UN
+standard, the spelling on the road signs and the spelling people actually use,
+and they disagree about the same town, so each place is indexed under several
+spellings rather than one. Accents fold away, dialytika does not, and digraphs
+are romanised as digraphs: a letter-for-letter table writes μπ as `mp` and ευ as
+`eu`, which is how nobody spells them.
+
+### A person can change what the app knows about them
+
+Name, photo and the two social handles, and the number the account signs
+in with. The last is a change of credential rather than of profile, so it
+runs as one: a code to the new number, a challenge quoted back rather than
+a number, and every refresh token revoked on the swap. What it cannot do
+is prove the session belongs to the account's owner, because there is no
+second factor to ask; what bounds that is the access token's fifteen
+minutes, which is written down rather than assumed.
+
+Photos are re-encoded rather than stored as they arrive. That is not about
+file size: it removes the EXIF block that routinely carries the
+coordinates of the person's house, and anything appended after the image
+data. They live in Postgres because there is no object store and none is
+being added for a hundred users. What that costs is written in the
+migration that creates the table.
+
+Social links are handles now, not URLs. Asking for a URL asks somebody to
+produce something they do not have to hand, and the one row in the
+development database proved it by holding facebook.com/notifications/.
+
+### A driver can see their routes and call off a departure
+
+Both were missing. A driver could publish a route and never look at it
+again, and no endpoint could cancel one morning's departure at all.
+
+They are separate acts on purpose. Retiring a route stops it being offered
+from now on and leaves arranged departures alone; cancelling a departure
+tells the people expecting a seat in it. Doing the second silently when a
+driver asked for the first is how somebody finds out by standing at a
+corner.
+
+The trip screen also stopped asking everybody the same two questions. A
+driver looking at tomorrow's empty car was asked whether the trip had
+happened and invited to rate a passenger who did not exist.
 
 ### Half the pilot's main corridor cannot be published
 

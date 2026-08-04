@@ -4,8 +4,21 @@ Running status log so any future session can resume cold. Updated every work ses
 
 ## Current state
 
-**Last updated:** 2026-07-29.
+**Last updated:** 2026-08-04.
 **All milestones complete.** Backend and app are built, reviewed and verified.
+
+Since the milestones closed, the work has been what testing the app on a real
+device turned up. In order:
+
+| What | Why it mattered |
+| --- | --- |
+| Cost sharing collected more than the trip cost | A full car made a profit. See docs/pricing.md |
+| Fuel consumption is worked out from the car | A flat 7.0 l/100km overcharged small petrol cars by a quarter |
+| The app runs in a browser | Testing flows without a build on a phone |
+| A web build could only talk to the network it was exported for | The bundle carried a LAN address, unroutable from Tailscale |
+| Towns are typed by name, in either script | Pickup points were typed as coordinates |
+| Profile: name, photo, social handles, phone number | None of it could be changed |
+| A driver can list and retire routes, and call off a departure | No endpoint could do any of it |
 
 Definition of Done, as measured on this machine:
 
@@ -13,7 +26,7 @@ Definition of Done, as measured on this machine:
 | --- | --- |
 | `make check` (vet + staticcheck + tests) | green |
 | Concurrency packages under `-race` | green |
-| App `tsc --noEmit` + `jest` | clean, 50 tests |
+| App `tsc --noEmit` + `jest` | clean, 96 tests |
 | Android bundle exports | 2.9 MB Hermes |
 | e2e scenario from a fresh database | passes (12 steps) |
 | Backup + restore drill | passes |
