@@ -20,11 +20,17 @@ const AdultYears = 18
 // could have been born on.
 var ErrImplausibleBirthDate = errors.New("domain: that is not a date somebody was born on")
 
-// oldestPlausibleYears bounds the other end. The oldest people alive are about
-// 117, and the point of the bound is not demography: it is that a typo in the
-// year is far more likely than a supercentenarian, and a birth date of 1808
-// should be refused rather than stored.
-const oldestPlausibleYears = 130
+// oldestPlausibleDate bounds the other end.
+//
+// The point is not demography — it is that a typo in the year is far more
+// likely than a supercentenarian, and a birth date of 1808 should be refused
+// rather than stored.
+//
+// A fixed date rather than "a hundred and thirty years ago", and the same fixed
+// date as the CHECK on users.date_of_birth in migration 00025. A relative bound
+// moves: it would let 1899 past this function next year to be refused by the
+// database instead, which is a 500 where a 400 was meant.
+var oldestPlausibleDate = Date{1900, time.January, 1}
 
 // DateIn is the civil date at an instant, in a given place.
 //
@@ -70,9 +76,10 @@ func ParseBirthDate(in string, today Date) (Date, error) {
 	if born.asTime().After(today.asTime()) {
 		return Date{}, fmt.Errorf("%w: %s is in the future", ErrImplausibleBirthDate, in)
 	}
-	if born.asTime().Before(today.asTime().AddDate(-oldestPlausibleYears, 0, 0)) {
-		return Date{}, fmt.Errorf("%w: %s is more than %d years ago",
-			ErrImplausibleBirthDate, in, oldestPlausibleYears)
+	if born.asTime().Before(oldestPlausibleDate.asTime()) {
+		return Date{}, fmt.Errorf("%w: %s is before %04d-%02d-%02d",
+			ErrImplausibleBirthDate, in,
+			oldestPlausibleDate.Year, oldestPlausibleDate.Month, oldestPlausibleDate.Day)
 	}
 	return born, nil
 }

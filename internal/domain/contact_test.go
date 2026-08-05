@@ -32,6 +32,12 @@ func TestContactDetailsAreFound(t *testing.T) {
 		{"whatsapp μου", ContactHandle},
 		{"@giannis1990", ContactHandle},
 
+		// Greek-script domains. .ελ is a real top level domain and the word
+		// boundaries around a host have to work for Greek letters too, which
+		// Go's \b does not: it is ASCII-only.
+		{"γιάννης@ταχυδρομείο.ελ", ContactEmail},
+		{"δες το γιάννης.ελ", ContactLink},
+
 		// Digits that are not ASCII digits.
 		{"６９４１２３４５６７", ContactPhone},
 

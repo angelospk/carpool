@@ -74,7 +74,7 @@ func TestABirthDateFromNowhereIsRefused(t *testing.T) {
 	for _, in := range []string{
 		"", "15/03/2008", "2008-3-15", "2008-13-01", "2008-02-30", "yesterday",
 		"2027-01-01", // the future
-		"1880-01-01", // older than anybody alive
+		"1899-12-31", // the day before the bound the database enforces
 	} {
 		if _, err := ParseBirthDate(in, today); !errors.Is(err, ErrImplausibleBirthDate) {
 			t.Errorf("ParseBirthDate(%q) gave %v, want ErrImplausibleBirthDate", in, err)
@@ -87,6 +87,23 @@ func TestABirthDateFromNowhereIsRefused(t *testing.T) {
 	}
 	if got != (Date{2008, time.March, 15}) {
 		t.Errorf("parsed %v", got)
+	}
+}
+
+// The bound is a fixed date and it is the same fixed date the database has.
+//
+// It used to be "a hundred and thirty years ago", which moves, and which let
+// 1899 through here to be refused by a CHECK constraint one layer down — a 500
+// where a 400 was meant. Two bounds that agree today and disagree next year are
+// worse than either bound on its own.
+func TestTheOldestPlausibleDateIsTheOneTheDatabaseAgreesWith(t *testing.T) {
+	today := Date{2026, time.August, 5}
+
+	if _, err := ParseBirthDate("1900-01-01", today); err != nil {
+		t.Errorf("the boundary date itself was refused: %v", err)
+	}
+	if _, err := ParseBirthDate("1899-12-31", today); !errors.Is(err, ErrImplausibleBirthDate) {
+		t.Errorf("the day before the boundary was accepted: %v", err)
 	}
 }
 

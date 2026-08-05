@@ -105,7 +105,7 @@ var detectors = []struct {
 }{
 	{ContactEmail, regexp.MustCompile(
 		// name@host.tld, and the ways people write the two symbols out.
-		`[\p{L}\p{N}._%+-]+\s*(?:@|\(at\)|\[at\]|\sat\s|παπάκι)\s*[\p{L}\p{N}.-]+\s*(?:\.|\(dot\)|\[dot\]|\sdot\s|τελεία)\s*[a-z]{2,}`)},
+		`[\p{L}\p{N}._%+-]+\s*(?:@|\(at\)|\[at\]|\sat\s|παπάκι)\s*[\p{L}\p{N}.-]+\s*(?:\.|\(dot\)|\[dot\]|\sdot\s|τελεία)\s*\p{L}{2,}`)},
 
 	{ContactPhone, regexp.MustCompile(
 		// A Greek mobile: 69 and eight more, however it is spaced or punctuated,
@@ -116,7 +116,11 @@ var detectors = []struct {
 	{ContactLink, regexp.MustCompile(
 		// A scheme, a www, or a bare host with a plausible top level domain.
 		// The tld list is closed on purpose: an open \w{2,} matches "στο.τέλος".
-		`(?:https?://|www\.)\S+|\b[\p{L}\p{N}-]+\.(?:gr|com|net|org|io|me|eu|info|co)\b`)},
+		// .ελ is Greece's own script top level domain and belongs beside .gr.
+		// The delimiters are written out rather than using \b, which in Go is
+		// ASCII-only: it would put a boundary in the middle of "γιάννης" and
+		// none at the edge of a Greek host.
+		`(?:https?://|www\.)\S+|(?:^|[^\p{L}\p{N}.-])[\p{L}\p{N}-]+\.(?:gr|ελ|com|net|org|io|me|eu|info|co)(?:$|[^\p{L}\p{N}-])`)},
 
 	{ContactHandle, regexp.MustCompile(
 		// A platform named next to something that could be an account, or an
