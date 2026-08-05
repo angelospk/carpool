@@ -1,48 +1,57 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 
-import { api, type Region } from '../../src/api/endpoints';
+import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import { useSession } from '../../src/state/session';
+import { PlaceField } from '../../src/components/PlaceField';
+import { type Pin } from '../../src/design/pin';
 import { Button, Card, Field, Hint, Screen, Title } from '../../src/components/ui';
-import { colors, radius, space, type } from '../../src/design/tokens';
+import { colors, space, type } from '../../src/design/tokens';
 
+// Joining, once the number is proved.
+//
+// The region used to be picked from a list. That worked while the list had one
+// entry; with the whole country open it has seventy-five, and asking somebody
+// whether they live in "Περιφερειακή Ενότητα Δυτικού Τομέα Αθηνών" is asking
+// the wrong question. They know their town. The server reads the prefecture off
+// it, which is a thing a map can answer and a person should not have to.
 export default function ProfileSetupScreen() {
   const { t } = useTranslation();
-  const params = useLocalSearchParams<{ phone: string; code: string; regions: string }>();
+  const { signupToken } = useLocalSearchParams<{ signupToken: string }>();
   const signIn = useSession((s) => s.signIn);
 
-  // Parsed defensively because this arrives as a URL query parameter on web,
-  // where it is editable, truncatable and repeatable. A throw here happens
-  // during render, so it takes the screen down rather than showing an error.
-  const regions: Region[] = (() => {
-    try {
-      const parsed = params.regions ? JSON.parse(params.regions) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  })();
   const [name, setName] = useState('');
-  const [regionId, setRegionId] = useState(regions[0]?.id ?? '');
+  const [home, setHome] = useState<Pin | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // A place typed as a raw coordinate has no id, and the server takes ids
+  // only — so it is not a home town, however well-formed it looks.
+  const placeID = home?.id ?? null;
+
   const submit = async () => {
+    if (!placeID) return;
     setBusy(true);
     setError(null);
     try {
-      const tokens = await api.verifyOtp(params.phone, params.code, name.trim(), regionId);
+      const tokens = await api.completeSignup({
+        signup_token: signupToken,
+        name: name.trim(),
+        home_place_id: placeID,
+      });
       await signIn({ accessToken: tokens.access_token, refreshToken: tokens.refresh_token });
       // The root layout redirects once the session flips to signedIn.
     } catch (e) {
-      setError(
-        e instanceof ApiError && e.code === 'invalid_code'
-          ? t('auth.invalidCode')
-          : t('common.error'),
-      );
+      if (e instanceof ApiError && e.code === 'invalid_token') {
+        setError(t('auth.signupExpired'));
+      } else if (e instanceof ApiError && e.code === 'unknown_place') {
+        setError(t('auth.unknownPlace'));
+      } else {
+        setError(t('common.error'));
+      }
     } finally {
       setBusy(false);
     }
@@ -64,23 +73,16 @@ export default function ProfileSetupScreen() {
           />
         </Card>
 
-        <Hint>{t('auth.region')}</Hint>
-        <View style={styles.regions}>
-          {regions.map((r) => (
-            <Pressable
-              key={r.id}
-              testID={`region-${r.id}`}
-              accessibilityRole="button"
-              accessibilityState={{ selected: regionId === r.id }}
-              onPress={() => setRegionId(r.id)}
-              style={[styles.region, regionId === r.id && styles.regionSelected]}
-            >
-              <Text style={[styles.regionLabel, regionId === r.id && styles.regionLabelSelected]}>
-                {r.name}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <Hint>{t('auth.homeTownHint')}</Hint>
+        <Card>
+          <PlaceField
+            testID="home-place"
+            label={t('auth.homeTown')}
+            value={home}
+            onChange={setHome}
+            placeholder={t('auth.homeTownPlaceholder')}
+          />
+        </Card>
 
         {error ? (
           <Text testID="profile-error" style={styles.error}>
@@ -92,7 +94,7 @@ export default function ProfileSetupScreen() {
           testID="profile-submit"
           label={t('common.next')}
           onPress={submit}
-          disabled={!name.trim() || !regionId || busy}
+          disabled={!name.trim() || !placeID || busy}
         />
       </ScrollView>
     </Screen>
@@ -101,15 +103,5 @@ export default function ProfileSetupScreen() {
 
 const styles = StyleSheet.create({
   body: { gap: space.md, paddingBottom: space.xxl },
-  regions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
-  region: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.pill,
-    paddingVertical: space.md,
-    paddingHorizontal: space.lg,
-  },
-  regionSelected: { backgroundColor: colors.primary },
-  regionLabel: { ...type.label, color: colors.ink },
-  regionLabelSelected: { color: colors.primaryInk },
   error: { ...type.body, color: colors.danger },
 });

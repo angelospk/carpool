@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react-nativ
 
 import OtpScreen from '../(auth)/otp';
 import { api } from '../../src/api/endpoints';
+import { useSession } from '../../src/state/session';
 
 const mockPush = jest.fn();
 
@@ -11,51 +12,66 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { regions: jest.fn() },
+  api: { verifyOtp: jest.fn() },
 }));
 
-const region = { id: 'r1', name: 'Έβρος', fuel_price_eur: 1.8 };
+jest.mock('../../src/state/session', () => ({
+  useSession: jest.fn(),
+}));
+
+const mockSignIn = jest.fn();
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  (useSession as unknown as jest.Mock).mockImplementation((select: (s: unknown) => unknown) =>
+    select({ signIn: mockSignIn }),
+  );
+});
 
 describe('the code screen', () => {
-  afterEach(() => jest.clearAllMocks());
-
-  it('does not let you continue before the regions have arrived', async () => {
-    // The next screen picks its region from this list and has no way to fetch
-    // its own. Continuing early carries an empty list forward, which leaves its
-    // submit button disabled with nothing on screen to explain why, and no
-    // later response can repair it because this screen is gone.
-    let release!: (v: { regions: typeof region[] }) => void;
-    (api.regions as jest.Mock).mockReturnValue(new Promise((r) => (release = r)));
-
-    render(<OtpScreen />);
-    fireEvent.press(screen.getByTestId('otp-submit'));
-    expect(mockPush).not.toHaveBeenCalled();
-
-    release({ regions: [region] });
-    await waitFor(() => expect(screen.getByTestId('otp-submit')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('otp-submit'));
-    await waitFor(() => expect(mockPush).toHaveBeenCalled());
-  });
-
-  it('says so when the regions cannot be fetched, instead of going on regardless', async () => {
-    (api.regions as jest.Mock).mockRejectedValue(new Error('offline'));
+  // The whole point of the change. Somebody who joined in March opens the app
+  // in April, types the code, and is in — no name, no town, no list of
+  // seventy-five prefectures.
+  it('signs an existing account straight in', async () => {
+    (api.verifyOtp as jest.Mock).mockResolvedValue({
+      access_token: 'a',
+      refresh_token: 'r',
+    });
 
     render(<OtpScreen />);
-    await waitFor(() => expect(screen.getByText(/Δεν/)).toBeTruthy());
     fireEvent.press(screen.getByTestId('otp-submit'));
+
+    await waitFor(() =>
+      expect(mockSignIn).toHaveBeenCalledWith({ accessToken: 'a', refreshToken: 'r' }),
+    );
     expect(mockPush).not.toHaveBeenCalled();
   });
 
-  it('carries the regions it fetched to the next screen', async () => {
-    (api.regions as jest.Mock).mockResolvedValue({ regions: [region] });
+  // A new number gets a ticket instead of a session, and the ticket is what
+  // travels — never the code, which has already been spent proving the number.
+  it('carries the ticket to the profile screen for a new number', async () => {
+    (api.verifyOtp as jest.Mock).mockResolvedValue({ signup_token: 'tkt' });
 
     render(<OtpScreen />);
-    await waitFor(() => expect(api.regions).toHaveBeenCalled());
     fireEvent.press(screen.getByTestId('otp-submit'));
 
     await waitFor(() => expect(mockPush).toHaveBeenCalled());
-    const params = mockPush.mock.calls[0][0].params;
-    expect(JSON.parse(params.regions)).toEqual([region]);
-    expect(params.code).toBe('123456');
+    const { pathname, params } = mockPush.mock.calls[0][0];
+    expect(pathname).toContain('profile-setup');
+    expect(params.signupToken).toBe('tkt');
+    expect(params.code).toBeUndefined();
+    expect(mockSignIn).not.toHaveBeenCalled();
+  });
+
+  it('says the code was wrong rather than going on', async () => {
+    const { ApiError } = jest.requireActual('../../src/api/client');
+    (api.verifyOtp as jest.Mock).mockRejectedValue(new ApiError(401, 'invalid_code', 'no'));
+
+    render(<OtpScreen />);
+    fireEvent.press(screen.getByTestId('otp-submit'));
+
+    expect(await screen.findByTestId('otp-error')).toBeTruthy();
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockSignIn).not.toHaveBeenCalled();
   });
 });

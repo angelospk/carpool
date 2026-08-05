@@ -140,9 +140,16 @@ export type Message = {
 export const api = {
   regions: () => request<{ regions: Region[] }>('/v1/regions', { anonymous: true }),
 
-  /** Settlements matching what is being typed into a pickup field. */
+  /**
+   * Settlements matching what is being typed into a pickup field.
+   *
+   * Anonymous, because signing up asks for a home town before there is a
+   * session to ask it with. The list is public data — Greek place names out of
+   * OpenStreetMap, embedded in the binary — so there is nothing here that a
+   * token would be protecting.
+   */
   places: (q: string) =>
-    request<{ places: Place[] }>(`/v1/places?q=${encodeURIComponent(q)}`),
+    request<{ places: Place[] }>(`/v1/places?q=${encodeURIComponent(q)}`, { anonymous: true }),
 
   // dev_code comes back only when the server runs with DEV_MODE, where the code
   // is not sent by SMS at all. It lets a tester on a laptop sign in without
@@ -155,11 +162,36 @@ export const api = {
       body: { phone },
     }),
 
-  verifyOtp: (phone: string, code: string, name: string, regionId: string) =>
-    request<{ access_token: string; refresh_token: string }>('/v1/auth/otp/verify', {
+  /**
+   * Proves the number, and answers the only question left: is this an account?
+   *
+   * A number that already is one comes back with tokens. One that is not comes
+   * back with a signup_token — a ten-minute ticket to finish joining with,
+   * because the code itself has now been spent and cannot be sent twice.
+   */
+  verifyOtp: (phone: string, code: string) =>
+    request<{
+      access_token?: string;
+      refresh_token?: string;
+      signup_token?: string;
+      expires_at?: string;
+    }>('/v1/auth/otp/verify', {
       method: 'POST',
       anonymous: true,
-      body: { phone, code, name, region_id: regionId },
+      body: { phone, code },
+    }),
+
+  completeSignup: (body: {
+    signup_token: string;
+    name: string;
+    /** A settlement id out of the place list. The server reads the region off it. */
+    home_place_id: string;
+    invite_code?: string;
+  }) =>
+    request<{ access_token: string; refresh_token: string }>('/v1/auth/signup/complete', {
+      method: 'POST',
+      anonymous: true,
+      body,
     }),
 
   logout: (refreshToken: string) =>

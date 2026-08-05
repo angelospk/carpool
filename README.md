@@ -95,7 +95,7 @@ psql "postgres://carpool:carpool@localhost:5433/postgres?sslmode=disable" \
      -c "DROP DATABASE IF EXISTS smoke" -c "CREATE DATABASE smoke"
 DATABASE_URL="postgres://carpool:carpool@localhost:5433/smoke?sslmode=disable" \
 JWT_SECRET="e2e-secret-that-is-long-enough-32b" \
-DEV_MODE=true HTTP_ADDR=":8099" REGION_FIXTURE=fixtures/regions/evros.geojson \
+DEV_MODE=true HTTP_ADDR=":8099" REGION_FIXTURE=fixtures/regions/greece.geojson \
   go run ./cmd/api > /tmp/api-e2e.log 2>&1 &
 scripts/e2e.sh
 

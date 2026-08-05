@@ -77,6 +77,7 @@ func newHarnessWith(t *testing.T, devMode bool) *harness {
 		Clock:       c,
 		Issuer:      issuer,
 		OTP:         auth.NewOTPService(pool, c, sms),
+		Signup:      auth.NewSignupService(pool, c),
 		Sessions:    sessions,
 		PhoneChange: auth.NewPhoneChangeService(pool, c, sms, sessions, []byte(testSecret)),
 		Asks:        asks.NewService(pool, c, nil),
@@ -153,10 +154,8 @@ func (h *harness) signUp(phone, name string) (accessToken, refreshToken string) 
 	}
 
 	rec = h.do(http.MethodPost, "/v1/auth/otp/verify", map[string]any{
-		"phone":     phone,
-		"code":      h.sms.LastCode(),
-		"name":      name,
-		"region_id": h.regionID.String(),
+		"phone": phone,
+		"code":  h.sms.LastCode(),
 	}, "")
 	if rec.Code != http.StatusOK {
 		h.t.Fatalf("otp/verify: status %d, body %s", rec.Code, rec.Body.String())
@@ -165,8 +164,23 @@ func (h *harness) signUp(phone, name string) (accessToken, refreshToken string) 
 	var body struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
+		SignupToken  string `json:"signup_token"`
 	}
 	h.decode(rec, &body)
+
+	// A number that is already an account is signed in and done. A new one is
+	// handed a ticket and has to say who it is.
+	if body.SignupToken != "" {
+		rec = h.do(http.MethodPost, "/v1/auth/signup/complete", map[string]any{
+			"signup_token":  body.SignupToken,
+			"name":          name,
+			"home_place_id": feres,
+		}, "")
+		if rec.Code != http.StatusOK {
+			h.t.Fatalf("signup/complete: status %d, body %s", rec.Code, rec.Body.String())
+		}
+		h.decode(rec, &body)
+	}
 	return body.AccessToken, body.RefreshToken
 }
 

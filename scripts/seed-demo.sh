@@ -17,8 +17,9 @@ API=${API:-http://localhost:8080/v1}
 j() { node -pe "const d=JSON.parse(require('fs').readFileSync(0));$1"; }
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
-REGION=$(curl -s "$API/regions" | j "d.regions[0].id")
-[ -n "$REGION" ] || { echo "no regions — is the API up and seeded?" >&2; exit 1; }
+# Φέρες, out of the embedded settlement list. Signing up names a town and the
+# server reads the prefecture off it, so nothing here needs a region id.
+HOME_PLACE=${HOME_PLACE:-node/139260653}
 
 # Signing in is idempotent: the same number signs in as the same person, so
 # re-running this tops the world up rather than duplicating it.
@@ -36,8 +37,18 @@ signin() {
     esac
     exit 1
   fi
-  curl -s -X POST "$API/auth/otp/verify" -H 'Content-Type: application/json' \
-    -d "{\"phone\":\"$phone\",\"code\":\"$code\",\"name\":\"$name\",\"region_id\":\"$REGION\"}" \
+  local verified ticket
+  verified=$(curl -s -X POST "$API/auth/otp/verify" -H 'Content-Type: application/json' \
+    -d "{\"phone\":\"$phone\",\"code\":\"$code\"}")
+  ticket=$(printf '%s' "$verified" | j "d.signup_token || ''")
+  if [ -z "$ticket" ]; then
+    # Already an account. Signing in again is the whole point of this being
+    # idempotent, so this is the ordinary path on a re-run.
+    printf '%s' "$verified" | j "d.access_token"
+    return
+  fi
+  curl -s -X POST "$API/auth/signup/complete" -H 'Content-Type: application/json' \
+    -d "{\"signup_token\":\"$ticket\",\"name\":\"$name\",\"home_place_id\":\"$HOME_PLACE\"}" \
     | j "d.access_token"
 }
 

@@ -113,6 +113,14 @@ func rules() []rule {
 		//
 		// Two rules rather than one with an OR, because an OR across two
 		// nullable timestamps cannot use either index.
+		// A signup ticket is the same kind of thing as a refresh token and a
+		// shorter-lived one: it is spendable for ten minutes and worthless
+		// after. It is not a verification record — the otp_codes row that
+		// produced it already is that, and keeps its six months — so nothing is
+		// lost by dropping these the day after they die.
+		{"spent and expired signup tickets", batch("signup_tickets",
+			`t.expires_at < $1::timestamptz - interval '1 day'`)},
+
 		{"expired refresh tokens", batch("refresh_tokens",
 			`t.expires_at < $1::timestamptz - interval '30 days'`)},
 		{"revoked refresh tokens", batch("refresh_tokens",

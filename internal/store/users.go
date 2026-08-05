@@ -94,6 +94,31 @@ func GetUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (User, error
 	return u, nil
 }
 
+// UserByPhone loads the account for a verified number, or ErrNotFound.
+//
+// Signing in asks this before anything else: a number that is already an
+// account gets a session, and one that is not gets sent to finish joining.
+// Nothing outside a verified OTP flow may call it — the answer is whether a
+// given number is a member, which is not a question a stranger gets to ask.
+func UserByPhone(ctx context.Context, pool *pgxpool.Pool, phone string) (User, error) {
+	var u User
+	err := pool.QueryRow(ctx, `
+		SELECT id, phone, name, photo_url,
+		       (SELECT encode(substring(sha256 from 1 for 6), 'hex') FROM profile_photos WHERE user_id = users.id),
+		       gender, home_region_id, women_only, status,
+		       facebook_handle, instagram_handle
+		FROM users WHERE phone = $1`, phone).Scan(
+		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.PhotoVersion, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
+		&u.FacebookHandle, &u.InstagramHandle)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("store: loading user by phone: %w", err)
+	}
+	return u, nil
+}
+
 // UserUpdate carries the fields a user may change on their own profile. A nil
 // field is left untouched.
 type UserUpdate struct {

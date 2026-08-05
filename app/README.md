@@ -39,7 +39,7 @@ The build machine here is `192.168.0.154`. Substitute your own.
 DATABASE_URL=postgres://carpool:carpool@localhost:5433/lan?sslmode=disable \
 JWT_SECRET=at-least-32-bytes-of-something \
 DEV_MODE=true HTTP_ADDR=:8080 \
-REGION_FIXTURE=$PWD/fixtures/regions/evros.geojson \
+REGION_FIXTURE=$PWD/fixtures/regions/greece.geojson \
 ./bin/api
 
 # 2. tell the app where that is, then build. The .env matters: an inline

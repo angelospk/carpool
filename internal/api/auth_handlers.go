@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -8,9 +9,12 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"carpool/internal/auth"
 	"carpool/internal/invites"
+	"carpool/internal/places"
+	"carpool/internal/store"
 )
 
 // maxBodyBytes bounds request bodies; nothing this API accepts is large.
@@ -42,6 +46,14 @@ func (d Deps) handleOTPRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Asking for a fresh code means starting again — a new handset, or a
+	// message that never arrived. Whatever half-finished signup the previous
+	// code produced does not get to complete later.
+	if err := d.Signup.Void(r.Context(), body.Phone); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not start signing in")
+		return
+	}
+
 	code, err := d.OTP.Request(r.Context(), body.Phone)
 	switch {
 	case errors.Is(err, auth.ErrRateLimited):
@@ -68,25 +80,24 @@ func (d Deps) handleOTPRequest(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleOTPVerify checks the code and then answers the only question that is
+// left: is this number an account already?
+//
+// It deliberately does not ask for a name or a region. It used to, on every
+// sign-in, which meant somebody who joined in March was walked through
+// onboarding again in April — and since the client had to send something, the
+// obvious implementation quietly overwrote their profile with whatever they
+// retyped.
+//
+// The order matters. The lookup happens after the code is verified, never
+// before, so the endpoint cannot be used to ask whether a stranger's number is
+// registered.
 func (d Deps) handleOTPVerify(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Phone    string `json:"phone"`
-		Code     string `json:"code"`
-		Name     string `json:"name"`
-		RegionID string `json:"region_id"`
-		Invite   string `json:"invite_code"`
+		Phone string `json:"phone"`
+		Code  string `json:"code"`
 	}
 	if !decodeJSON(w, r, &body) {
-		return
-	}
-
-	regionID, err := uuid.Parse(body.RegionID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "region_id must be a uuid")
-		return
-	}
-	if body.Name == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "name is required")
 		return
 	}
 
@@ -95,17 +106,23 @@ func (d Deps) handleOTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := d.Invites.Admit(r.Context(), body.Phone, body.Name, regionID,
-		strings.ToUpper(strings.TrimSpace(body.Invite)))
+	user, err := store.UserByPhone(r.Context(), d.Pool, body.Phone)
 	switch {
-	case errors.Is(err, invites.ErrCodeRequired):
-		writeError(w, http.StatusForbidden, "invite_required", "this pilot is invite-only")
-		return
-	case errors.Is(err, invites.ErrCodeNotUsable):
-		writeError(w, http.StatusForbidden, "invite_invalid", "that invite code cannot be used")
+	case errors.Is(err, store.ErrNotFound):
+		// Nobody yet. The code has been spent proving the number, so what goes
+		// back is a ticket to finish joining with.
+		token, expires, err := d.Signup.Issue(r.Context(), body.Phone)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not start signing up")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"signup_token": token,
+			"expires_at":   expires,
+		})
 		return
 	case err != nil:
-		writeError(w, http.StatusBadRequest, "invalid_request", "could not create the account; check region_id")
+		writeError(w, http.StatusInternalServerError, "internal", "could not look up the account")
 		return
 	}
 
@@ -114,7 +131,82 @@ func (d Deps) handleOTPVerify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not start a session")
 		return
 	}
+	writeJSON(w, http.StatusOK, tokenResponse(pair))
+}
 
+// handleSignupComplete turns a verified number into an account.
+//
+// The home region is read off the town rather than chosen from a list of
+// seventy-five prefectures. Somebody knows which village they live in; far
+// fewer would pick "Περιφερειακή Ενότητα Δυτικού Τομέα Αθηνών" from a menu, and
+// the answer is on the map anyway. The place id is the app's own identifier for
+// a settlement, so there is no coordinate for a client to invent.
+func (d Deps) handleSignupComplete(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		SignupToken string `json:"signup_token"`
+		Name        string `json:"name"`
+		HomePlaceID string `json:"home_place_id"`
+		Invite      string `json:"invite_code"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+
+	phone, err := d.Signup.Peek(r.Context(), body.SignupToken)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid_token",
+			"that signup has expired; ask for a new code")
+		return
+	}
+
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "name is required")
+		return
+	}
+
+	place, ok := places.ByID(body.HomePlaceID)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unknown_place", "that is not a settlement we know")
+		return
+	}
+
+	region, err := store.RegionAt(r.Context(), d.Pool, place.Lon, place.Lat)
+	if errors.Is(err, store.ErrOutsideGreece) {
+		writeError(w, http.StatusBadRequest, "unknown_place", "that settlement is outside the country")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not locate that town")
+		return
+	}
+
+	user, err := d.Invites.AdmitWith(r.Context(), phone, name, region.ID,
+		strings.ToUpper(strings.TrimSpace(body.Invite)),
+		func(ctx context.Context, tx pgx.Tx) error {
+			return d.Signup.SpendTx(ctx, tx, body.SignupToken)
+		})
+	switch {
+	case errors.Is(err, invites.ErrCodeRequired):
+		writeError(w, http.StatusForbidden, "invite_required", "this pilot is invite-only")
+		return
+	case errors.Is(err, invites.ErrCodeNotUsable):
+		writeError(w, http.StatusForbidden, "invite_invalid", "that invite code cannot be used")
+		return
+	case errors.Is(err, auth.ErrNoTicket):
+		// Lost a race with another exchange of the same ticket.
+		writeError(w, http.StatusUnauthorized, "invalid_token", "that signup has already been used")
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "could not create the account")
+		return
+	}
+
+	pair, err := d.Sessions.Create(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not start a session")
+		return
+	}
 	writeJSON(w, http.StatusOK, tokenResponse(pair))
 }
 

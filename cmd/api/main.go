@@ -146,6 +146,7 @@ func run() error {
 		Clock:    clk,
 		Issuer:   issuer,
 		OTP:      auth.NewOTPService(pool, clk, sms),
+		Signup:   auth.NewSignupService(pool, clk),
 		Sessions: sessions,
 		Asks:     askSvc,
 		Standing: standing.NewService(pool, clk),

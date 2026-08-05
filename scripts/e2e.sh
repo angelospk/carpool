@@ -14,16 +14,31 @@ DSN=${DSN:-postgres://carpool:carpool@localhost:5433/smoke?sslmode=disable}
 j() { node -pe "const d=JSON.parse(require('fs').readFileSync(0));$1"; }
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
-REGION=$(curl -s "$API/regions" | j "d.regions[0].id")
+# Φέρες, out of the embedded settlement list. The server reads the prefecture
+# off it, so nothing here has to know what a region id is.
+HOME_PLACE=${HOME_PLACE:-node/139260653}
 
 # DEV_MODE prints the OTP to the log instead of sending an SMS.
-signup() {
+#
+# Verifying answers one of two ways: tokens for a number that is already an
+# account, or a ticket for one that is not. A fresh smoke database is always the
+# second, but handling both keeps this honest against a re-run.
+signup_pair() {
   curl -s -X POST "$API/auth/otp/request" -H 'Content-Type: application/json' -d "{\"phone\":\"$1\"}" -o /dev/null
-  local code
+  local code verified ticket
   code=$(grep -ao '"message":"[0-9]\{6\}' "$LOG" | tail -1 | grep -o '[0-9]\{6\}')
-  curl -s -X POST "$API/auth/otp/verify" -H 'Content-Type: application/json' \
-    -d "{\"phone\":\"$1\",\"code\":\"$code\",\"name\":\"$2\",\"region_id\":\"$REGION\"}" | j "d.access_token"
+  verified=$(curl -s -X POST "$API/auth/otp/verify" -H 'Content-Type: application/json' \
+    -d "{\"phone\":\"$1\",\"code\":\"$code\"}")
+  ticket=$(printf '%s' "$verified" | j "d.signup_token || ''")
+  if [ -z "$ticket" ]; then
+    printf '%s' "$verified"
+    return
+  fi
+  curl -s -X POST "$API/auth/signup/complete" -H 'Content-Type: application/json' \
+    -d "{\"signup_token\":\"$ticket\",\"name\":\"$2\",\"home_place_id\":\"$HOME_PLACE\"}"
 }
+
+signup() { signup_pair "$1" "$2" | j "d.access_token"; }
 
 step "1. sign up a driver and a passenger by phone OTP"
 DRIVER=$(signup "+306900000021" "Οδηγός")
@@ -118,12 +133,7 @@ step "12. a lost refresh response does not sign anyone out"
 # The app persists a rotated token only after the response arrives. Retrying with
 # the attempt id that spent the old token must return that same successor rather
 # than looking like a replay and ending the session.
-curl -s -X POST "$API/auth/otp/request" -H 'Content-Type: application/json' \
-  -d '{"phone":"+306900000023"}' -o /dev/null
-CODE=$(grep -ao '"message":"[0-9]\{6\}' "$LOG" | tail -1 | grep -o '[0-9]\{6\}')
-REFRESH=$(curl -s -X POST "$API/auth/otp/verify" -H 'Content-Type: application/json' \
-  -d "{\"phone\":\"+306900000023\",\"code\":\"$CODE\",\"name\":\"Δοκιμή\",\"region_id\":\"$REGION\"}" \
-  | j "d.refresh_token")
+REFRESH=$(signup_pair "+306900000023" "Δοκιμή" | j "d.refresh_token")
 ATTEMPT=$(uuidgen | tr 'A-Z' 'a-z')
 rotate() {
   curl -s -X POST "$API/auth/refresh" -H 'Content-Type: application/json' \

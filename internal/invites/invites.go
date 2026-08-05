@@ -63,6 +63,21 @@ func NewService(pool *pgxpool.Pool, c clock.Clock, required bool) *Service {
 func (s *Service) Admit(
 	ctx context.Context, phone, name string, regionID uuid.UUID, code string,
 ) (store.User, error) {
+	return s.AdmitWith(ctx, phone, name, regionID, code, nil)
+}
+
+// AdmitWith is Admit with one more thing spent in the same transaction.
+//
+// The caller that needs this is signup: the ticket proving the phone number was
+// verified has to be spent exactly when the account is created, or a ticket can
+// buy two accounts, or an account can exist that no ticket paid for. Running it
+// after the account is created rather than before means a name the database
+// rejects costs nobody their sign-in — the whole transaction rolls back, ticket
+// included.
+func (s *Service) AdmitWith(
+	ctx context.Context, phone, name string, regionID uuid.UUID, code string,
+	alsoSpend func(context.Context, pgx.Tx) error,
+) (store.User, error) {
 	now := s.clock.Now()
 
 	tx, err := s.pool.Begin(ctx)
@@ -98,6 +113,12 @@ func (s *Service) Admit(
 			INSERT INTO invite_redemptions (code, user_id, redeemed_at)
 			VALUES ($1, $2, $3)`, code, user.ID, now); err != nil {
 			return store.User{}, fmt.Errorf("invites: recording the redemption: %w", err)
+		}
+	}
+
+	if alsoSpend != nil {
+		if err := alsoSpend(ctx, tx); err != nil {
+			return store.User{}, err
 		}
 	}
 

@@ -364,3 +364,28 @@ func TestOnlyOneJanitorSweepsAtATime(t *testing.T) {
 		t.Errorf("swept while another janitor held the lock")
 	}
 }
+
+// A signup ticket is a credential with a ten-minute life. Once it has expired
+// it grants nothing, so keeping it is keeping something that can only leak.
+//
+// A day's grace rather than none, so that a support question about a signup
+// that failed this morning can still be answered — and so the sweep is not
+// racing the ten-minute expiry of tickets people are holding right now.
+func TestSignupTicketsGoTheDayAfterTheyDie(t *testing.T) {
+	f := newJanitorFixture(t)
+
+	for i, expires := range []time.Time{
+		retentionNow.Add(-25 * time.Hour), // dead yesterday
+		retentionNow.Add(-23 * time.Hour), // dead, but only just
+		retentionNow.Add(5 * time.Minute), // somebody is typing their name
+	} {
+		f.exec(`INSERT INTO signup_tickets (token_hash, phone, expires_at)
+		        VALUES ($1, $2, $3)`, fmt.Sprintf("hash-%d", i), phoneNo(i), expires)
+	}
+
+	f.run()
+
+	if got := f.count("signup_tickets"); got != 2 {
+		t.Errorf("signup_tickets: kept %d rows, want the two inside a day of expiry", got)
+	}
+}

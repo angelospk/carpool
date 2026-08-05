@@ -11,6 +11,9 @@
     "waiting": "Waiting for an answer"
   },
   "auth": {
+    "homeTown": "Your town or village",
+    "homeTownHint": "Where you usually set out from. It decides which region’s fuel price your trips are worked out with.",
+    "homeTownPlaceholder": "e.g. Feres",
     "invalidCode": "Wrong or expired code",
     "namePlaceholder": "Your name",
     "otpHint": "Six digits, valid for 5 minutes.",
@@ -19,9 +22,9 @@
     "phonePlaceholder": "+30 690 000 0000",
     "phoneTitle": "Your number",
     "profileTitle": "Tell us a little about you",
-    "region": "Region",
-    "regionsUnavailable": "Could not load the regions. Try again.",
+    "signupExpired": "That took too long. Ask for a new code and start again.",
     "tooManyRequests": "Too many attempts. Try again shortly.",
+    "unknownPlace": "I do not know that settlement. Pick one from the list.",
     "unreachable": "Cannot reach the server at {{url}}. Is it running, and are you on the same network?"
   },
   "common": {

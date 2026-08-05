@@ -100,11 +100,21 @@ func TestPlacesCapsHowMuchCanBeAskedFor(t *testing.T) {
 	}
 }
 
-func TestPlacesNeedsASession(t *testing.T) {
+// Searching settlements does not need a session, because joining asks for a
+// home town before there is one. It is a list of Greek place names out of
+// OpenStreetMap; there is nothing here a token would be protecting.
+//
+// Its neighbour is a different matter: meeting points carry moderator
+// decisions and the proposals people have made, so that one stays behind a
+// session.
+func TestPlacesIsPublicButMeetingPointsAreNot(t *testing.T) {
 	h := newHarness(t)
-	rec := h.do(http.MethodGet, "/v1/places?q=alexandr", nil, "")
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status %d, want 401", rec.Code)
+
+	if rec := h.do(http.MethodGet, "/v1/places?q=alexandr", nil, ""); rec.Code != http.StatusOK {
+		t.Errorf("GET /places anonymously: status %d, want 200", rec.Code)
+	}
+	if rec := h.do(http.MethodGet, "/v1/places/points?place=node%2F139260064", nil, ""); rec.Code != http.StatusUnauthorized {
+		t.Errorf("GET /places/points anonymously: status %d, want 401", rec.Code)
 	}
 }
 

@@ -1,52 +1,65 @@
-import { useEffect, useState } from 'react';
-import { StyleSheet, TextInput, View } from 'react-native';
+import { useState } from 'react';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 
-import { api, type Region } from '../../src/api/endpoints';
+import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
+import { useSession } from '../../src/state/session';
 import { Button, Card, Hint, Screen, Title } from '../../src/components/ui';
 import { colors, radius, space, type } from '../../src/design/tokens';
 
+// This screen used to fetch the list of regions and carry it forward, because
+// the next screen had to send a name and a region along with the code — on
+// every sign-in, not just the first. Somebody who joined in March was walked
+// through onboarding again in April.
+//
+// Now the code is verified here, and what comes back decides where to go. A
+// number that is already an account is simply signed in. A new one is handed a
+// ticket, and the ticket is what travels to the profile screen — never the
+// code, which has just been spent proving the number and would be refused if
+// it were sent again.
 export default function OtpScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const { phone, devCode } = useLocalSearchParams<{ phone: string; devCode?: string }>();
+  const signIn = useSession((s) => s.signIn);
+
   // Prefilled only when the server ran with DEV_MODE and handed the code back
   // instead of texting it. Everywhere else this is undefined and the field
-  // starts empty, exactly as before.
+  // starts empty.
   const [code, setCode] = useState(devCode ?? '');
-  const [regions, setRegions] = useState<Region[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  // Regions are needed by the next step, which has no way to fetch its own: it
-  // reads the list out of the route parameters and picks the first one. So an
-  // empty list there is not a slow start, it is a dead end. Its submit button
-  // stays disabled with nothing on screen to say why, and no response arriving
-  // later can repair it, because this screen has already been left behind.
-  //
-  // Hence null for "not yet" as distinct from an empty list, and a submit that
-  // waits. With the code prefilled on a DEV_MODE server there is nothing to
-  // type, so the press can easily land before the fetch returns.
-  const load = () => {
+  const submit = async () => {
+    setBusy(true);
     setError(null);
-    api
-      .regions()
-      .then((r) => setRegions(r.regions))
-      .catch(() => setError(t('auth.regionsUnavailable')));
-  };
+    try {
+      const res = await api.verifyOtp(phone, code);
 
-  useEffect(load, []);
+      if (res.signup_token) {
+        router.push({
+          pathname: '/(auth)/profile-setup',
+          params: { signupToken: res.signup_token },
+        });
+        return;
+      }
 
-  const submit = () => {
-    if (!regions) {
-      return;
+      await signIn({
+        accessToken: res.access_token as string,
+        refreshToken: res.refresh_token as string,
+      });
+      // The root layout redirects once the session flips to signedIn.
+    } catch (e) {
+      setError(
+        e instanceof ApiError && e.code === 'invalid_code'
+          ? t('auth.invalidCode')
+          : t('common.error'),
+      );
+    } finally {
+      setBusy(false);
     }
-    setError(null);
-    router.push({
-      pathname: '/(auth)/profile-setup',
-      params: { phone, code, regions: JSON.stringify(regions) },
-    });
   };
 
   return (
@@ -71,19 +84,19 @@ export default function OtpScreen() {
         />
       </Card>
 
-      {error ? <Hint>{error}</Hint> : null}
+      {error ? (
+        <Text testID="otp-error" style={styles.error}>
+          {error}
+        </Text>
+      ) : null}
 
       <View style={styles.spacer} />
-
-      {error ? (
-        <Button testID="otp-retry" label={t('common.retry')} onPress={load} />
-      ) : null}
 
       <Button
         testID="otp-submit"
         label={t('common.next')}
         onPress={submit}
-        disabled={code.length !== 6 || !regions}
+        disabled={code.length !== 6 || busy}
       />
     </Screen>
   );
@@ -92,6 +105,7 @@ export default function OtpScreen() {
 const styles = StyleSheet.create({
   top: { gap: space.sm },
   spacer: { flex: 1 },
+  error: { ...type.body, color: colors.danger },
   input: {
     ...type.display,
     fontSize: 32,

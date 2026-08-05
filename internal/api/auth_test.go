@@ -79,7 +79,7 @@ func TestOTPVerifyRejectsAWrongCode(t *testing.T) {
 	}
 
 	rec := h.do(http.MethodPost, "/v1/auth/otp/verify", map[string]any{
-		"phone": phone, "code": "000000", "name": "X", "region_id": h.regionID.String(),
+		"phone": phone, "code": "000000",
 	}, "")
 
 	if rec.Code != http.StatusUnauthorized {

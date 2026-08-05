@@ -38,7 +38,11 @@ type Deps struct {
 	Issuer   *auth.TokenIssuer
 	OTP      *auth.OTPService
 	Sessions *auth.SessionService
-	Asks     *asks.Service
+	// Signup holds the tickets that stand between proving a phone number and
+	// having an account, so that verifying a code does not have to demand a
+	// profile from somebody who already has one.
+	Signup *auth.SignupService
+	Asks   *asks.Service
 	// Standing records the agreements two people already made, so the matcher
 	// stops handing their seat to a stranger.
 	Standing *standing.Service
@@ -104,9 +108,17 @@ func NewRouter(deps Deps) http.Handler {
 
 		r.Get("/regions", deps.handleListRegions)
 
+		// Public, because joining asks for a home town before there is a
+		// session to ask it with. The list is Greek place names out of
+		// OpenStreetMap, embedded in the binary — public data, and a search
+		// through it is a linear scan of 12k rows measured at under a
+		// millisecond, so there is neither a secret nor a cost to protect.
+		r.Get("/places", deps.handlePlaces)
+
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/otp/request", deps.handleOTPRequest)
 			r.Post("/otp/verify", deps.handleOTPVerify)
+			r.Post("/signup/complete", deps.handleSignupComplete)
 			r.Post("/refresh", deps.handleRefresh)
 			r.Post("/logout", deps.handleLogout)
 		})
@@ -145,8 +157,7 @@ func NewRouter(deps Deps) http.Handler {
 			}
 
 			// No collaborator to guard: the settlement list is embedded in
-			// the binary, so this handler cannot be half-wired.
-			r.Get("/places", deps.handlePlaces)
+			// the binary, so these handlers cannot be half-wired.
 			r.Get("/places/points", deps.handleMeetingPoints)
 			r.Post("/places/points", deps.handleProposeMeetingPoint)
 			r.Get("/me/meeting-points", deps.handleMyMeetingPointProposals)

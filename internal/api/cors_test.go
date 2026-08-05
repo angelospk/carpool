@@ -119,7 +119,6 @@ func TestDevModeReturnsTheOTPSoATesterCanSeeIt(t *testing.T) {
 	// And it must actually work, or it is worse than no help at all.
 	verify := h.do(http.MethodPost, "/v1/auth/otp/verify", map[string]any{
 		"phone": "+306900000055", "code": got.DevCode,
-		"name": "Δοκιμή", "region_id": h.regionID.String(),
 	}, "")
 	if verify.Code != http.StatusOK {
 		t.Fatalf("the returned code did not verify: %d %s", verify.Code, verify.Body)
