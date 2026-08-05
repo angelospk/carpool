@@ -80,6 +80,9 @@
     "againAsked": "The driver has been asked",
     "againNone": "No next trip with a free seat"
   },
+  "map": {
+    "unconfigured": "No map is configured on this deployment."
+  },
   "phone": {
     "code": "Code",
     "codeHint": "Enter the code that arrived on the new number.",
@@ -93,12 +96,9 @@
   },
   "places": {
     "city": "city",
-    "none": "No such place",
-    "town": "town",
-    "village": "village",
     "hamlet": "settlement",
-    "whereExactly": "Where exactly?",
     "noMeetingPoints": "No meeting point is listed here — agree one between yourselves.",
+    "none": "No such place",
     "point": {
       "bus_station": "bus station",
       "train_station": "station",
@@ -106,16 +106,20 @@
       "fuel": "petrol station",
       "parking": "car park"
     },
-    "proposeOpen": "Know a better spot? Suggest it",
+    "proposeBadName": "That name cannot be used.",
+    "proposeDuplicate": "There is already a point there.",
+    "proposeHint": "Somebody will look at it before anyone else sees it.",
     "proposeName": "What is it called",
     "proposeNamePlaceholder": "e.g. KTEL Evrou",
-    "proposeSubmit": "Send it",
-    "proposeHint": "Somebody will look at it before anyone else sees it.",
+    "proposeOpen": "Know a better spot? Suggest it",
     "proposeSent": "Got it. It will appear once somebody has looked at it.",
+    "proposeSubmit": "Send it",
+    "proposeTapTheMap": "Tap the map to show exactly where.",
+    "proposeTooFar": "That point is not in this area.",
     "proposeTooMany": "That is enough suggestions for today.",
-    "proposeDuplicate": "There is already a point there.",
-    "proposeBadName": "That name cannot be used.",
-    "proposeTooFar": "That point is not in this area."
+    "town": "town",
+    "village": "village",
+    "whereExactly": "Where exactly?"
   },
   "preferences": {
     "air_conditioning": "Air conditioning",

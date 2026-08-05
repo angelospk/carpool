@@ -23,6 +23,9 @@ import { SocialLinks } from '../../src/components/SocialLink';
 import { PortNotice } from '../../src/components/PortNotice';
 import { PriceBreakdown } from '../../src/components/PriceBreakdown';
 import { PreferenceChips } from '../../src/components/Preferences';
+import { Map } from '../../src/map/Map';
+import polyline from '@mapbox/polyline';
+import { haveTiles } from '../../src/map/tiles';
 import { colors, radius, space, type } from '../../src/design/tokens';
 import { athensDay, athensTime } from '../../src/design/format';
 
@@ -158,6 +161,17 @@ export default function TripScreen() {
 
                   {trip.data.price_breakdown ? (
                     <PriceBreakdown testID="trip-price" breakdown={trip.data.price_breakdown} />
+                  ) : null}
+
+                  {/* The route as it was snapped, not as the two labels suggest.
+                      A trip cut short at a ferry port is the case where the
+                      difference matters most. */}
+                  {haveTiles() ? (
+                    <Map
+                      testID="trip-map"
+                      centre={startOf(trip.data.route_polyline)}
+                      polyline={trip.data.route_polyline}
+                    />
                   ) : null}
                 </Card>
 
@@ -372,3 +386,11 @@ const styles = StyleSheet.create({
     paddingVertical: space.md,
   },
 });
+
+// Where to point the map: the first coordinate of the route as it was snapped.
+// The two endpoint labels are names, not positions, and the polyline is the
+// only thing on the trip that knows where it actually starts.
+function startOf(encoded: string) {
+  const [first] = polyline.decode(encoded, 6);
+  return first ? { lon: first[1], lat: first[0] } : { lon: 23.7275, lat: 37.9838 };
+}

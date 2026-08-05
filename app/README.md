@@ -97,3 +97,32 @@ input without changing the shape it produces.
 
 Push registration is the other real gap. The endpoint exists, the app never
 registers, so nothing is ever delivered.
+
+## The map
+
+The app draws no map until a tile source is configured. That is deliberate:
+OpenStreetMap's own tile servers are for OSM's own site and their policy asks
+applications not to use them, so shipping a default pointed at
+`tile.openstreetmap.org` would be freeloading on a charity's bandwidth and would
+be cut off. MapTiler, Stadia and Protomaps all have free tiers; each wants a
+key, and a key belongs to whoever deploys this rather than to this repository.
+
+One variable, an XYZ raster template:
+
+```
+EXPO_PUBLIC_MAP_TILES_URL=https://tiles.example/{z}/{x}/{y}.png?key=…
+EXPO_PUBLIC_MAP_ATTRIBUTION=© MapTiler © OpenStreetMap contributors
+```
+
+Raster rather than vector because it is the one shape every provider offers and
+the one both platforms draw with what is already installed: maplibre-gl in the
+browser, react-native-maps' `UrlTile` on a phone. Without the variable both
+render a short notice instead, and every screen works as it did before.
+
+The attribution is required — by the provider's terms, and by ODbL for the
+contributors underneath whichever provider.
+
+A vector renderer (`@maplibre/maplibre-react-native`) would be the better answer
+on a phone and is a larger decision: it is a native module, so it cannot run in
+Expo Go and needs a development build. Worth doing when the map is more than a
+picture with pins on it.

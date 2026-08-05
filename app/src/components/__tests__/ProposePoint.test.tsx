@@ -118,3 +118,51 @@ test('a refusal is reported as the reason it was refused', async () => {
     screen.unmount();
   }
 });
+
+// Without a map, a suggestion is a name and the settlement's own coordinate,
+// and a moderator has to work out where it meant.
+describe('with a map configured', () => {
+  beforeEach(() => {
+    process.env.EXPO_PUBLIC_MAP_TILES_URL = 'https://tiles.example/{z}/{x}/{y}.png';
+  });
+  afterEach(() => {
+    delete process.env.EXPO_PUBLIC_MAP_TILES_URL;
+  });
+
+  it('offers the map to say where exactly', () => {
+    open();
+    expect(screen.getByTestId('pp-map')).toBeTruthy();
+  });
+
+  // The point of the map. Without it a suggestion is a name and the middle of
+  // the village, and a moderator has to work out where it meant.
+  it('sends where the pin was dropped, not the middle of the village', async () => {
+    const { STUB_TAP } = jest.requireMock('react-native-maps');
+
+    open();
+    fireEvent.changeText(screen.getByTestId('pp-name'), 'ΚΤΕΛ Φερών');
+    fireEvent.press(screen.getByTestId('stub-map-canvas'));
+    fireEvent.press(screen.getByTestId('pp-submit'));
+
+    await waitFor(() => expect(api.proposeMeetingPoint).toHaveBeenCalled());
+    const body = (api.proposeMeetingPoint as jest.Mock).mock.calls[0][0];
+    expect(body.lon).toBe(STUB_TAP.longitude);
+    expect(body.lat).toBe(STUB_TAP.latitude);
+    expect(body.lon).not.toBe(feres.lon);
+  });
+});
+
+it('sends the settlement coordinate when there is no map to drop a pin on', async () => {
+  delete process.env.EXPO_PUBLIC_MAP_TILES_URL;
+
+  open();
+  expect(screen.queryByTestId('pp-map')).toBeNull();
+
+  fireEvent.changeText(screen.getByTestId('pp-name'), 'ΚΤΕΛ Φερών');
+  fireEvent.press(screen.getByTestId('pp-submit'));
+
+  await waitFor(() => expect(api.proposeMeetingPoint).toHaveBeenCalled());
+  const body = (api.proposeMeetingPoint as jest.Mock).mock.calls[0][0];
+  expect(body.lon).toBe(feres.lon);
+  expect(body.lat).toBe(feres.lat);
+});

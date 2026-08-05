@@ -18,6 +18,8 @@ import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 
 import { api, type PointProposal } from '../api/endpoints';
+import { Map } from '../map/Map';
+import { haveTiles } from '../map/tiles';
 import { ApiError } from '../api/client';
 import { type Pin } from '../design/pin';
 import { Button, Field } from './ui';
@@ -31,6 +33,9 @@ export function ProposePoint({ place, testID }: { place: Pin; testID?: string })
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [kind, setKind] = useState<string>('other');
+  // Where they put the pin, or null while it is still the settlement's own
+  // coordinate. A map is not always configured, and this works either way.
+  const [pin, setPin] = useState<{ lon: number; lat: number } | null>(null);
   const [sent, setSent] = useState<PointProposal | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,11 +49,11 @@ export function ProposePoint({ place, testID }: { place: Pin; testID?: string })
         place_id: place.id!,
         name,
         kind,
-        // The settlement's own coordinate. Picking a point on a map is the
-        // right way to do this and there is no map yet; a moderator sees the
-        // name and can place it properly, which is what review is for.
-        lon: place.lon,
-        lat: place.lat,
+        // The pin if they dropped one, the settlement's own coordinate
+        // otherwise. Without a map this is a name and a rough position, and a
+        // moderator has to work out where it meant; with one it is the place.
+        lon: pin?.lon ?? place.lon,
+        lat: pin?.lat ?? place.lat,
         idempotency_key: key,
       }),
     onSuccess: (p) => {
@@ -115,6 +120,18 @@ export function ProposePoint({ place, testID }: { place: Pin; testID?: string })
           </Text>
         ))}
       </View>
+
+      {haveTiles() ? (
+        <>
+          <Text style={styles.hint}>{t('places.proposeTapTheMap')}</Text>
+          <Map
+            testID={testID ? `${testID}-map` : undefined}
+            centre={{ lon: place.lon, lat: place.lat }}
+            pins={[pin ?? { lon: place.lon, lat: place.lat }]}
+            onPick={setPin}
+          />
+        </>
+      ) : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Text style={styles.hint}>{t('places.proposeHint')}</Text>
