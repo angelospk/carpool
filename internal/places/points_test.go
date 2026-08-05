@@ -1,6 +1,8 @@
 package places_test
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 
 	"carpool/internal/places"
@@ -78,5 +80,42 @@ func TestEveryMeetingPointBelongsToARealSettlement(t *testing.T) {
 	}
 	if len(seen) < 1000 {
 		t.Fatalf("only %d meeting points; the dataset is not built", len(seen))
+	}
+}
+
+// The harvester's job is the systematic junk; a moderator's is the judgement
+// calls. These are the systematic kinds, and they must not come back.
+func TestTheListHoldsNoBusStopsWearingAStationsTag(t *testing.T) {
+	timetable := regexp.MustCompile(`(Νο\s?\d|ΓΡΑΜΜΗ\s?\d|->|→)`)
+	urban := regexp.MustCompile(`(Αφετηρ|Αμαξοστάσ|\bΤ\.\s?Σ\.)`)
+
+	for _, p := range places.AllPoints() {
+		if timetable.MatchString(p.Name) {
+			t.Errorf("%s (%s) is a route number, not a place", p.Name, p.ID)
+		}
+		if urban.MatchString(p.Name) {
+			t.Errorf("%s (%s) is a piece of the city bus network", p.Name, p.ID)
+		}
+		if p.Kind == "port" && strings.Contains(p.Name, "&") {
+			t.Errorf("%s (%s) is a berth named after the boats at it", p.Name, p.ID)
+		}
+	}
+}
+
+// Two identical names under one settlement is a choice between two identical
+// answers, which is not a choice.
+func TestNoSettlementOffersTheSameNameTwice(t *testing.T) {
+	seen := map[string]map[string]bool{}
+	for _, p := range places.AllPoints() {
+		names, ok := seen[p.PlaceID]
+		if !ok {
+			names = map[string]bool{}
+			seen[p.PlaceID] = names
+		}
+		key := strings.ToLower(strings.TrimSpace(p.Name))
+		if names[key] {
+			t.Errorf("%s offers %q twice", p.PlaceID, p.Name)
+		}
+		names[key] = true
 	}
 }

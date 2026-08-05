@@ -27,6 +27,23 @@ Rejected on purpose:
 - Anything with access=private, customers or no. A gated car park is not a
   place to meet a stranger.
 - Anything unnamed. "The parking" is not a landmark.
+- Anything that is a bus stop wearing a station's tag: highway=bus_stop, or a
+  route_ref listing the urban lines it serves. Θεσσαλονίκη's list was three of
+  these, and one of them was a coach agency.
+- Names that are really route numbers — "ΚΕΝ. ΑΦΕΤΗΡΙΑ Νο2, Νο4, Νο5" is a
+  terminus board, not a place.
+
+What is NOT rejected, having been checked against the data rather than assumed:
+
+- shop=ticket. It is on ΚΤΕΛ Αττικής, which is a real coach station with a
+  ticket window in it. Treating it as a hard negative would have deleted one of
+  the best entries in the file.
+- public_transport=station. It is on the junk as often as on the stations,
+  including on the coach agency, so it discriminates nothing.
+
+What sorts the rest is whether anything says a real establishment is there: a
+phone, a website, a street address, a network. A coach agency mapped as a bare
+name has none of them; ΚΤΕΛ Λάρισας has four.
 
 Output: © OpenStreetMap contributors, ODbL.
 """
@@ -35,6 +52,7 @@ import csv
 import io
 import math
 import pathlib
+import re
 import sys
 import tempfile
 
@@ -75,6 +93,32 @@ RADIUS_KM = {"city": 6.0, "town": 4.0, "village": 2.5, "hamlet": 2.0}
 # Access values that mean "not for you". A gated car park is not a place to meet
 # a stranger, and offering it is worse than offering nothing.
 CLOSED_ACCESS = {"private", "customers", "no", "permit", "residents"}
+
+# Tags that mean "this is a stop, whatever its amenity says". A thing serving
+# numbered urban routes is where a bus pauses, not where a car waits.
+STOP_TELLS = ("highway", "route_ref", "public_transport:version")
+STOP_HIGHWAY = {"bus_stop", "platform"}
+
+# Names that are timetables. Route numbers, arrows to destinations, and the
+# semicolon-separated line lists that come with them.
+ROUTE_NOISE = re.compile(r"(Νο\s?\d|Ν[οο]\.\s?\d|ΓΡΑΜΜΗ\s?\d|->|→|\bNo\.?\s?\d)", re.IGNORECASE)
+
+# Words that name a piece of the urban bus network rather than a place a car
+# meets somebody. Αφετηρία is where a city line starts, αμαξοστάσιο is the depot
+# it sleeps in, and Τ.Σ. is how στάση is abbreviated on a pole.
+#
+# "Αστικ-" is deliberately not here on its own: ΚΤΕΛ Αστικών Λάρισας is the
+# operator of the city buses and also a real station somebody can be dropped at.
+URBAN_NETWORK = re.compile(r"(Αφετηρ|Αμαξοστάσ|\bΤ\.\s?Σ\.|\bΤ\.Σ\b)", re.IGNORECASE)
+
+# A ferry terminal named after the boats tied up at it. Two vessels joined with
+# an ampersand is a berth label, not a place.
+VESSEL_NAME = re.compile(r"&")
+
+# Tags that say somebody actually runs something here. None of them proves a
+# coach station; together they separate one from a name on a pavement.
+ESTABLISHMENT_TELLS = ("phone", "website", "operator", "network", "addr:street",
+                       "opening_hours", "email", "brand")
 
 
 def load_settlements() -> list[dict]:
@@ -125,6 +169,19 @@ def build(pbf: pathlib.Path, features) -> tuple[list[dict], dict]:
                     continue
                 if p.get("access", "") in CLOSED_ACCESS:
                     continue
+                if p.get("highway") in STOP_HIGHWAY or "route_ref" in p:
+                    continue
+                if ROUTE_NOISE.search(name) or URBAN_NETWORK.search(name):
+                    continue
+                if kind == "port" and VESSEL_NAME.search(name):
+                    continue
+
+                # Two candidates of the same kind are separated by whether
+                # anything says a real establishment is there. Without this a
+                # coach agency mapped as a bare name outranks ΚΤΕΛ, because both
+                # are amenity=bus_station and the agency happens to sit nearer
+                # the settlement node.
+                established = any(tell in p for tell in ESTABLISHMENT_TELLS)
 
                 lon, lat = coords[0], coords[1]
                 best, best_km = None, None
@@ -144,7 +201,7 @@ def build(pbf: pathlib.Path, features) -> tuple[list[dict], dict]:
                 # id without its type is not an identity, because the two
                 # spaces overlap.
                 raw = str(f.get("id", ""))
-                found.setdefault(place_id, []).append((rank, best_km, {
+                found.setdefault(place_id, []).append((rank, 0 if established else 1, best_km, {
                     "place_id": place_id,
                     "osm_type": {"n": "node", "w": "way", "r": "relation"}.get(raw[:1], "node"),
                     "osm_id": raw[1:],
@@ -163,9 +220,21 @@ def build(pbf: pathlib.Path, features) -> tuple[list[dict], dict]:
     by_kind = {s["osm_type"] + "/" + s["osm_id"]: s["kind"] for s in settlements}
     rows = []
     for place_id, candidates in found.items():
-        candidates.sort(key=lambda c: (c[0], c[1], c[2]["osm_id"]))
+        candidates.sort(key=lambda c: (c[0], c[1], c[2], c[3]["osm_id"]))
         limit = PER_KIND.get(by_kind.get(place_id, "village"), 1)
-        rows.extend(c[2] for c in candidates[:limit])
+
+        # One name per settlement. Ηράκλειο had two ferry terminals both called
+        # "Heraklion", which is a choice between two identical answers.
+        taken, seen = [], set()
+        for c in candidates:
+            key = c[3]["name"].strip().casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            taken.append(c[3])
+            if len(taken) == limit:
+                break
+        rows.extend(taken)
 
     # Sorted for a reproducible diff, but on the rank first so the file order
     # is the order the app shows them in.
