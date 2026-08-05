@@ -112,12 +112,18 @@ applications not to use them, so shipping a default pointed at
 be cut off. MapTiler, Stadia and Protomaps all have free tiers; each wants a
 key, and a key belongs to whoever deploys this rather than to this repository.
 
-One variable, an XYZ raster template:
+One variable, an XYZ raster template. MapTiler is the suggested one — a key on
+the URL, nothing to configure per domain, so the same value works from a laptop,
+from a phone and from the LAN address this is tested on:
 
 ```
-EXPO_PUBLIC_MAP_TILES_URL=https://tiles.example/{z}/{x}/{y}.png?key=…
+EXPO_PUBLIC_MAP_TILES_URL=https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=YOUR_KEY
 EXPO_PUBLIC_MAP_ATTRIBUTION=© MapTiler © OpenStreetMap contributors
 ```
+
+Stadia Maps is an equally good second and takes an `api_key=` parameter the same
+way, so switching is a change of one variable. Check whichever you pick against
+their current free-tier limits rather than against this paragraph — those move.
 
 Raster rather than vector because it is the one shape every provider offers, and
 both platforms build the same style out of it: `maplibre-gl` in the browser,
