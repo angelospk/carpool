@@ -311,3 +311,46 @@ func TestRevokingIsRecordedAndImmediate(t *testing.T) {
 		t.Errorf("%d grant records, want both the grant and the revocation", n)
 	}
 }
+
+// A correction that fixes a name must not wipe the coordinate somebody set last
+// week. The upsert used to overwrite every column with whatever the latest
+// request happened to carry.
+func TestACorrectionThatNamesOneThingKeepsTheRest(t *testing.T) {
+	ctx := context.Background()
+	pool := pointsPool(t)
+	_, mod := seedDriver(t, pool, "+306900000720")
+
+	if err := store.ApplyModeratorEdit(ctx, pool, store.ModeratorEdit{
+		PlaceID: alexandroupoli, Action: "add", Name: "ΚΤΕΛ Έβρου",
+		Kind: "bus_station", Lon: 25.8600, Lat: 40.8600, Priority: -1, By: mod,
+	}); err != nil {
+		t.Fatalf("adding: %v", err)
+	}
+
+	added, err := store.MeetingPointsFor(ctx, pool, alexandroupoli)
+	if err != nil {
+		t.Fatalf("MeetingPointsFor: %v", err)
+	}
+	if added[0].Name != "ΚΤΕΛ Έβρου" || added[0].Lon == 0 {
+		t.Fatalf("the fixture is wrong: %+v", added[0])
+	}
+
+	// Now only the name, as somebody fixing a typo would send.
+	if err := store.ApplyModeratorEdit(ctx, pool, store.ModeratorEdit{
+		PlaceID: alexandroupoli, Action: "update", TargetID: added[0].ID,
+		Name: "ΚΤΕΛ Αλεξανδρούπολης", Priority: -1, By: mod,
+	}); err != nil {
+		t.Fatalf("renaming: %v", err)
+	}
+
+	got, err := store.MeetingPointsFor(ctx, pool, alexandroupoli)
+	if err != nil {
+		t.Fatalf("MeetingPointsFor: %v", err)
+	}
+	if got[0].Name != "ΚΤΕΛ Αλεξανδρούπολης" {
+		t.Errorf("name = %q, want the corrected one", got[0].Name)
+	}
+	if got[0].Lon == 0 || got[0].Kind == "" {
+		t.Errorf("fixing the name wiped the rest: %+v", got[0])
+	}
+}

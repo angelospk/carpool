@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/places"
@@ -41,7 +42,18 @@ type override struct {
 // the harvested list. Falling back would put a point somebody removed for a
 // reason back in front of people, at exactly the moment nobody is watching.
 func MeetingPointsFor(ctx context.Context, pool *pgxpool.Pool, placeID string) ([]places.MeetingPoint, error) {
-	rows, err := pool.Query(ctx, `
+	return meetingPointsIn(ctx, pool, placeID)
+}
+
+// pointQuerier is a pool or a transaction. Reading through the transaction is
+// what lets a proposal be checked against the list as it will be, rather than
+// as it was before the lock was taken.
+type pointQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+func meetingPointsIn(ctx context.Context, q pointQuerier, placeID string) ([]places.MeetingPoint, error) {
+	rows, err := q.Query(ctx, `
 		SELECT target_id, action,
 		       coalesce(name, ''), coalesce(kind, ''),
 		       coalesce(ST_X(point), 0), coalesce(ST_Y(point), 0),
@@ -62,7 +74,11 @@ func MeetingPointsFor(ctx context.Context, pool *pgxpool.Pool, placeID string) (
 			return nil, fmt.Errorf("store: scanning a meeting point override: %w", err)
 		}
 		edits[o.targetID] = o
-		if o.action == "add" {
+		// A point that is not in the harvested list is a point this table
+		// carries itself, whether the row calls it an addition or a correction
+		// to one. Keying off the action alone made a curated point vanish the
+		// first time somebody fixed its name.
+		if o.action != "hide" && !harvested(placeID, o.targetID) {
 			added = append(added, o)
 		}
 	}
@@ -117,6 +133,16 @@ func MeetingPointsFor(ctx context.Context, pool *pgxpool.Pool, placeID string) (
 		out = out[:MaxMeetingPoints]
 	}
 	return out, nil
+}
+
+// harvested reports whether a target came out of the embedded list.
+func harvested(placeID, targetID string) bool {
+	for _, p := range places.PointsFor(placeID) {
+		if p.ID == targetID {
+			return true
+		}
+	}
+	return false
 }
 
 func priorityOf(edits map[string]override, p places.MeetingPoint) int {

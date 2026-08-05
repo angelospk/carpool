@@ -323,3 +323,26 @@ func TestAPointOnTopOfAnExistingOneIsRefused(t *testing.T) {
 		t.Errorf("error = %v, want ErrDuplicatePoint", err)
 	}
 }
+
+// A point curated last week is a point. Proposing it again under another name
+// gives one place two entries, and the list stops being an answer.
+func TestAProposalOnTopOfACuratedPointIsRefused(t *testing.T) {
+	ctx := context.Background()
+	pool, user := proposerPool(t, "+306900000817")
+	_, mod := seedDriver(t, pool, "+306900000818")
+
+	if err := store.ApplyModeratorEdit(ctx, pool, store.ModeratorEdit{
+		PlaceID: alexandroupoli, Action: "add", Name: "ΚΤΕΛ Έβρου",
+		Kind: "bus_station", Lon: proposalLon, Lat: proposalLat, By: mod,
+	}); err != nil {
+		t.Fatalf("curating: %v", err)
+	}
+
+	// The same spot, a different name. The harvested list knows nothing about
+	// it, which is exactly why the check cannot only consult the harvested list.
+	p := proposal(user)
+	p.Name = "Το πρακτορείο"
+	if _, err := store.ProposeMeetingPoint(ctx, pool, p); !errors.Is(err, store.ErrDuplicatePoint) {
+		t.Errorf("error = %v, want ErrDuplicatePoint", err)
+	}
+}

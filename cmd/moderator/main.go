@@ -40,6 +40,19 @@ func main() {
 }
 
 func run(grant, revoke string, list bool, note string) error {
+	// Checked before anything is opened, so a mistyped invocation is answered
+	// at once rather than after a connection to the production database.
+	asked := 0
+	for _, on := range []bool{grant != "", revoke != "", list} {
+		if on {
+			asked++
+		}
+	}
+	if asked != 1 {
+		flag.Usage()
+		return fmt.Errorf("say exactly one of -grant, -revoke or -list")
+	}
+
 	ctx := context.Background()
 
 	cfg, err := config.Load(os.LookupEnv)
@@ -60,8 +73,7 @@ func run(grant, revoke string, list bool, note string) error {
 	case revoke != "":
 		return set(ctx, pool, revoke, false, note)
 	default:
-		flag.Usage()
-		return fmt.Errorf("nothing to do")
+		return fmt.Errorf("unreachable: the check above allows exactly one")
 	}
 }
 

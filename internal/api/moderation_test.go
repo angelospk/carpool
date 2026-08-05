@@ -358,3 +358,30 @@ func TestAModeratorsCorrectionIsCheckedToo(t *testing.T) {
 		}
 	}
 }
+
+// A database that cannot be read is not an answer about who somebody is.
+// Reporting 403 during an outage tells a moderator they have been demoted, and
+// sends them looking for the wrong problem.
+func TestADatabaseFailureIsNotReportedAsNotBeingAModerator(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000915", "Ελένη")
+	makeModerator(t, h, "+306900000915", true)
+
+	ctx := context.Background()
+	// The bluntest possible outage, and a real one: the query the check makes
+	// stops working.
+	if _, err := h.pool.Exec(ctx, `ALTER TABLE users RENAME TO users_away`); err != nil {
+		t.Fatalf("breaking the read: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = h.pool.Exec(context.Background(), `ALTER TABLE users_away RENAME TO users`)
+	})
+
+	rec := h.do(http.MethodGet, "/v1/moderation/meeting-points", nil, token)
+	if rec.Code == http.StatusForbidden {
+		t.Fatal("an outage was reported as the caller not being a moderator")
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status %d, want 500", rec.Code)
+	}
+}

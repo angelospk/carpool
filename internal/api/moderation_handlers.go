@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"carpool/internal/domain"
 	"carpool/internal/store"
@@ -109,10 +110,22 @@ func (d Deps) requireModerator(next http.Handler) http.Handler {
 		}
 
 		var is bool
-		if err := d.Pool.QueryRow(r.Context(),
-			`SELECT is_moderator FROM users WHERE id = $1 AND status = 'active'`, userID).Scan(&is); err != nil || !is {
-			// The same answer either way: somebody who is not a moderator does
-			// not learn that the queue exists.
+		err := d.Pool.QueryRow(r.Context(),
+			`SELECT is_moderator FROM users WHERE id = $1 AND status = 'active'`, userID).Scan(&is)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			// No such user, or a suspended one. The same answer as somebody who
+			// is simply not a moderator: nobody learns the queue exists by
+			// being told which of the two they are.
+			writeError(w, http.StatusForbidden, "forbidden", "that is not yours to do")
+			return
+		case err != nil:
+			// A database that cannot be read is not an answer about who this
+			// person is. Saying 403 here would tell a moderator they had been
+			// demoted, during an outage.
+			writeError(w, http.StatusInternalServerError, "internal", "could not check that")
+			return
+		case !is:
 			writeError(w, http.StatusForbidden, "forbidden", "that is not yours to do")
 			return
 		}
@@ -201,8 +214,14 @@ func (d Deps) handleModeratorEdit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "too_far", "that point is not in that place")
 	case errors.Is(err, domain.ErrBadName):
 		writeError(w, http.StatusBadRequest, "invalid_name", "that name cannot be used")
-	case err != nil:
+	case errors.Is(err, store.ErrBadEdit):
+		// The correction itself did not make sense: an action nobody has heard
+		// of, or a hide that did not say which point.
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	case err != nil:
+		// Anything else is this service failing, and its internals are not the
+		// caller's to read.
+		writeError(w, http.StatusInternalServerError, "internal", "could not record that correction")
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}

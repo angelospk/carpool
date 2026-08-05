@@ -82,6 +82,7 @@ export function ProposePoint({ place, testID }: { place: Pin; testID?: string })
     return (
       <Text
         testID={testID ? `${testID}-open` : undefined}
+        accessibilityRole="button"
         style={styles.link}
         onPress={() => setOpen(true)}
       >
@@ -105,6 +106,8 @@ export function ProposePoint({ place, testID }: { place: Pin; testID?: string })
           <Text
             key={k}
             testID={testID ? `${testID}-kind-${k}` : undefined}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: kind === k }}
             onPress={() => setKind(k)}
             style={[styles.kind, kind === k && styles.kindChosen]}
           >

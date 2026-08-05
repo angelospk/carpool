@@ -37,6 +37,8 @@ var (
 	ErrAlreadyDecided = errors.New("store: that request has already been decided")
 	// ErrNoRequest means there is no such request.
 	ErrNoRequest = errors.New("store: no such request")
+	// ErrBadEdit means the correction itself does not make sense.
+	ErrBadEdit = errors.New("store: that is not a correction")
 )
 
 // PointKinds are the kinds a person may choose. "other" exists so that somebody
@@ -109,12 +111,6 @@ func ProposeMeetingPoint(ctx context.Context, pool *pgxpool.Pool, p MeetingPoint
 	if err := plausible(place, p.Lon, p.Lat); err != nil {
 		return MeetingPointRequest{}, err
 	}
-	for _, existing := range places.PointsFor(p.PlaceID) {
-		if haversineMeters(p.Lon, p.Lat, existing.Lon, existing.Lat) < nearbyMeters {
-			return MeetingPointRequest{}, ErrDuplicatePoint
-		}
-	}
-
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return MeetingPointRequest{}, fmt.Errorf("store: begin: %w", err)
@@ -133,18 +129,34 @@ func ProposeMeetingPoint(ctx context.Context, pool *pgxpool.Pool, p MeetingPoint
 	if p.IdempotencyKey != "" {
 		var existing MeetingPointRequest
 		err := tx.QueryRow(ctx, `
-			SELECT id, place_id, action, name, kind, status, created_at
+			SELECT id, place_id, action, target_id, name, kind,
+			       ST_X(point), ST_Y(point), status, reason, created_at, reviewed_at
 			  FROM meeting_point_requests
 			 WHERE proposed_by = $1 AND idempotency_key = $2`,
 			p.ProposedBy, p.IdempotencyKey).
-			Scan(&existing.ID, &existing.PlaceID, &existing.Action, &existing.Name,
-				&existing.Kind, &existing.Status, &existing.CreatedAt)
+			Scan(&existing.ID, &existing.PlaceID, &existing.Action, &existing.TargetID,
+				&existing.Name, &existing.Kind, &existing.Lon, &existing.Lat,
+				&existing.Status, &existing.Reason, &existing.CreatedAt, &existing.Reviewed)
 		if err == nil {
 			existing.PlaceName = place.Name
 			return existing, nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return MeetingPointRequest{}, fmt.Errorf("store: checking for a retry: %w", err)
+		}
+	}
+
+	// Against what the settlement actually offers, not the harvested list alone:
+	// a point curated last week is a point, and proposing it again under
+	// another name gives two entries for one place. Inside the transaction,
+	// because outside it the answer is already stale by the time it is used.
+	effective, err := meetingPointsIn(ctx, tx, p.PlaceID)
+	if err != nil {
+		return MeetingPointRequest{}, err
+	}
+	for _, existing := range effective {
+		if haversineMeters(p.Lon, p.Lat, existing.Lon, existing.Lat) < nearbyMeters {
+			return MeetingPointRequest{}, ErrDuplicatePoint
 		}
 	}
 
@@ -346,10 +358,10 @@ type ModeratorEdit struct {
 // the question "who removed this, and when" has no answer.
 func ApplyModeratorEdit(ctx context.Context, pool *pgxpool.Pool, e ModeratorEdit) error {
 	if e.Action != "add" && e.Action != "update" && e.Action != "hide" {
-		return fmt.Errorf("store: %q is not something that can be done to a meeting point", e.Action)
+		return fmt.Errorf("%w: %q is not something that can be done to a meeting point", ErrBadEdit, e.Action)
 	}
 	if e.Action != "add" && e.TargetID == "" {
-		return fmt.Errorf("store: a %s needs to say which point", e.Action)
+		return fmt.Errorf("%w: a %s has to say which point", ErrBadEdit, e.Action)
 	}
 	place, ok := places.ByID(e.PlaceID)
 	if !ok {
@@ -382,7 +394,7 @@ func ApplyModeratorEdit(ctx context.Context, pool *pgxpool.Pool, e ModeratorEdit
 		// Adding needs all three, which the schema also insists on; saying so
 		// here gives a reason rather than a constraint violation.
 		if e.Action == "add" && (name == nil || kind == nil || lon == nil) {
-			return fmt.Errorf("store: a new point needs a name, a kind and a coordinate")
+			return fmt.Errorf("%w: a new point needs a name, a kind and a coordinate", ErrBadEdit)
 		}
 	}
 
@@ -416,9 +428,18 @@ func ApplyModeratorEdit(ctx context.Context, pool *pgxpool.Pool, e ModeratorEdit
 		VALUES ($1, $2, $3, $4, $5,
 		        CASE WHEN $6::float8 IS NULL THEN NULL
 		             ELSE ST_SetSRID(ST_MakePoint($6, $7), 4326) END, $8, $9)
+		-- coalesce, because a correction that only fixes a name must not wipe
+		-- the coordinate somebody set last week. Hiding is the exception: it
+		-- clears them, and the schema insists on that.
 		ON CONFLICT (target_id) DO UPDATE
-		   SET action = EXCLUDED.action, name = EXCLUDED.name, kind = EXCLUDED.kind,
-		       point = EXCLUDED.point, priority = EXCLUDED.priority,
+		   SET action = EXCLUDED.action,
+		       name  = CASE WHEN EXCLUDED.action = 'hide' THEN NULL
+		                    ELSE coalesce(EXCLUDED.name, meeting_point_overrides.name) END,
+		       kind  = CASE WHEN EXCLUDED.action = 'hide' THEN NULL
+		                    ELSE coalesce(EXCLUDED.kind, meeting_point_overrides.kind) END,
+		       point = CASE WHEN EXCLUDED.action = 'hide' THEN NULL
+		                    ELSE coalesce(EXCLUDED.point, meeting_point_overrides.point) END,
+		       priority = EXCLUDED.priority,
 		       request_id = EXCLUDED.request_id, updated_at = now()`,
 		targetID, e.PlaceID, e.Action, name, kind, lon, lat, e.Priority, requestID); err != nil {
 		return fmt.Errorf("store: applying the correction: %w", err)
