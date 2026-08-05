@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"carpool/internal/asks"
+	"carpool/internal/domain"
 	"carpool/internal/store"
 )
 
@@ -28,6 +29,10 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		WindowStart      time.Time `json:"window_start"`
 		WindowEnd        time.Time `json:"window_end"`
 		Seats            int       `json:"seats"`
+		// Luggage is what they are bringing. Absent means a bag they can hold,
+		// which is most people; the one bringing skis is the one who will
+		// happily say so.
+		Luggage string `json:"luggage"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -35,6 +40,16 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 
 	if body.Seats <= 0 {
 		body.Seats = 1
+	}
+	luggage := domain.LuggageNone
+	if body.Luggage != "" {
+		parsed, err := domain.ParseLuggage(body.Luggage)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_luggage",
+				"that is not a luggage size this app knows")
+			return
+		}
+		luggage = parsed
 	}
 	if !body.WindowStart.Before(body.WindowEnd) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "window_start must precede window_end")
@@ -75,14 +90,15 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	var requestID uuid.UUID
 	err := d.Pool.QueryRow(r.Context(), `
 		INSERT INTO ride_requests (passenger_id, origin, destination, origin_label, destination_label,
-		                           window_start, window_end, seats, kind, status)
+		                           window_start, window_end, seats, kind, status, luggage)
 		VALUES ($1,
 		        ST_SetSRID(ST_MakePoint($2, $3), 4326),
 		        ST_SetSRID(ST_MakePoint($4, $5), 4326),
-		        $6, $7, $8, $9, $10, 'open', 'open')
+		        $6, $7, $8, $9, $10, 'open', 'open', $11::luggage_size)
 		RETURNING id`,
 		userID, body.OriginLon, body.OriginLat, body.DestinationLon, body.DestinationLat,
-		body.OriginLabel, body.DestinationLabel, body.WindowStart, body.WindowEnd, body.Seats).Scan(&requestID)
+		body.OriginLabel, body.DestinationLabel, body.WindowStart, body.WindowEnd, body.Seats,
+		string(luggage)).Scan(&requestID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "the request was rejected")
 		return

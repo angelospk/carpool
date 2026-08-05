@@ -6,7 +6,10 @@ import PublishScreen from '../(tabs)/publish';
 import { api } from '../../src/api/endpoints';
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { publishRoute: jest.fn(), places: jest.fn(), meetingPoints: jest.fn() },
+  api: { publishRoute: jest.fn(), places: jest.fn(), meetingPoints: jest.fn(), vehicles: jest.fn() },
+  // The screen renders pickers built from these, so a mock that omits them
+  // takes the screen down before the test reaches what it is about.
+  LUGGAGE_SIZES: ['none', 'cabin', 'suitcase', 'bulky'],
 }));
 
 function wrap(node: ReactNode) {

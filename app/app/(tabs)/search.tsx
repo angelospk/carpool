@@ -4,10 +4,11 @@ import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 
-import { api } from '../../src/api/endpoints';
+import { api, type LuggageSize } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import { Button, Card, Hint, Screen, Stepper, Title } from '../../src/components/ui';
 import { PlaceField } from '../../src/components/PlaceField';
+import { LuggagePicker } from '../../src/components/LuggagePicker';
 import { colors, space, type } from '../../src/design/tokens';
 import { type Pin } from '../../src/design/pin';
 
@@ -20,6 +21,7 @@ export default function SearchScreen() {
   const [from, setFrom] = useState<Pin | null>(null);
   const [to, setTo] = useState<Pin | null>(null);
   const [seats, setSeats] = useState(1);
+  const [luggage, setLuggage] = useState<LuggageSize>('none');
   const [outcome, setOutcome] = useState<string | null>(null);
 
   const create = useMutation({
@@ -37,6 +39,7 @@ export default function SearchScreen() {
         window_start: start.toISOString(),
         window_end: end.toISOString(),
         seats,
+        luggage,
       });
     },
     onSuccess: (res) => {
@@ -80,6 +83,8 @@ export default function SearchScreen() {
               />
             </View>
           </View>
+
+          <LuggagePicker testID="luggage" value={luggage} onChange={setLuggage} />
 
           <View style={styles.seats}>
             <Text style={styles.seatsLabel}>{t('search.seats')}</Text>

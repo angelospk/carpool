@@ -689,3 +689,82 @@ func TestEditingTheDetourReachesOccurrencesNobodyHasBookedYet(t *testing.T) {
 			allow, km, min)
 	}
 }
+
+// The allowance is copied onto the departure, like the detour budget and the
+// car. A driver who publishes "suitcases fine" and changes their mind in March
+// has not changed what the trip somebody booked in February agreed to carry.
+func TestMaterializeSnapshotsTheLuggageAllowance(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t, time.Monday)
+
+	if _, err := f.pool.Exec(ctx, `UPDATE route_templates SET luggage = 'bulky'`); err != nil {
+		t.Fatalf("setting the allowance: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	luggage := func() string {
+		t.Helper()
+		var stored string
+		if err := f.pool.QueryRow(ctx,
+			`SELECT luggage::text FROM trip_occurrences ORDER BY service_date LIMIT 1`).Scan(&stored); err != nil {
+			t.Fatalf("reading the occurrence: %v", err)
+		}
+		return stored
+	}
+	if got := luggage(); got != "bulky" {
+		t.Errorf("the departure carries %q, want the route's bulky", got)
+	}
+
+	// Changing the route changes the departures nobody has booked yet, the same
+	// way the seats and the detour budget do.
+	if _, err := f.pool.Exec(ctx, `UPDATE route_templates SET luggage = 'cabin'`); err != nil {
+		t.Fatalf("changing the allowance: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if got := luggage(); got != "cabin" {
+		t.Errorf("an unbooked departure still carries %q after the route changed", got)
+	}
+}
+
+// And a departure somebody has booked keeps what it agreed to. A driver who
+// changes their mind in March has not changed what the trip booked in February
+// promised to carry, and the passenger with the suitcase already packed it.
+func TestABookedDepartureKeepsTheAllowanceItWasBookedWith(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t, time.Monday)
+
+	if _, err := f.pool.Exec(ctx, `UPDATE route_templates SET luggage = 'bulky'`); err != nil {
+		t.Fatalf("setting the allowance: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var first string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT service_date::text FROM trip_occurrences ORDER BY service_date LIMIT 1`).Scan(&first); err != nil {
+		t.Fatalf("finding the first departure: %v", err)
+	}
+	f.bookOccurrence(first)
+
+	if _, err := f.pool.Exec(ctx, `UPDATE route_templates SET luggage = 'none'`); err != nil {
+		t.Fatalf("changing the allowance: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	var stored string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT o.luggage::text FROM trip_occurrences o
+		  JOIN bookings b ON b.occurrence_id = o.id LIMIT 1`).Scan(&stored); err != nil {
+		t.Fatalf("reading the booked occurrence: %v", err)
+	}
+	if stored != "bulky" {
+		t.Errorf("a booked departure became %q; it was booked as bulky", stored)
+	}
+}

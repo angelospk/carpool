@@ -50,7 +50,6 @@ func TestContradictoryPreferencesAreRefused(t *testing.T) {
 		{"pets_ok", "no_pets"},
 		{"quiet_ride", "music_on"},
 		{"chatty", "keep_to_myself"},
-		{"big_luggage_ok", "cabin_bag_only"},
 	} {
 		if _, err := domain.NormalisePreferences(pair); !errors.Is(err, domain.ErrContradictoryTags) {
 			t.Errorf("%v gave %v, want ErrContradictoryTags", pair, err)
@@ -68,12 +67,12 @@ func TestPickingEverythingIsRefused(t *testing.T) {
 		t.Errorf("the whole vocabulary gave %v", err)
 	}
 
-	// And six is the largest set that does not contradict itself: one from each
+	// And five is the largest set that does not contradict itself: one from each
 	// pair, plus air conditioning. Which is why there is no separate cap — a
-	// number above six could never be reached.
+	// number above five could never be reached.
 	most := []string{
 		"no_smoking", "no_pets", "quiet_ride", "chatty",
-		"air_conditioning", "big_luggage_ok",
+		"air_conditioning",
 	}
 	if _, err := domain.NormalisePreferences(most); err != nil {
 		t.Fatalf("the largest compatible set was refused: %v", err)

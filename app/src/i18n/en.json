@@ -81,6 +81,16 @@
     "againAsked": "The driver has been asked",
     "againNone": "No next trip with a free seat"
   },
+  "luggage": {
+    "bulky": "A bicycle, skis, a pushchair",
+    "cabin": "A cabin bag",
+    "driverHint": "We will not bother you about anything bigger.",
+    "driverLabel": "What fits?",
+    "hint": "We will only offer you drivers who take it.",
+    "label": "What are you bringing?",
+    "none": "A bag on my lap",
+    "suitcase": "A suitcase"
+  },
   "map": {
     "unconfigured": "No map is configured on this deployment."
   },
@@ -124,10 +134,8 @@
   },
   "preferences": {
     "air_conditioning": "Air conditioning",
-    "big_luggage_ok": "Big bags fine",
     "bioLabel": "A few words about you",
     "bioPlaceholder": "e.g. I work in Alexandroupoli and drive down Tuesdays and Thursdays.",
-    "cabin_bag_only": "Small bags only",
     "chatty": "Happy to chat",
     "hint": "These are not rules — they are what to expect.",
     "keep_to_myself": "I keep to myself",

@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 
-import { api, type MeetingPoint } from '../../src/api/endpoints';
+import { api, type LuggageSize, type MeetingPoint } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import {
   Button,
@@ -17,6 +17,7 @@ import {
   Title,
 } from '../../src/components/ui';
 import { VehiclePicker } from '../../src/components/VehiclePicker';
+import { LuggagePicker } from '../../src/components/LuggagePicker';
 import { colors, space, type } from '../../src/design/tokens';
 import { type Pin } from '../../src/design/pin';
 import { PlaceField } from '../../src/components/PlaceField';
@@ -57,6 +58,7 @@ export default function PublishScreen() {
   // null means "whichever is my default", which is what a driver with one car
   // sends and what the server would have chosen anyway.
   const [vehicleID, setVehicleID] = useState<string | null>(null);
+  const [luggage, setLuggage] = useState<LuggageSize>('suitcase');
   const [outcome, setOutcome] = useState<string | null>(null);
 
 
@@ -80,6 +82,7 @@ export default function PublishScreen() {
         ...(allowStops !== null ? { allow_stops: allowStops } : {}),
         ...(detourKm !== null ? { detour_km: detourKm } : {}),
         ...(vehicleID !== null ? { vehicle_id: vehicleID } : {}),
+        luggage,
       }),
     onSuccess: (r) => setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`),
     onError: (e) =>
@@ -168,6 +171,8 @@ export default function PublishScreen() {
           </View>
 
           <VehiclePicker testID="publish-vehicle" value={vehicleID} onChange={setVehicleID} />
+
+          <LuggagePicker testID="publish-luggage" value={luggage} onChange={setLuggage} asDriver />
 
           <View style={styles.seats}>
             <Text style={styles.seatsLabel}>{t('publish.seats')}</Text>

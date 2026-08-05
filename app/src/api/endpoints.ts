@@ -84,11 +84,21 @@ export const PREFERENCE_TAGS = [
   'chatty',
   'keep_to_myself',
   'air_conditioning',
-  'big_luggage_ok',
-  'cabin_bag_only',
 ] as const;
 
 export type PreferenceTag = (typeof PREFERENCE_TAGS)[number];
+
+/**
+ * How much somebody is bringing, or how much a driver will take.
+ *
+ * Ordered, and the order is the whole point: a driver who will take a suitcase
+ * will take a cabin bag, and one who will take neither should not be asked
+ * about a bicycle. The server excludes on it rather than ranking, so a size
+ * chosen here changes who is offered the trip.
+ */
+export const LUGGAGE_SIZES = ['none', 'cabin', 'suitcase', 'bulky'] as const;
+
+export type LuggageSize = (typeof LUGGAGE_SIZES)[number];
 
 /** The pairs that cannot both be true, so the picker can grey one out. */
 export const CONTRADICTIONS: Array<[PreferenceTag, PreferenceTag]> = [
@@ -96,7 +106,6 @@ export const CONTRADICTIONS: Array<[PreferenceTag, PreferenceTag]> = [
   ['no_pets', 'pets_ok'],
   ['quiet_ride', 'music_on'],
   ['chatty', 'keep_to_myself'],
-  ['big_luggage_ok', 'cabin_bag_only'],
 ];
 
 export type Me = {
@@ -378,6 +387,8 @@ export const api = {
     detour_km?: number;
     /** Which car. Omitted means the default, which is what a driver with one sends. */
     vehicle_id?: string;
+    /** The largest thing this route will take. Omitted means a suitcase. */
+    luggage?: LuggageSize;
   }) => request<{ template_id: string; route_km: number; ends_at_port: boolean }>('/v1/routes', {
       method: 'POST',
       body,
@@ -393,6 +404,8 @@ export const api = {
     window_start: string;
     window_end: string;
     seats: number;
+    /** What you are bringing. Omitted means a bag you can hold. */
+    luggage?: LuggageSize;
   }) =>
     request<{ request_id: string; asking: boolean; ask_id?: string }>('/v1/requests', {
       method: 'POST',

@@ -34,6 +34,10 @@ type routeBody struct {
 	DetourKm   *float64 `json:"detour_km"`
 	DetourMin  *int     `json:"detour_min"`
 
+	// Luggage is the largest thing this route will carry. Absent means a
+	// suitcase, which is what an ordinary boot takes.
+	Luggage string `json:"luggage"`
+
 	// VehicleID names which of the driver's cars this route goes out in.
 	// Absent means their default, which is what somebody with one car sends and
 	// what the app sends until the driver has a second.
@@ -123,6 +127,17 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	luggage := domain.LuggageSuitcase
+	if body.Luggage != "" {
+		parsed, err := domain.ParseLuggage(body.Luggage)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_luggage",
+				"that is not a luggage size this app knows")
+			return
+		}
+		luggage = parsed
+	}
+
 	vehicle, err := d.chooseVehicle(r.Context(), userID, body.VehicleID)
 	if errors.Is(err, drivers.ErrNoVehicle) {
 		writeError(w, http.StatusBadRequest, "no_vehicle",
@@ -149,6 +164,7 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		OSRMDataVersion:  d.OSRMDataVersion,
 		EndsAtPort:       shaped.SeaCrossing,
 		Detour:           detour,
+		Luggage:          luggage,
 		Schedule:         schedule,
 	})
 	if err != nil {

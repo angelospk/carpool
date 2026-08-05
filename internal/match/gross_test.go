@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"carpool/internal/domain"
 	"carpool/internal/match"
 	"carpool/internal/store"
 	"carpool/internal/store/testdb"
@@ -378,4 +379,100 @@ func wktLine(lon1, lat1, lon2, lat2 float64) string {
 func ftoa(f float64) string {
 	b, _ := json.Marshal(f)
 	return string(b)
+}
+
+// A driver who said they will take a cabin bag is not asked about a bicycle.
+// They would say no, and both of them would have spent the exchange finding
+// that out.
+func TestABicycleDoesNotReachADriverWhoSaidCabinBagsOnly(t *testing.T) {
+	f := setup(t)
+	f.addOccurrence(t, corridorWKT)
+	ctx := context.Background()
+
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE trip_occurrences SET luggage = 'cabin'`); err != nil {
+		t.Fatalf("setting the allowance: %v", err)
+	}
+
+	q := query()
+	q.Luggage = domain.LuggageBulky
+	got, err := match.Gross(ctx, f.pool, q)
+	if err != nil {
+		t.Fatalf("Gross: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("%d drivers offered for a bicycle they will not take", len(got))
+	}
+
+	// And the same driver is still there for somebody with a cabin bag.
+	q.Luggage = domain.LuggageCabin
+	got, err = match.Gross(ctx, f.pool, q)
+	if err != nil {
+		t.Fatalf("Gross: %v", err)
+	}
+	if len(got) == 0 {
+		t.Error("a cabin bag was refused by a driver who takes cabin bags")
+	}
+}
+
+// A request that says nothing about luggage is somebody with a bag they can
+// hold, which is most people. The alternative — treating silence as a bicycle —
+// would empty the results of every request that did not think to mention it.
+func TestARequestThatSaysNothingAboutLuggageIsStillMatched(t *testing.T) {
+	f := setup(t)
+	f.addOccurrence(t, corridorWKT)
+	ctx := context.Background()
+
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE trip_occurrences SET luggage = 'none'`); err != nil {
+		t.Fatalf("setting the allowance: %v", err)
+	}
+
+	got, err := match.Gross(ctx, f.pool, query()) // Luggage left unset
+	if err != nil {
+		t.Fatalf("Gross: %v", err)
+	}
+	if len(got) == 0 {
+		t.Error("a request with no luggage stated matched nobody")
+	}
+}
+
+// Every level against every level, in the database rather than in Go.
+//
+// The comparison is `o.luggage >= $9::luggage_size`, and it is right only
+// because the column is a Postgres enum, whose ordering is the order the values
+// were declared. As text the same expression would sort alphabetically —
+// bulky < cabin < none < suitcase — which is not a size order at all and would
+// have let a bicycle through to a driver who takes nothing.
+func TestLuggageIsComparedBySizeAndNotAlphabetically(t *testing.T) {
+	ctx := context.Background()
+	sizes := []domain.Luggage{
+		domain.LuggageNone, domain.LuggageCabin, domain.LuggageSuitcase, domain.LuggageBulky,
+	}
+
+	for _, takes := range sizes {
+		for _, brings := range sizes {
+			t.Run(string(takes)+"/"+string(brings), func(t *testing.T) {
+				f := setup(t)
+				f.addOccurrence(t, corridorWKT)
+				if _, err := f.pool.Exec(ctx,
+					`UPDATE trip_occurrences SET luggage = $1::luggage_size`, string(takes)); err != nil {
+					t.Fatalf("setting the allowance: %v", err)
+				}
+
+				q := query()
+				q.Luggage = brings
+				got, err := match.Gross(ctx, f.pool, q)
+				if err != nil {
+					t.Fatalf("Gross: %v", err)
+				}
+
+				matched := len(got) > 0
+				if want := takes.Fits(brings); matched != want {
+					t.Errorf("a driver taking %s asked about %s: matched = %v, want %v",
+						takes, brings, matched, want)
+				}
+			})
+		}
+	}
 }

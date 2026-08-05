@@ -16,7 +16,7 @@ func TestAProfileCarriesAFewWordsAndSomeTags(t *testing.T) {
 
 	rec := h.do(http.MethodPatch, "/v1/me", map[string]any{
 		"bio":         "Δουλεύω στην Αλεξανδρούπολη, κατεβαίνω Τρίτη και Πέμπτη.",
-		"preferences": []string{"no_smoking", "chatty", "big_luggage_ok"},
+		"preferences": []string{"no_smoking", "chatty", "air_conditioning"},
 	}, token)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d; body %s", rec.Code, rec.Body.String())

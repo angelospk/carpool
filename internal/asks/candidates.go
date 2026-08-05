@@ -45,6 +45,7 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 		WindowStart: req.WindowStart,
 		WindowEnd:   req.WindowEnd,
 		Seats:       req.Seats,
+		Luggage:     req.Luggage,
 		RequestKm:   req.RequestKm,
 		PassengerID: req.PassengerID,
 	})
@@ -119,7 +120,10 @@ type request struct {
 	WindowEnd   time.Time
 	Seats       int
 	Status      string
-	RequestKm   float64
+	// Luggage is what this passenger is bringing, which decides which drivers
+	// are worth asking at all.
+	Luggage   domain.Luggage
+	RequestKm float64
 	// Target names the one occurrence a repeat is aimed at. Nil for an ordinary
 	// request, which is free to go to whichever driver ranks best.
 	Target *uuid.UUID
@@ -131,11 +135,13 @@ func (s *Service) loadRequest(ctx context.Context, id uuid.UUID) (request, error
 		SELECT id, passenger_id,
 		       ST_X(origin), ST_Y(origin), ST_X(destination), ST_Y(destination),
 		       window_start, window_end, seats, status, target_occurrence_id,
-		       ST_Distance(origin::geography, destination::geography) / 1000
+		       ST_Distance(origin::geography, destination::geography) / 1000,
+		       luggage
 		FROM ride_requests WHERE id = $1`, id).Scan(
 		&r.ID, &r.PassengerID,
 		&r.Origin.Lon, &r.Origin.Lat, &r.Destination.Lon, &r.Destination.Lat,
-		&r.WindowStart, &r.WindowEnd, &r.Seats, &r.Status, &r.Target, &r.RequestKm)
+		&r.WindowStart, &r.WindowEnd, &r.Seats, &r.Status, &r.Target, &r.RequestKm,
+		&r.Luggage)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return request{}, ErrNoCandidates
 	}

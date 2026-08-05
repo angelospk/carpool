@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"carpool/internal/domain"
 )
 
 // maxCandidates caps how many candidates leave the gross stage. Every survivor
@@ -29,6 +31,10 @@ type GrossQuery struct {
 	WindowStart time.Time
 	WindowEnd   time.Time
 	Seats       int
+	// Luggage is what the passenger is bringing. A driver who said they will
+	// take a cabin bag is not asked about a bicycle: they would say no, and
+	// both of them would have spent the exchange finding that out.
+	Luggage domain.Luggage
 	// RequestKm is the passenger's own trip length, used for the shared-distance
 	// floor.
 	RequestKm float64
@@ -96,6 +102,10 @@ WITH cand AS (
 	JOIN driver_profiles  d ON d.user_id = t.driver_id
 	WHERE o.status = 'scheduled'
 	  AND o.seats_free >= $5
+	  -- Excluded rather than ranked down. An ask a driver will certainly
+	  -- refuse costs them a notification and the passenger a wait, and the
+	  -- enum's own order is what "will certainly refuse" means.
+	  AND o.luggage >= $9::luggage_size
 	  AND o.depart_earliest < $4
 	  AND o.depart_latest   > $3
 	  AND NOT d.notifications_muted
@@ -170,15 +180,29 @@ func grossArgs(q GrossQuery) []any {
 		passenger = &q.PassengerID
 	}
 	return []any{
-		pointWKT(q.Origin),      // $1
-		pointWKT(q.Destination), // $2
-		q.WindowStart,           // $3
-		q.WindowEnd,             // $4
-		q.Seats,                 // $5
-		q.RequestKm,             // $6
-		passenger,               // $7
-		maxCandidates,           // $8
+		pointWKT(q.Origin),       // $1
+		pointWKT(q.Destination),  // $2
+		q.WindowStart,            // $3
+		q.WindowEnd,              // $4
+		q.Seats,                  // $5
+		q.RequestKm,              // $6
+		passenger,                // $7
+		maxCandidates,            // $8
+		luggageOrNone(q.Luggage), // $9
 	}
+}
+
+// luggageOrNone defaults an unset size to the smallest.
+//
+// A caller that forgets it is asking on behalf of somebody with a bag they can
+// hold, which is what most people have. The alternative — treating unset as
+// "bulky" — would quietly exclude every driver from a request that simply did
+// not mention luggage.
+func luggageOrNone(l domain.Luggage) string {
+	if !l.Valid() {
+		return string(domain.LuggageNone)
+	}
+	return string(l)
 }
 
 // pointWKT renders a point as EWKT so PostGIS parses it with the right SRID.

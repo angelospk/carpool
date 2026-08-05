@@ -29,6 +29,11 @@ const MaxBioRunes = 500
 //
 // They describe; they do not enforce. "Δεν καπνίζω" is what to expect, not a
 // promise the app polices.
+//
+// Luggage used to be two of them, and is not any more. It became a thing the
+// matcher decides on, and a question with an answer in two places is a question
+// with two answers: a profile saying "big bags fine" beside a route that takes
+// a cabin bag sends somebody to the kerb with a suitcase.
 func PreferenceTags() []string {
 	return []string{
 		"no_smoking", "smoking_ok",
@@ -36,17 +41,16 @@ func PreferenceTags() []string {
 		"quiet_ride", "music_on",
 		"chatty", "keep_to_myself",
 		"air_conditioning",
-		"big_luggage_ok", "cabin_bag_only",
 	}
 }
 
 // MaxPreferences is how many somebody can end up with, and it is not a rule —
-// it is arithmetic. The vocabulary is eleven tags in five contradictory pairs
-// plus air conditioning, so the largest set that does not contradict itself is
-// six. A separate cap would be unreachable code pretending to be a policy.
+// it is arithmetic. The vocabulary is nine tags in four contradictory pairs plus
+// air conditioning, so the largest set that does not contradict itself is five.
+// A separate cap would be unreachable code pretending to be a policy.
 //
 // It becomes a real decision the day a non-contradictory tag is added.
-const MaxPreferences = 6
+const MaxPreferences = 5
 
 // contradictions are the pairs that cannot both be true. Stated rather than
 // left to the reader: a profile saying both "no smoking" and "smoking is fine"
@@ -56,7 +60,6 @@ var contradictions = [][2]string{
 	{"no_pets", "pets_ok"},
 	{"quiet_ride", "music_on"},
 	{"chatty", "keep_to_myself"},
-	{"big_luggage_ok", "cabin_bag_only"},
 }
 
 var (

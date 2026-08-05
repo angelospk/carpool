@@ -59,7 +59,11 @@ type CreateRouteTemplateParams struct {
 	// zero value means "take nobody" is a caller that forgets one line and
 	// publishes a route no passenger can ever be matched to, with nothing to
 	// show for it in any log.
-	Detour          match.Budget
+	Detour match.Budget
+	// Luggage is the largest thing this route will carry. It lives on the route
+	// rather than on the car for the same reason the detour budget does: "the
+	// boot is full of my own things today" is a statement about today.
+	Luggage         domain.Luggage
 	OSRMDataVersion string
 	Schedule        domain.Schedule
 }
@@ -78,19 +82,19 @@ func CreateRouteTemplate(ctx context.Context, pool *pgxpool.Pool, p CreateRouteT
 		INSERT INTO route_templates (
 			driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 			route_geom, route_km, route_min, seats, pricing_mode, osrm_data_version, ends_at_port,
-			allow_stops, detour_km, detour_min)
+			allow_stops, detour_km, detour_min, luggage)
 		VALUES ($1, $18,
 			ST_SetSRID(ST_MakePoint($2, $3), 4326),
 			ST_SetSRID(ST_MakePoint($4, $5), 4326),
 			$6, $7,
-			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13, $14, $15, $16, $17, $19::luggage_size)
 		RETURNING id`,
 		p.DriverID,
 		p.Origin.Lon, p.Origin.Lat,
 		p.Destination.Lon, p.Destination.Lat,
 		p.OriginLabel, p.DestinationLabel,
 		p.RouteWKT, p.RouteKm, p.RouteMin, p.Seats, string(p.PricingMode), p.OSRMDataVersion, p.EndsAtPort,
-		p.Detour.AllowStops, p.Detour.Km, p.Detour.Min, p.VehicleID,
+		p.Detour.AllowStops, p.Detour.Km, p.Detour.Min, p.VehicleID, luggageOr(p.Luggage),
 	).Scan(&templateID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("store: inserting route template: %w", err)
@@ -217,4 +221,17 @@ func GetSchedule(ctx context.Context, q scheduleQuerier, templateID uuid.UUID) (
 		s.Exceptions = append(s.Exceptions, d)
 	}
 	return s, nil
+}
+
+// luggageOr defaults an unset allowance to a suitcase.
+//
+// That is what an ordinary boot takes, and it is what every route published
+// before this column existed was implicitly offering. Defaulting to 'none'
+// instead would make a caller that forgot one field publish a route refusing
+// everybody, with nothing on screen to say so.
+func luggageOr(l domain.Luggage) string {
+	if !l.Valid() {
+		return string(domain.LuggageSuitcase)
+	}
+	return string(l)
 }
