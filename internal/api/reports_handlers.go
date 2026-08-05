@@ -73,8 +73,13 @@ func (d Deps) handleDecideReport(suspend bool) http.HandlerFunc {
 		case errors.Is(err, moderation.ErrDeleted):
 			writeError(w, http.StatusConflict, "account_deleted",
 				"that account has been erased; there is nothing left to suspend")
+		case errors.Is(err, moderation.ErrNoAccount):
+			writeError(w, http.StatusNotFound, "not_found", "that account no longer exists")
 		case err != nil:
-			writeError(w, http.StatusBadRequest, "invalid_request", "the decision was rejected")
+			// Everything named above is the caller's doing. What is left is
+			// ours, and reporting it as a bad request sends a moderator looking
+			// for a mistake they did not make.
+			writeError(w, http.StatusInternalServerError, "internal", "could not record the decision")
 		default:
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -110,7 +115,7 @@ func (d Deps) handleReinstate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "account_deleted",
 			"that account has been erased and cannot be brought back")
 	case err != nil:
-		writeError(w, http.StatusBadRequest, "invalid_request", "the reinstatement was rejected")
+		writeError(w, http.StatusInternalServerError, "internal", "could not reinstate the account")
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}

@@ -120,9 +120,14 @@ func NewRouter(deps Deps) http.Handler {
 		r.Get("/places", deps.handlePlaces)
 
 		r.Route("/auth", func(r chi.Router) {
-			r.Post("/otp/request", deps.handleOTPRequest)
-			r.Post("/otp/verify", deps.handleOTPVerify)
-			r.Post("/signup/complete", deps.handleSignupComplete)
+			// Guarded on their collaborator like every other group here: these
+			// three dereference deps.Signup, and a half-wired process should
+			// answer 404 rather than panic on the first sign-in.
+			if deps.Signup != nil {
+				r.Post("/otp/request", deps.handleOTPRequest)
+				r.Post("/otp/verify", deps.handleOTPVerify)
+				r.Post("/signup/complete", deps.handleSignupComplete)
+			}
 			r.Post("/refresh", deps.handleRefresh)
 			r.Post("/logout", deps.handleLogout)
 		})

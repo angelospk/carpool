@@ -161,6 +161,11 @@ func UserByPhone(ctx context.Context, pool *pgxpool.Pool, phone string) (User, e
 	if err != nil {
 		return User{}, fmt.Errorf("store: loading user by phone: %w", err)
 	}
+	// Preferences are deliberately not loaded, unlike GetUser. The one caller is
+	// signing in, which needs an id and a status and returns tokens — so the
+	// extra query would be on the hot path for a field nothing reads. If that
+	// stops being true, load them here rather than surprising somebody with an
+	// empty list.
 	return u, nil
 }
 

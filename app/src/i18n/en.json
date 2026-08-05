@@ -11,8 +11,9 @@
     "waiting": "Waiting for an answer"
   },
   "auth": {
+    "accountSuspended": "This account cannot be used. Write to us if you think that is wrong.",
     "homeTown": "Your town or village",
-    "homeTownHint": "Where you usually set out from. It decides which region’s fuel price your trips are worked out with.",
+    "homeTownHint": "Where you usually set out from. We use it to work out which region you are in.",
     "homeTownPlaceholder": "e.g. Feres",
     "invalidCode": "Wrong or expired code",
     "namePlaceholder": "Your name",

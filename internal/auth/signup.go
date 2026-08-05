@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -65,6 +66,9 @@ func (s *SignupService) Issue(ctx context.Context, phone string) (string, time.T
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := lockPhone(ctx, tx, phone); err != nil {
+		return "", time.Time{}, err
+	}
 	if err := voidTickets(ctx, tx, phone); err != nil {
 		return "", time.Time{}, err
 	}
@@ -90,11 +94,33 @@ func (s *SignupService) Void(ctx context.Context, phone string) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := lockPhone(ctx, tx, phone); err != nil {
+		return err
+	}
 	if err := voidTickets(ctx, tx, phone); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("auth: commit: %w", err)
+	}
+	return nil
+}
+
+// lockPhone serialises everything that touches one number's tickets.
+//
+// Issuing is a delete followed by an insert, and the unique index is on the
+// token digest rather than on the phone — so two verifications arriving together
+// both clear the table and both insert, and the older ticket outlives the newer
+// flow that was supposed to replace it. A ticket is a credential; two live at
+// once is one more than intended.
+//
+// Transaction-scoped, so it is released by the commit or the rollback and no
+// path can leak it.
+func lockPhone(ctx context.Context, tx pgx.Tx, phone string) error {
+	sum := sha256.Sum256([]byte("signup:" + phone))
+	key := int64(binary.BigEndian.Uint64(sum[:8]))
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, key); err != nil {
+		return fmt.Errorf("auth: locking the number: %w", err)
 	}
 	return nil
 }

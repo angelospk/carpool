@@ -46,15 +46,21 @@ func (d Deps) handleOTPRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Asking for a fresh code means starting again — a new handset, or a
-	// message that never arrived. Whatever half-finished signup the previous
-	// code produced does not get to complete later.
-	if err := d.Signup.Void(r.Context(), body.Phone); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "could not start signing in")
-		return
-	}
-
 	code, err := d.OTP.Request(r.Context(), body.Phone)
+	if err == nil {
+		// Asking for a fresh code means starting again — a new handset, or a
+		// message that never arrived. Whatever half-finished signup the previous
+		// code produced does not get to complete later.
+		//
+		// After the request rather than before it: a malformed number or a
+		// rate-limited retry sends no code, and destroying a ticket somebody is
+		// part way through using because they mistyped their number once is a
+		// worse outcome than the one this prevents.
+		if err := d.Signup.Void(r.Context(), body.Phone); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not start signing in")
+			return
+		}
+	}
 	switch {
 	case errors.Is(err, auth.ErrRateLimited):
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many codes requested for this number")

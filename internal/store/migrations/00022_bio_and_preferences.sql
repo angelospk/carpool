@@ -6,8 +6,13 @@
 -- and a rating. All three say who; none says what the two hours will be like.
 -- A sentence and a handful of tags do, and they are the cheapest trust signal
 -- there is.
+--
+-- The regex is not decoration: NormaliseBio trims before writing, so a bio of
+-- three spaces cannot arrive through the API — but the column is also written
+-- by hand during support and by whatever comes next, and "not empty" is a rule
+-- about the data rather than about one code path.
 ALTER TABLE users ADD COLUMN bio text
-    CHECK (bio IS NULL OR length(bio) BETWEEN 1 AND 500);
+    CHECK (bio IS NULL OR (char_length(bio) BETWEEN 1 AND 500 AND bio ~ '[^[:space:]]'));
 
 -- Preferences are a closed vocabulary, not free tags.
 --

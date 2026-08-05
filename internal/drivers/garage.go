@@ -59,7 +59,7 @@ func (v Vehicle) Name() string {
 // The first car a driver adds becomes their default, so that somebody with one
 // car never has to choose one.
 func (s *Service) AddVehicle(ctx context.Context, ownerID uuid.UUID, car Car) (Vehicle, error) {
-	assessed, fuel, err := s.assess(car)
+	assessed, fuel, car, err := s.assess(car)
 	if err != nil {
 		return Vehicle{}, err
 	}
@@ -271,16 +271,21 @@ func (s *Service) RetireVehicle(ctx context.Context, ownerID, vehicleID uuid.UUI
 }
 
 // assess validates a submitted car and works out what it drinks.
-func (s *Service) assess(car Car) (vehicles.Assessment, vehicles.Fuel, error) {
+//
+// It returns the car back, trimmed. Without that the caller stores whatever
+// whitespace arrived — " Toyota " goes in the database and comes back on a
+// passenger's screen — while the lookup that decided the consumption used the
+// tidy version.
+func (s *Service) assess(car Car) (vehicles.Assessment, vehicles.Fuel, Car, error) {
 	car.Make = strings.TrimSpace(car.Make)
 	car.Model = strings.TrimSpace(car.Model)
 	car.Plate = strings.TrimSpace(car.Plate)
 
 	if car.Make == "" || car.Model == "" {
-		return vehicles.Assessment{}, "", fmt.Errorf("%w: a make and a model are needed", ErrInvalid)
+		return vehicles.Assessment{}, "", Car{}, fmt.Errorf("%w: a make and a model are needed", ErrInvalid)
 	}
 	if car.Plate == "" {
-		return vehicles.Assessment{}, "", fmt.Errorf("%w: a plate is needed so a passenger can find the car", ErrInvalid)
+		return vehicles.Assessment{}, "", Car{}, fmt.Errorf("%w: a plate is needed so a passenger can find the car", ErrInvalid)
 	}
 
 	fuel := vehicles.Fuel(car.Fuel)
@@ -289,7 +294,7 @@ func (s *Service) assess(car Car) (vehicles.Assessment, vehicles.Fuel, error) {
 		known = known || f == fuel
 	}
 	if !known {
-		return vehicles.Assessment{}, "", fmt.Errorf("%w: %q is not a fuel this app can price", ErrInvalid, car.Fuel)
+		return vehicles.Assessment{}, "", Car{}, fmt.Errorf("%w: %q is not a fuel this app can price", ErrInvalid, car.Fuel)
 	}
 
 	assessed, err := vehicles.Assess(vehicles.Car{
@@ -297,12 +302,12 @@ func (s *Service) assess(car Car) (vehicles.Assessment, vehicles.Fuel, error) {
 		EngineCC: car.EngineCC, CO2GramsPerKm: car.CO2GramsPerKm,
 	})
 	if errors.Is(err, vehicles.ErrUnusable) {
-		return vehicles.Assessment{}, "", fmt.Errorf("%w: %s", ErrInvalid, err)
+		return vehicles.Assessment{}, "", Car{}, fmt.Errorf("%w: %s", ErrInvalid, err)
 	}
 	if err != nil {
-		return vehicles.Assessment{}, "", fmt.Errorf("drivers: assessing the car: %w", err)
+		return vehicles.Assessment{}, "", Car{}, fmt.Errorf("drivers: assessing the car: %w", err)
 	}
-	return assessed, fuel, nil
+	return assessed, fuel, car, nil
 }
 
 // atMost brings a figure down to what may be charged for.

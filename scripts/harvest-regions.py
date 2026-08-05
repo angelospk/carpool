@@ -191,10 +191,14 @@ def main():
                 continue
 
             size = sum(area_of(poly[0]) for poly in polygons)
-            if name in found and found[name][0] >= size:
+            if name in found:
+                # Reported whichever way it resolves. Warning only when the
+                # stored one wins hides half the collisions, which is the half
+                # where the file quietly changed under a re-harvest.
                 print(f"  duplicate relation for {name}, keeping the larger",
                       file=sys.stderr)
-                continue
+                if found[name][0] >= size:
+                    continue
 
             simplified = [[simplify_ring(ring) for ring in poly] for poly in polygons]
 

@@ -42,8 +42,8 @@ func seed(t *testing.T) fixture {
 	}
 
 	var regionID uuid.UUID
-	scan(&regionID, `INSERT INTO regions (name, boundary, fuel_price_eur)
-		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25 40, 27 40, 27 42, 25 42, 25 40))', 4326)), 1.8)
+	scan(&regionID, `INSERT INTO regions (name, boundary)
+		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25 40, 27 40, 27 42, 25 42, 25 40))', 4326)))
 		RETURNING id`)
 	scan(&f.driverID, `INSERT INTO users (phone, name, home_region_id)
 		VALUES ('+306900000001', 'Οδηγός', $1) RETURNING id`, regionID)

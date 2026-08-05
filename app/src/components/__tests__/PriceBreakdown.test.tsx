@@ -85,3 +85,35 @@ test('a rounding that changed nothing is not shown as a step', () => {
   open({ ...formula, share_cents: 200, rounded_cents: 200 });
   expect(screen.queryByTestId('pb-rounded')).toBeNull();
 });
+
+// The waiver covers the driver's own fuel, not the barrier they handed cash
+// over at. A short trip that passed a toll still has a total, and saying "the
+// driver asks for nothing" over the top of a number on the same screen is a
+// lie about that number.
+test('a waived trip that passed a toll shows the toll rather than claiming nothing is owed', () => {
+  open({
+    ...formula,
+    waived: true,
+    share_cents: 0,
+    rounded_cents: 0,
+    toll_share_cents: 140,
+    total_cents: 140,
+  });
+
+  expect(screen.queryByTestId('pb-waived')).toBeNull();
+  expect(screen.getByTestId('pb-tolls')).toBeTruthy();
+  // Once as the toll line, once as the total: everything owed is the toll.
+  expect(screen.getAllByText('1,40 €')).toHaveLength(2);
+});
+
+// And one that passed none says so, which is the case the early return exists
+// for.
+test('a waived trip with nothing to pay says the driver asks for nothing', () => {
+  render(
+    <PriceBreakdown
+      breakdown={{ ...formula, waived: true, rounded_cents: 0, toll_share_cents: 0, total_cents: 0 }}
+      testID="pb"
+    />,
+  );
+  expect(screen.getByTestId('pb-waived')).toBeTruthy();
+});

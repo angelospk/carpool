@@ -74,21 +74,26 @@ native build, check this first.
 
 ## Dependencies that are installed and never imported
 
-Four of them, and they are worth a decision rather than a shrug, because in
+Three of them, and they are worth a decision rather than a shrug, because in
 React Native an unused dependency is not free — it is linked into the native
 build and ships in the APK.
 
 | Package | Why it is here | Cost of keeping it |
 | --- | --- | --- |
-| `react-native-maps` | a map view that was never built | pulls in Google Play Services Maps; also breaks the web build the moment it is imported |
-| `expo-location` | ditto | permission prompts already declared in `app.json` |
+| `expo-location` | a map view that was never built | permission prompts already declared in `app.json` |
 | `expo-notifications` | the server has `PUT /v1/me/push-token`; the app never calls it | small |
 | `expo-device` | only used alongside notifications | small |
 
-There is no map in the app on purpose — see `src/design/routeGlyph.ts`, which
-draws the real shape of a route as a vector mark instead. The route is
-recognisable from its shape alone, there is no tile key to hold and no vendor to
-pay, and a tile view of rural Thrace tells a rider nothing they do not know.
+`react-native-maps` used to be on that list. It is imported now, by
+`src/map/Map.native.tsx` — see "The map" below.
+
+What has not gone away is the reason there was no map for so long:
+`src/design/routeGlyph.ts` draws the real shape of a route as a vector mark, the
+route is recognisable from its shape alone, and a tile view of rural Thrace
+tells a rider nothing they do not already know. The map earns its place on the
+two screens where a coordinate is the answer — dropping a pin on a meeting
+point, and seeing where a ferry cut a route short — and every other screen still
+uses the glyph.
 
 What is genuinely missing is not the map view but the **picker**: pickup points
 are typed as `"25.87, 40.85 Πλατεία"` today, which no pilot user will do.

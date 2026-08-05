@@ -52,11 +52,15 @@ export default function OtpScreen() {
       });
       // The root layout redirects once the session flips to signedIn.
     } catch (e) {
-      setError(
-        e instanceof ApiError && e.code === 'invalid_code'
-          ? t('auth.invalidCode')
-          : t('common.error'),
-      );
+      if (e instanceof ApiError && e.code === 'invalid_code') {
+        setError(t('auth.invalidCode'));
+      } else if (e instanceof ApiError && e.code === 'account_suspended') {
+        // They hold the number and typed the right code, so the honest answer
+        // is why they still cannot get in.
+        setError(t('auth.accountSuspended'));
+      } else {
+        setError(t('common.error'));
+      }
     } finally {
       setBusy(false);
     }

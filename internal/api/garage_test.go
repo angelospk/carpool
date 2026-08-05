@@ -157,9 +157,10 @@ func TestPublishingWithoutACarSaysSo(t *testing.T) {
 		"depart_earliest": "07:30", "depart_latest": "08:00",
 	}, token)
 
-	// Without a router wired the harness cannot snap a route, so the only thing
-	// asserted here is that it is not a server error and not a success.
-	if rec.Code >= 500 {
+	// Without a router wired the harness cannot snap a route, so which 4xx it is
+	// depends on how far the request gets. What must hold either way: it is not
+	// a success, and it is not a server error.
+	if rec.Code < http.StatusBadRequest || rec.Code >= http.StatusInternalServerError {
 		t.Fatalf("publishing without a car gave %d: %s", rec.Code, rec.Body.String())
 	}
 }

@@ -177,9 +177,15 @@ func (s *Service) Decide(ctx context.Context, reportID, moderatorID uuid.UUID, s
 		// two are told apart with a second look, because "already handled" and
 		// "no such thing" lead a moderator to do different things next.
 		var live bool
-		if err := tx.QueryRow(ctx,
-			`SELECT true FROM reports WHERE id = $1`, reportID).Scan(&live); err != nil {
+		switch err := tx.QueryRow(ctx,
+			`SELECT true FROM reports WHERE id = $1`, reportID).Scan(&live); {
+		case errors.Is(err, pgx.ErrNoRows):
 			return ErrNoReport
+		case err != nil:
+			// A database that cannot answer is not the same as a report that is
+			// not there, and telling a moderator the second when it is the first
+			// sends them looking for the wrong thing.
+			return fmt.Errorf("moderation: looking up the report: %w", err)
 		}
 		return ErrAlreadyDecided
 	}

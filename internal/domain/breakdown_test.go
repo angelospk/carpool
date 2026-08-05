@@ -200,3 +200,31 @@ func TestAnOlderReceiptIsShownAsWhatItSaysRatherThanRecomputed(t *testing.T) {
 		t.Errorf("basis version = %d; a reader cannot tell which formula this was", b.BasisVersion)
 	}
 }
+
+// The share before rounding is divided out of the unrounded cost, the way
+// SuggestedPrice divides it — not out of FuelCostCents, which has already been
+// rounded to the nearest cent.
+//
+// 6 l/100km × 1.85 €/l × 90 km is 9.99 €, and one seat plus the driver is a
+// divisor of two. Dividing 999 cents by two truncates to 499; halving 9.99 €
+// and rounding gives 500. A line that says 4,99 above a total of 5,00 is the
+// kind of arithmetic somebody checks once and then stops trusting.
+func TestTheShareIsDividedOutOfTheUnroundedCost(t *testing.T) {
+	in := inputs()
+	in.FuelConsumptionLPer100Km = 6.0
+	in.FuelPriceEUR = 1.85
+	in.TripKm = 90
+	in.OfferedSeats = 1
+	in.TollShareCents = 0
+
+	_, basis := domain.SuggestedPrice(in)
+	b := domain.BreakdownOf(basis)
+
+	if basis.CostEUR != 9.99 {
+		t.Fatalf("cost = %v, want 9.99 — the case this test is about", basis.CostEUR)
+	}
+	if b.ShareCents != 500 {
+		t.Errorf("share = %d, want 500; %d is what dividing the rounded %d cents gives",
+			b.ShareCents, b.FuelCostCents/b.Divisor, b.FuelCostCents)
+	}
+}

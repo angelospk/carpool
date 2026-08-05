@@ -235,6 +235,11 @@ func (s *Service) giveBackTheirSeats(ctx context.Context, tx pgx.Tx, userID uuid
 			   AND o.status <> 'cancelled'
 			RETURNING b.id, b.occurrence_id, b.seats
 		),
+		-- One row per occurrence, so no aggregation: bookings carry a unique
+		-- constraint on (occurrence_id, passenger_id), and this only ever
+		-- releases one person's. UPDATE ... FROM would apply one of several
+		-- matching rows and silently drop the rest, which is worth knowing about
+		-- if that constraint is ever relaxed.
 		returned AS (
 			UPDATE trip_occurrences o
 			   SET seats_free = o.seats_free + r.seats, updated_at = now()

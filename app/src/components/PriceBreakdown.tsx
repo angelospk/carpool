@@ -31,7 +31,12 @@ export function PriceBreakdown({
   const [open, setOpen] = useState(false);
   const b = breakdown;
 
-  if (b.waived) {
+  // Waived and free are not the same, and neither is "waived" the same as
+  // "nothing to pay": the driver's threshold covers their own fuel, not the
+  // barrier they handed cash over at. A trip under the threshold that passed a
+  // toll still has a total, and saying "the driver asks for nothing" over the
+  // top of it would be a lie about a number on the same screen.
+  if (b.waived && b.total_cents === 0) {
     return (
       <Text testID={testID ? `${testID}-waived` : undefined} style={styles.note}>
         {t('price.waived')}

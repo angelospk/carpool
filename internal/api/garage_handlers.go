@@ -9,12 +9,12 @@ import (
 	"carpool/internal/drivers"
 )
 
-// vehicleResponse is one car as the app sees it.
+// vehicleResponse is one car as its owner sees it.
 //
-// The plate is not here. It is revealed to a passenger only after their seat is
-// accepted, and this endpoint is the owner's own list — but keeping the shape
-// identical everywhere is what stops it leaking from the one place that forgets.
-// The owner sees theirs through the profile, which they already know.
+// The plate is included, because this is the owner's own garage and they know
+// their own plate. That is exactly why this helper must not be reused for
+// anything a passenger reads: a plate reaches a passenger only after their seat
+// has been accepted, and a shared shape is how that rule gets forgotten.
 func vehicleResponse(v drivers.Vehicle) map[string]any {
 	return map[string]any{
 		"id":     v.ID,

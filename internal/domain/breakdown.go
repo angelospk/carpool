@@ -38,6 +38,9 @@ type Breakdown struct {
 	FuelPriceEUR    float64 `json:"fuel_price_eur"`
 	RegionName      string  `json:"region_name,omitempty"`
 	PriceIsRegional bool    `json:"price_is_regional"`
+	// PriceSource is where the figure came from, in the words whoever set it
+	// used. A price nobody can trace is a price nobody can argue with.
+	PriceSource string `json:"price_source,omitempty"`
 
 	TripKm float64 `json:"trip_km"`
 
@@ -79,6 +82,7 @@ func BreakdownOf(b Basis) Breakdown {
 		FuelPriceEUR:         b.FuelPriceEUR,
 		RegionName:           b.RegionName,
 		PriceIsRegional:      b.PriceIsRegional,
+		PriceSource:          b.PriceSource,
 		TripKm:               b.TripKm,
 		FuelCostCents:        int(math.Round(b.CostEUR * 100)),
 		Divisor:              b.OfferedSeats + 1,
@@ -102,7 +106,10 @@ func BreakdownOf(b Basis) Breakdown {
 	// is worth being able to see.
 	out.RoundedCents = b.SeatPriceCents - b.TollShareCents
 	if out.Divisor > 0 {
-		out.ShareCents = out.FuelCostCents / out.Divisor
+		// From the unrounded cost, the way SuggestedPrice divides it. Dividing
+		// the rounded FuelCostCents instead loses up to a cent, which is enough
+		// to make the line above the total not add up to it.
+		out.ShareCents = int(math.Round(b.CostEUR * 100 / float64(out.Divisor)))
 	}
 
 	// A trip that produced no fuel share, over a distance short enough to be

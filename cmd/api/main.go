@@ -70,11 +70,22 @@ func run() error {
 	}
 	slog.Info("schema is up to date")
 
+	// Boundaries are load-bearing rather than optional decoration: without them
+	// RegionAt resolves nothing, every trip is refused as "outside_country" and
+	// nothing can be priced — while /readyz cheerfully says the service is up.
+	// Failing at boot is the only place that is honest.
 	if cfg.RegionFixture != "" {
 		if err := store.SeedRegionsFromFile(ctx, pool, cfg.RegionFixture); err != nil {
 			return err
 		}
 		slog.Info("regions seeded", "fixture", cfg.RegionFixture)
+	}
+	var regions int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM regions`).Scan(&regions); err != nil {
+		return fmt.Errorf("counting regions: %w", err)
+	}
+	if regions == 0 {
+		return errors.New("no regions: set REGION_FIXTURE to fixtures/regions/greece.geojson")
 	}
 
 	// Fuel prices are seeded unconditionally, unlike the boundaries: without

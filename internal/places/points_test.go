@@ -87,7 +87,10 @@ func TestEveryMeetingPointBelongsToARealSettlement(t *testing.T) {
 // calls. These are the systematic kinds, and they must not come back.
 func TestTheListHoldsNoBusStopsWearingAStationsTag(t *testing.T) {
 	timetable := regexp.MustCompile(`(Νο\s?\d|ΓΡΑΜΜΗ\s?\d|->|→)`)
-	urban := regexp.MustCompile(`(Αφετηρ|Αμαξοστάσ|\bΤ\.\s?Σ\.)`)
+	// (^|non-letter) rather than \b: Go's word boundary is ASCII-only, so \bΤ
+	// never matches after a Greek letter and the rule would quietly cover less
+	// than it reads as covering.
+	urban := regexp.MustCompile(`(Αφετηρ|Αμαξοστάσ|(^|[^\p{L}\p{N}_])Τ\.\s?Σ\.)`)
 
 	for _, p := range places.AllPoints() {
 		if timetable.MatchString(p.Name) {
