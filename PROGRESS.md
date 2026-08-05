@@ -317,6 +317,41 @@ Neither of these is scheduled. They are written down because the design
 decision, that the driver does not get to set what a kilometre costs, should be
 made before the code and not after the first argument about a price.
 
+## What GoRide's own terms were worth reading for (2026-08-05)
+
+Two Greek services publish terms: BlaBlaCar and GoRide. Both describe the same
+shape — the platform *suggests* a figure and the driver decides at or under it,
+never above cost. That is what migration 00024 moved us to, and it turns out we
+divide more strictly than GoRide does: they split by "τον συνολικό αριθμό των
+επιβαινόντων", we split by offered seats plus the driver, so an empty seat still
+counts in our denominator. A driver earns less here than they would there, by
+construction.
+
+Reading them properly surfaced three things we did not have. All three are now
+built.
+
+**No age gate at all.** Theirs says "οι χρήστες της υπηρεσίας πρέπει να είναι
+ενήλικοι - 18 ετών". Ours asked nothing. Now asked once, at signup, because age
+only goes one way: eighteen on the day you join is eighteen for ever after, and
+there is no later moment at which the answer changes. Their allowance for a
+minor travelling with an adult family member is deliberately not copied —
+nothing in a booking can tell the app that the adult in the next seat is
+somebody's parent, and a rule the app cannot check is a rule it should not claim
+to have.
+
+**Luggage counted, not just sized.** Their booking request captures "τον αριθμό
+και το μέγεθος των αποσκευών". We had only the size, so three passengers with a
+suitcase each all fitted in a boot with room for one. Fixed as uniform slots
+with the space derived from the bookings holding it, rather than as a counter —
+seats already have six places that give them back, and a seventh counter through
+all of them is the leak that gets missed.
+
+**Contact details in free text.** They forbid links, emails and external profile
+names in listings. For us it is safety before rules: a bio is read by strangers,
+so a number in one is a public number. Filtered now, with the obfuscated forms
+covered and with ordinary Greek prose as the larger test set — see RISKS.md for
+why it is a speed bump rather than a wall.
+
 ## Deliberately not built
 
 Parked with a reason, not forgotten:
