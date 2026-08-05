@@ -463,3 +463,31 @@ Two related things are deliberately not built:
   claim to have.
 - **A per-seat age check.** A booking is made by one account for one or more
   seats. The account holder's age says nothing about who else gets in the car.
+
+## The bio filter is a speed bump, not a wall (raised 2026-08-05)
+
+A profile bio is now refused if it carries an email address, a link, a Greek
+mobile number or a platform handle — including the obfuscated forms people
+actually use (`at`/`dot`, `παπάκι`/`τελεία`, full-width digits, zero-width
+characters wedged into the middle).
+
+It will never be evasion-proof. Somebody determined to publish their number can
+spell it out in Greek words, and no closed set of patterns catches that without
+flagging ordinary prose about years, prices and distances. The trade is
+deliberate: a filter that eats normal Greek gets switched off, and then it
+protects nobody. Ordinary bios are the larger test set of the two.
+
+What it stops is the ordinary case — somebody who does not think of a bio as
+public typing their number in because it seemed helpful.
+
+Two loose ends:
+
+- **Only the bio is filtered.** Codex's review named the other stranger-visible
+  free-text fields as the same bypass. Right now the bio is the only one, but
+  a trip description or a pickup instruction would need the same check on the
+  day it is added.
+- **facebook_handle and instagram_handle are still public**, by design. The
+  distinction is not "no off-platform contact" — it is between an identity
+  somebody deliberately published and a number buried in prose where it will not
+  be noticed until it is too late. That distinction is a judgement, and somebody
+  may reasonably disagree with it.

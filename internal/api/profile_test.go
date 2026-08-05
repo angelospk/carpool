@@ -168,3 +168,60 @@ func TestTheTripCarriesWhatTheRideIsLike(t *testing.T) {
 		t.Error("a passenger with no preferences came back as null")
 	}
 }
+
+// A bio is read by people who have not met whoever wrote it. A phone number in
+// one is a public phone number, handed not to the passenger they agreed to
+// travel with but to everybody who scrolled past.
+func TestABioCannotCarryContactDetails(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306955000001", "Γιάννης")
+
+	for _, tt := range []struct{ bio, code string }{
+		{"πάρε με 6941234567", "bio_contains_phone"},
+		{"giannis at gmail dot com", "bio_contains_email"},
+		{"δες www.giannis.gr", "bio_contains_link"},
+		{"instagram: giannis_1990", "bio_contains_handle"},
+	} {
+		rec := h.do(http.MethodPatch, "/v1/me", map[string]any{"bio": tt.bio}, token)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%q gave %d, want 400: %s", tt.bio, rec.Code, rec.Body.String())
+			continue
+		}
+		if code := h.errorCode(rec); code != tt.code {
+			t.Errorf("%q gave error %q, want %q", tt.bio, code, tt.code)
+		}
+	}
+
+	// And nothing was stored on the way past.
+	var stored string
+	h.mustQuery(`SELECT COALESCE(bio, '') FROM users WHERE phone = $1`, &stored, "+306955000001")
+	if stored != "" {
+		t.Errorf("a refused bio was stored anyway: %q", stored)
+	}
+
+	// The refusal must not echo what it found: that would put the number in a
+	// log, which is where it was not supposed to be.
+	rec := h.do(http.MethodPatch, "/v1/me", map[string]any{"bio": "πάρε με 6941234567"}, token)
+	if strings.Contains(rec.Body.String(), "6941234567") {
+		t.Errorf("the error repeated the number: %s", rec.Body.String())
+	}
+}
+
+// The ordinary bio still goes in. A filter that eats normal Greek gets switched
+// off, and then it protects nobody.
+func TestAnOrdinaryBioIsStillAccepted(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306955000002", "Μαρία")
+
+	const bio = "Οδηγώ από το 2010, κάνω τη διαδρομή 6 φορές τον μήνα και μου αρέσει η κουβέντα."
+	rec := h.do(http.MethodPatch, "/v1/me", map[string]any{"bio": bio}, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("an ordinary bio gave %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var stored string
+	h.mustQuery(`SELECT bio FROM users WHERE phone = $1`, &stored, "+306955000002")
+	if stored != bio {
+		t.Errorf("stored %q", stored)
+	}
+}

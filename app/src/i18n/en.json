@@ -215,7 +215,8 @@
     "title": "Your profile",
     "upcomingTrips": "{{count}} scheduled trips",
     "womenOnly": "Women only",
-    "you": "You"
+    "you": "You",
+    "bioHasContactDetails": "Take the contact details out of your profile. Everybody can see it, not only whoever travels with you, and your passenger can reach you through the app."
   },
   "publish": {
     "allowStops": "I accept stops",

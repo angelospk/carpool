@@ -56,6 +56,11 @@ export default function ProfileScreen() {
       setError(
         e instanceof ApiError && e.code === 'bio_too_long'
           ? t('profile.bioTooLong')
+          : // One message for all four kinds. The code says which thing was
+            // found, but naming it back at somebody who just typed their own
+            // number reads as an accusation rather than as a warning.
+            e instanceof ApiError && e.code.startsWith('bio_contains_')
+          ? t('profile.bioHasContactDetails')
           : e instanceof ApiError && e.code === 'invalid_handle'
           ? t('profile.handleInvalid')
           : e instanceof ApiError && e.code === 'invalid_name'

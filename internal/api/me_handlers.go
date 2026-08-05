@@ -95,6 +95,19 @@ func (d Deps) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 				"that is longer than a profile takes")
 			return
 		}
+		// Checked after the length, because the length bounds the work, and
+		// before anything is stored, because a bio that reaches the database is
+		// a bio somebody can already read.
+		if found, kind := domain.HasContactDetails(bio); found {
+			// The kind goes in the code, so the app can name the thing to take
+			// out without the error envelope growing a field. What does not go
+			// anywhere is the matched text: echoing somebody's phone number
+			// into an error response puts it in a log, which is where it was
+			// not supposed to be in the first place.
+			writeError(w, http.StatusBadRequest, "bio_contains_"+string(kind),
+				"take the contact details out of your profile; it is visible to everybody, not only to whoever you travel with")
+			return
+		}
 		up.Bio = &bio
 	}
 	if body.Preferences != nil {
