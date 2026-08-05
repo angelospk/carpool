@@ -1,22 +1,34 @@
 // The map, on a phone.
 //
-// react-native-maps was already a dependency, and its UrlTile draws exactly the
-// XYZ template the web side draws — so the same one environment variable
-// configures both, and adding a map costs no new native module and no rebuilt
-// development client. What it does mean is that the base map underneath is the
-// platform's own; mapType "none" hides it where the platform allows, and where
-// it does not the raster tiles sit on top of it.
+// MapLibre rather than react-native-maps, and the reason is iOS. react-native-maps
+// draws through the platform's own map — Apple Maps on an iPhone — and its
+// mapType="none", the prop that hides that base layer, is Android only. So on
+// an iPhone the OSM tiles were being laid over a live Apple Maps view: two maps
+// fetched, Apple's showing through wherever a tile had not arrived yet, and
+// MapKit used as a substrate for somebody else's tiles, which is not what its
+// terms are for.
 //
-// A vector renderer (@maplibre/maplibre-react-native) would be the better
-// answer and is a larger decision: it is a native module, so it cannot run in
-// Expo Go and needs a development build. Worth doing when the map is more than
-// a picture with pins on it.
+// MapLibre renders the style itself and nothing sits underneath it. It is a
+// native module, so it cannot run in Expo Go and needs a development build —
+// which this project already makes, because Expo Go dropped Android push
+// notifications in SDK 53 and eas.json has carried a development profile since.
+//
+// The style is the same one the browser draws, out of tiles.ts, so one
+// environment variable configures both and neither can drift from the other.
 
-import { StyleSheet, View } from 'react-native';
-import MapView, { Marker, Polyline, UrlTile } from 'react-native-maps';
+import { StyleSheet, Text, View } from 'react-native';
+import {
+  Camera,
+  GeoJSONSource,
+  Layer,
+  Map as MapLibre,
+  Marker,
+  type PressEvent,
+} from '@maplibre/maplibre-react-native';
+import type { NativeSyntheticEvent } from 'react-native';
 import polyline from '@mapbox/polyline';
 
-import { attribution, haveTiles, tileURL } from './tiles';
+import { attribution, haveTiles, rasterStyle } from './tiles';
 import { MapFallback } from './Fallback';
 import type { MapPin } from './Map';
 
@@ -35,52 +47,66 @@ export function Map({
 }) {
   if (!haveTiles()) return <MapFallback testID={testID} />;
 
-  const line = encoded
-    ? polyline.decode(encoded, 6).map(([latitude, longitude]) => ({ latitude, longitude }))
-    : [];
+  // @mapbox/polyline yields [lat, lon]; GeoJSON wants the other order.
+  const line = encoded ? polyline.decode(encoded, 6).map(([lat, lon]) => [lon, lat]) : [];
 
   return (
     <View testID={testID} style={styles.box}>
-      <MapView
+      <MapLibre
         style={styles.canvas}
-        mapType="none"
-        initialRegion={{
-          latitude: centre.lat,
-          longitude: centre.lon,
-          latitudeDelta: 0.05,
-          longitudeDelta: 0.05,
-        }}
+        mapStyle={rasterStyle()}
         onPress={
           onPick
-            ? (e) =>
-                onPick({
-                  lon: e.nativeEvent.coordinate.longitude,
-                  lat: e.nativeEvent.coordinate.latitude,
-                })
+            ? (e: NativeSyntheticEvent<PressEvent>) =>
+                onPick({ lon: e.nativeEvent.lngLat[0], lat: e.nativeEvent.lngLat[1] })
             : undefined
         }
       >
-        <UrlTile urlTemplate={tileURL()} maximumZ={19} flipY={false} />
+        <Camera initialViewState={{ center: [centre.lon, centre.lat], zoom: 13 }} />
+
         {pins.map((p, i) => (
-          <Marker key={`${p.lon},${p.lat},${i}`} coordinate={{ latitude: p.lat, longitude: p.lon }} />
+          <Marker key={`${p.lon},${p.lat},${i}`} lngLat={[p.lon, p.lat]}>
+            <View style={styles.pin} />
+          </Marker>
         ))}
-        {line.length > 1 ? <Polyline coordinates={line} strokeWidth={4} strokeColor="#1f6f4a" /> : null}
-      </MapView>
+
+        {line.length > 1 ? (
+          <GeoJSONSource
+            id="route"
+            data={{
+              type: 'Feature',
+              properties: {},
+              geometry: { type: 'LineString', coordinates: line },
+            }}
+          >
+            <Layer
+              id="route-line"
+              type="line"
+              paint={{ 'line-width': 4, 'line-color': '#1f6f4a' }}
+            />
+          </GeoJSONSource>
+        ) : null}
+      </MapLibre>
+
       {/* Every provider requires their credit on the map, and OSM's licence
-          requires crediting the contributors whatever the provider. */}
-      <Attribution />
+          requires crediting the contributors whatever the provider. MapLibre
+          draws no attribution control of its own on a phone, so this is it. */}
+      <Text style={styles.attribution}>{attribution()}</Text>
     </View>
   );
-}
-
-function Attribution() {
-  const { Text } = require('react-native');
-  return <Text style={styles.attribution}>{attribution()}</Text>;
 }
 
 const styles = StyleSheet.create({
   box: { height: 260, borderRadius: 12, overflow: 'hidden' },
   canvas: { flex: 1 },
+  pin: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#1f6f4a',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
   attribution: {
     position: 'absolute',
     right: 4,

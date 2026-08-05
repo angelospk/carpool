@@ -84,8 +84,8 @@ build and ships in the APK.
 | `expo-notifications` | the server has `PUT /v1/me/push-token`; the app never calls it | small |
 | `expo-device` | only used alongside notifications | small |
 
-`react-native-maps` used to be on that list. It is imported now, by
-`src/map/Map.native.tsx` — see "The map" below.
+`react-native-maps` used to be on that list and is now gone entirely, replaced
+by `@maplibre/maplibre-react-native` — see "The map" below for why.
 
 What has not gone away is the reason there was no map for so long:
 `src/design/routeGlyph.ts` draws the real shape of a route as a vector mark, the
@@ -119,15 +119,33 @@ EXPO_PUBLIC_MAP_TILES_URL=https://tiles.example/{z}/{x}/{y}.png?key=…
 EXPO_PUBLIC_MAP_ATTRIBUTION=© MapTiler © OpenStreetMap contributors
 ```
 
-Raster rather than vector because it is the one shape every provider offers and
-the one both platforms draw with what is already installed: maplibre-gl in the
-browser, react-native-maps' `UrlTile` on a phone. Without the variable both
-render a short notice instead, and every screen works as it did before.
+Raster rather than vector because it is the one shape every provider offers, and
+both platforms build the same style out of it: `maplibre-gl` in the browser,
+`@maplibre/maplibre-react-native` on a phone. Without the variable both render a
+short notice instead, and every screen works as it did before.
 
 The attribution is required — by the provider's terms, and by ODbL for the
 contributors underneath whichever provider.
 
-A vector renderer (`@maplibre/maplibre-react-native`) would be the better answer
-on a phone and is a larger decision: it is a native module, so it cannot run in
-Expo Go and needs a development build. Worth doing when the map is more than a
-picture with pins on it.
+### Why not react-native-maps
+
+It was the first implementation and it was wrong on iOS. It draws through the
+platform's own map — Apple Maps on an iPhone — and `mapType="none"`, the prop
+that hides that base layer, is Android only; the installed source says so:
+
+```
+@platform iOS: hybrid | mutedStandard | satellite | standard | terrain | …
+@platform Android: hybrid | none | satellite | standard | terrain
+```
+
+So on an iPhone the OSM tiles were laid over a live Apple Maps view. Two maps
+fetched for one picture, Apple's showing through wherever a tile had not
+arrived, and MapKit used as a substrate for a competitor's tiles — which is not
+what its terms are for. On Android it also pulled in Google Play Services Maps
+for a base layer that was then hidden.
+
+MapLibre renders the style itself and nothing sits underneath it. The cost is
+that it is a native module: it cannot run in Expo Go and needs a development
+build. This project already makes those — Expo Go dropped Android push
+notifications in SDK 53, and `eas.json` has carried a `development` profile
+since. So the cost was already paid.

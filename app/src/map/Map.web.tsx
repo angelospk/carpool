@@ -15,22 +15,9 @@ import { StyleSheet, View } from 'react-native';
 import { GeoJSONSource, Map as GLMap, Marker, type MapMouseEvent } from 'maplibre-gl';
 import polyline from '@mapbox/polyline';
 
-import { attribution, haveTiles, tileURL } from './tiles';
+import { haveTiles, rasterStyle } from './tiles';
 import { MapFallback } from './Fallback';
 import type { MapPin } from './Map';
-
-const styleFor = (url: string) => ({
-  version: 8 as const,
-  sources: {
-    base: {
-      type: 'raster' as const,
-      tiles: [url],
-      tileSize: 256,
-      attribution: attribution(),
-    },
-  },
-  layers: [{ id: 'base', type: 'raster' as const, source: 'base' }],
-});
 
 export function Map({
   centre,
@@ -57,7 +44,7 @@ export function Map({
 
     const created = new GLMap({
       container: host.current,
-      style: styleFor(tileURL()),
+      style: rasterStyle(),
       center: [centre.lon, centre.lat],
       zoom: 13,
       attributionControl: { compact: false },

@@ -11,9 +11,10 @@ module.exports = {
     // maplibre-gl is WebGL and ESM: jsdom cannot run it and jest's resolver
     // cannot load it. See src/map/__stubs__/maplibre-gl.ts.
     '^maplibre-gl$': '<rootDir>/src/map/__stubs__/maplibre-gl.ts',
-    // react-native-maps is a native module; outside a built app importing it
-    // throws before a test can run. Same reasoning.
-    '^react-native-maps$': '<rootDir>/src/map/__stubs__/react-native-maps.tsx',
+    // MapLibre's React Native binding is a native module; outside a built app
+    // importing it throws before a test can run. Same reasoning.
+    '^@maplibre/maplibre-react-native$':
+      '<rootDir>/src/map/__stubs__/maplibre-react-native.tsx',
   },
   // react-query keeps a cache timer alive after a test finishes; without this
   // jest reports a leak that is really just an idle timer.

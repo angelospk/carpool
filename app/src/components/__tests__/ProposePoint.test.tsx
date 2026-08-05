@@ -137,7 +137,9 @@ describe('with a map configured', () => {
   // The point of the map. Without it a suggestion is a name and the middle of
   // the village, and a moderator has to work out where it meant.
   it('sends where the pin was dropped, not the middle of the village', async () => {
-    const { STUB_TAP } = jest.requireMock('react-native-maps');
+    // requireActual, not requireMock: the module is redirected by
+    // moduleNameMapper rather than mocked, so this is the stub itself.
+    const { STUB_TAP } = jest.requireActual('@maplibre/maplibre-react-native');
 
     open();
     fireEvent.changeText(screen.getByTestId('pp-name'), 'ΚΤΕΛ Φερών');
@@ -146,8 +148,8 @@ describe('with a map configured', () => {
 
     await waitFor(() => expect(api.proposeMeetingPoint).toHaveBeenCalled());
     const body = (api.proposeMeetingPoint as jest.Mock).mock.calls[0][0];
-    expect(body.lon).toBe(STUB_TAP.longitude);
-    expect(body.lat).toBe(STUB_TAP.latitude);
+    expect(body.lon).toBe(STUB_TAP[0]);
+    expect(body.lat).toBe(STUB_TAP[1]);
     expect(body.lon).not.toBe(feres.lon);
   });
 });

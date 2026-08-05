@@ -34,3 +34,26 @@ export function attribution() {
 export function haveTiles() {
   return tileURL().length > 0;
 }
+
+/**
+ * The style, built here rather than fetched.
+ *
+ * What is configured is one XYZ template, and a style wrapped around a raster
+ * source is six lines — so both platforms draw the same thing from the same
+ * function, and a provider that offers vector tiles can be pointed at through
+ * the same variable and simply be drawn as raster.
+ */
+export function rasterStyle() {
+  return {
+    version: 8 as const,
+    sources: {
+      base: {
+        type: 'raster' as const,
+        tiles: [tileURL()],
+        tileSize: 256,
+        attribution: attribution(),
+      },
+    },
+    layers: [{ id: 'base', type: 'raster' as const, source: 'base' }],
+  };
+}
