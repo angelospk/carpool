@@ -60,6 +60,7 @@ export default function PublishScreen() {
   // sends and what the server would have chosen anyway.
   const [vehicleID, setVehicleID] = useState<string | null>(null);
   const [luggage, setLuggage] = useState<LuggageSize>('suitcase');
+  const [luggageCapacity, setLuggageCapacity] = useState(3);
   // All of it until the driver says otherwise, which is what every route
   // published before they could choose was implicitly asking for.
   const [share, setShare] = useState(1);
@@ -87,6 +88,7 @@ export default function PublishScreen() {
         ...(detourKm !== null ? { detour_km: detourKm } : {}),
         ...(vehicleID !== null ? { vehicle_id: vehicleID } : {}),
         luggage,
+        luggage_capacity: luggageCapacity,
         contribution_share: share,
       }),
     onSuccess: (r) => setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`),
@@ -177,7 +179,14 @@ export default function PublishScreen() {
 
           <VehiclePicker testID="publish-vehicle" value={vehicleID} onChange={setVehicleID} />
 
-          <LuggagePicker testID="publish-luggage" value={luggage} onChange={setLuggage} asDriver />
+          <LuggagePicker
+            testID="publish-luggage"
+            value={luggage}
+            onChange={setLuggage}
+            count={luggageCapacity}
+            onCountChange={setLuggageCapacity}
+            asDriver
+          />
 
           <ContributionChoice testID="publish-share" value={share} onChange={setShare} />
 

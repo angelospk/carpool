@@ -64,6 +64,9 @@ type CreateRouteTemplateParams struct {
 	// rather than on the car for the same reason the detour budget does: "the
 	// boot is full of my own things today" is a statement about today.
 	Luggage domain.Luggage
+	// LuggageCapacity is how many items of that size the boot holds. Zero is
+	// only meaningful alongside a Luggage of 'none', which the schema enforces.
+	LuggageCapacity int
 	// ContributionShare is how much of the computed cost share this driver asks
 	// for. The app caps; the driver chooses. Zero means they did not say, which
 	// is read as all of it.
@@ -86,19 +89,19 @@ func CreateRouteTemplate(ctx context.Context, pool *pgxpool.Pool, p CreateRouteT
 		INSERT INTO route_templates (
 			driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 			route_geom, route_km, route_min, seats, pricing_mode, osrm_data_version, ends_at_port,
-			allow_stops, detour_km, detour_min, luggage, contribution_share)
+			allow_stops, detour_km, detour_min, luggage, luggage_capacity, contribution_share)
 		VALUES ($1, $18,
 			ST_SetSRID(ST_MakePoint($2, $3), 4326),
 			ST_SetSRID(ST_MakePoint($4, $5), 4326),
 			$6, $7,
-			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13, $14, $15, $16, $17, $19::luggage_size, $20)
+			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13, $14, $15, $16, $17, $19::luggage_size, $20, $21)
 		RETURNING id`,
 		p.DriverID,
 		p.Origin.Lon, p.Origin.Lat,
 		p.Destination.Lon, p.Destination.Lat,
 		p.OriginLabel, p.DestinationLabel,
 		p.RouteWKT, p.RouteKm, p.RouteMin, p.Seats, string(p.PricingMode), p.OSRMDataVersion, p.EndsAtPort,
-		p.Detour.AllowStops, p.Detour.Km, p.Detour.Min, p.VehicleID, luggageOr(p.Luggage), shareOr(p.ContributionShare),
+		p.Detour.AllowStops, p.Detour.Km, p.Detour.Min, p.VehicleID, luggageOr(p.Luggage), capacityOr(p.LuggageCapacity, p.Luggage), shareOr(p.ContributionShare),
 	).Scan(&templateID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("store: inserting route template: %w", err)
@@ -233,6 +236,27 @@ func GetSchedule(ctx context.Context, q scheduleQuerier, templateID uuid.UUID) (
 // before this column existed was implicitly offering. Defaulting to 'none'
 // instead would make a caller that forgot one field publish a route refusing
 // everybody, with nothing on screen to say so.
+// capacityOr pairs an unstated capacity with whatever size ended up being
+// stored.
+//
+// The two columns constrain each other — 'none' takes nothing, anything else
+// takes at least one — so a caller that sets one and forgets the other would hit
+// a CHECK rather than a sensible default. Defaulted here, beside luggageOr, so
+// that the pairing is decided in one place instead of at every call site.
+func capacityOr(capacity int, l domain.Luggage) int {
+	if l == domain.LuggageNone {
+		return 0
+	}
+	if capacity <= 0 {
+		return defaultLuggageCapacity
+	}
+	return capacity
+}
+
+// defaultLuggageCapacity is an ordinary boot on a trip with three seats on
+// offer. It matches the column default in migration 00026.
+const defaultLuggageCapacity = 3
+
 func luggageOr(l domain.Luggage) string {
 	if !l.Valid() {
 		return string(domain.LuggageSuitcase)

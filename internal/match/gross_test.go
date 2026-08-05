@@ -423,8 +423,10 @@ func TestARequestThatSaysNothingAboutLuggageIsStillMatched(t *testing.T) {
 	f.addOccurrence(t, corridorWKT)
 	ctx := context.Background()
 
+	// A driver taking nothing, which is the strictest case: if silence still
+	// matches here, it matches everywhere.
 	if _, err := f.pool.Exec(ctx,
-		`UPDATE trip_occurrences SET luggage = 'none'`); err != nil {
+		`UPDATE trip_occurrences SET luggage = 'none', luggage_capacity = 0`); err != nil {
 		t.Fatalf("setting the allowance: %v", err)
 	}
 
@@ -455,8 +457,16 @@ func TestLuggageIsComparedBySizeAndNotAlphabetically(t *testing.T) {
 			t.Run(string(takes)+"/"+string(brings), func(t *testing.T) {
 				f := setup(t)
 				f.addOccurrence(t, corridorWKT)
+				// The capacity moves with the size: 'none' means no places at
+				// all, and anything else means enough places not to be what
+				// this test is measuring.
+				capacity := 4
+				if takes == domain.LuggageNone {
+					capacity = 0
+				}
 				if _, err := f.pool.Exec(ctx,
-					`UPDATE trip_occurrences SET luggage = $1::luggage_size`, string(takes)); err != nil {
+					`UPDATE trip_occurrences SET luggage = $1::luggage_size, luggage_capacity = $2`,
+					string(takes), capacity); err != nil {
 					t.Fatalf("setting the allowance: %v", err)
 				}
 

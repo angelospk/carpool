@@ -751,7 +751,10 @@ func TestABookedDepartureKeepsTheAllowanceItWasBookedWith(t *testing.T) {
 	}
 	f.bookOccurrence(first)
 
-	if _, err := f.pool.Exec(ctx, `UPDATE route_templates SET luggage = 'none'`); err != nil {
+	// Both together: a size of 'none' with a capacity above zero would be four
+	// places for nothing, which the schema refuses.
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE route_templates SET luggage = 'none', luggage_capacity = 0`); err != nil {
 		t.Fatalf("changing the allowance: %v", err)
 	}
 	if err := f.materializer().Run(ctx); err != nil {

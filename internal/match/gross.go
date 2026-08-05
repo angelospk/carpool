@@ -35,6 +35,10 @@ type GrossQuery struct {
 	// take a cabin bag is not asked about a bicycle: they would say no, and
 	// both of them would have spent the exchange finding that out.
 	Luggage domain.Luggage
+	// LuggageCount is how many items of that size, which is the other half of
+	// the question. One maximum size cannot say whether three suitcases fit in a
+	// boot that takes one.
+	LuggageCount int
 	// RequestKm is the passenger's own trip length, used for the shared-distance
 	// floor.
 	RequestKm float64
@@ -106,6 +110,14 @@ WITH cand AS (
 	  -- refuse costs them a notification and the passenger a wait, and the
 	  -- enum's own order is what "will certainly refuse" means.
 	  AND o.luggage >= $9::luggage_size
+	  -- And enough places for that many of them. Advisory only: what a search
+	  -- shows can be out of date by the time somebody acts on it, and the
+	  -- booking recomputes this under the occurrence lock. Here it stops the
+	  -- driver being asked about a boot that is already full.
+	  AND o.luggage_capacity - COALESCE((
+	        SELECT sum(b.luggage_count) FROM bookings b
+	        WHERE b.occurrence_id = o.id AND b.status IN ('confirmed', 'completed')
+	      ), 0) >= $10
 	  AND o.depart_earliest < $4
 	  AND o.depart_latest   > $3
 	  AND NOT d.notifications_muted
@@ -189,6 +201,7 @@ func grossArgs(q GrossQuery) []any {
 		passenger,                // $7
 		maxCandidates,            // $8
 		luggageOrNone(q.Luggage), // $9
+		q.LuggageCount,           // $10
 	}
 }
 

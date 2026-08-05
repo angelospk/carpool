@@ -409,6 +409,8 @@ export const api = {
     vehicle_id?: string;
     /** The largest thing this route will take. Omitted means a suitcase. */
     luggage?: LuggageSize;
+    /** How many of that size the boot holds. Absent means three. */
+    luggage_capacity?: number;
     /**
      * How much of the computed fuel share you ask for, from just above zero to
      * one. Omitted means all of it.
@@ -452,6 +454,8 @@ export const api = {
     seats: number;
     /** What you are bringing. Omitted means a bag you can hold. */
     luggage?: LuggageSize;
+    /** How many of that size you are bringing. Absent means one, or none. */
+    luggage_count?: number;
   }) =>
     request<{ request_id: string; asking: boolean; ask_id?: string }>('/v1/requests', {
       method: 'POST',

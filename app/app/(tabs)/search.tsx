@@ -23,6 +23,7 @@ export default function SearchScreen() {
   const [to, setTo] = useState<Pin | null>(null);
   const [seats, setSeats] = useState(1);
   const [luggage, setLuggage] = useState<LuggageSize>('none');
+  const [luggageCount, setLuggageCount] = useState(0);
   const [outcome, setOutcome] = useState<string | null>(null);
 
   const create = useMutation({
@@ -41,6 +42,7 @@ export default function SearchScreen() {
         window_end: end.toISOString(),
         seats,
         luggage,
+        luggage_count: luggageCount,
       });
     },
     onSuccess: (res) => {
@@ -87,7 +89,13 @@ export default function SearchScreen() {
 
           <Estimate testID="estimate" from={from} to={to} />
 
-          <LuggagePicker testID="luggage" value={luggage} onChange={setLuggage} />
+          <LuggagePicker
+            testID="luggage"
+            value={luggage}
+            onChange={setLuggage}
+            count={luggageCount}
+            onCountChange={setLuggageCount}
+          />
 
           <View style={styles.seats}>
             <Text style={styles.seatsLabel}>{t('search.seats')}</Text>

@@ -37,6 +37,9 @@ type routeBody struct {
 	// Luggage is the largest thing this route will carry. Absent means a
 	// suitcase, which is what an ordinary boot takes.
 	Luggage string `json:"luggage"`
+	// LuggageCapacity is how many of them the boot holds. Absent means three,
+	// which is an ordinary boot on a trip with three seats on offer.
+	LuggageCapacity *int `json:"luggage_capacity"`
 
 	// ContributionShare is how much of the computed cost share this driver
 	// asks for, between zero (exclusive) and one. Absent means all of it, which
@@ -105,6 +108,21 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		luggage = parsed
+	}
+
+	// Size and number have to agree. "I will take nothing" and "I will take four
+	// of nothing" are the same sentence, and only one of them is storable.
+	capacity := defaultLuggageCapacity
+	if luggage == domain.LuggageNone {
+		capacity = 0
+	}
+	if body.LuggageCapacity != nil {
+		capacity = *body.LuggageCapacity
+	}
+	if (luggage == domain.LuggageNone) != (capacity == 0) || capacity < 0 || capacity > maxLuggageCapacity {
+		writeError(w, http.StatusBadRequest, "invalid_luggage",
+			"say how many bags fit, between one and eight, or say the boot is full")
+		return
 	}
 	if body.Seats <= 0 {
 		body.Seats = 3 // the wizard's default
@@ -192,6 +210,7 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		EndsAtPort:        shaped.SeaCrossing,
 		Detour:            detour,
 		Luggage:           luggage,
+		LuggageCapacity:   capacity,
 		ContributionShare: share,
 		Schedule:          schedule,
 	})
@@ -354,3 +373,11 @@ func (d Deps) chooseVehicle(ctx context.Context, driverID uuid.UUID, id string) 
 	}
 	return d.Drivers.Vehicle(ctx, driverID, vehicleID)
 }
+
+// The boot, in items of whatever size the route states. Eight is a van with the
+// seats down; three is a hatchback with room for the people in it. They match
+// the CHECK on route_templates.luggage_capacity.
+const (
+	defaultLuggageCapacity = 3
+	maxLuggageCapacity     = 8
+)

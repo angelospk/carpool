@@ -109,7 +109,9 @@
     "hint": "We will only offer you drivers who take it.",
     "label": "What are you bringing?",
     "none": "A bag on my lap",
-    "suitcase": "A suitcase"
+    "suitcase": "A suitcase",
+    "countLabel": "How many bags?",
+    "driverCountLabel": "How many fit?"
   },
   "map": {
     "unconfigured": "No map is configured on this deployment."

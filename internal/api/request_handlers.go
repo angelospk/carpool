@@ -33,6 +33,10 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		// which is most people; the one bringing skis is the one who will
 		// happily say so.
 		Luggage string `json:"luggage"`
+		// LuggageCount is how many of them. Absent means one when a size was
+		// given and none when it was not, so a client that has not been updated
+		// keeps meaning what it used to.
+		LuggageCount *int `json:"luggage_count"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -50,6 +54,22 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		luggage = parsed
+	}
+
+	// The pair has to agree: "none" is nothing, and nothing is "none". The
+	// schema refuses the other combinations, and a 500 from a CHECK is a worse
+	// way to learn it than a 400 that says so.
+	count := 1
+	if luggage == domain.LuggageNone {
+		count = 0
+	}
+	if body.LuggageCount != nil {
+		count = *body.LuggageCount
+	}
+	if (luggage == domain.LuggageNone) != (count == 0) || count < 0 || count > maxLuggageItems {
+		writeError(w, http.StatusBadRequest, "invalid_luggage",
+			"say how many items you are bringing, between one and four, or say you have none")
+		return
 	}
 	if !body.WindowStart.Before(body.WindowEnd) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "window_start must precede window_end")
@@ -90,15 +110,15 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	var requestID uuid.UUID
 	err := d.Pool.QueryRow(r.Context(), `
 		INSERT INTO ride_requests (passenger_id, origin, destination, origin_label, destination_label,
-		                           window_start, window_end, seats, kind, status, luggage)
+		                           window_start, window_end, seats, kind, status, luggage, luggage_count)
 		VALUES ($1,
 		        ST_SetSRID(ST_MakePoint($2, $3), 4326),
 		        ST_SetSRID(ST_MakePoint($4, $5), 4326),
-		        $6, $7, $8, $9, $10, 'open', 'open', $11::luggage_size)
+		        $6, $7, $8, $9, $10, 'open', 'open', $11::luggage_size, $12)
 		RETURNING id`,
 		userID, body.OriginLon, body.OriginLat, body.DestinationLon, body.DestinationLat,
 		body.OriginLabel, body.DestinationLabel, body.WindowStart, body.WindowEnd, body.Seats,
-		string(luggage)).Scan(&requestID)
+		string(luggage), count).Scan(&requestID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "the request was rejected")
 		return
@@ -190,3 +210,8 @@ func (d Deps) handlePutPushToken(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// maxLuggageItems bounds what a passenger can declare. Somebody with five things
+// is moving house, and that is a conversation to have rather than a form to fill
+// in. It matches the CHECK on ride_requests.luggage_count.
+const maxLuggageItems = 4

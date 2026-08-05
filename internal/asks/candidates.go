@@ -40,14 +40,15 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 	}
 
 	candidates, err := match.Gross(ctx, s.pool, match.GrossQuery{
-		Origin:      match.Point{Lon: req.Origin.Lon, Lat: req.Origin.Lat},
-		Destination: match.Point{Lon: req.Destination.Lon, Lat: req.Destination.Lat},
-		WindowStart: req.WindowStart,
-		WindowEnd:   req.WindowEnd,
-		Seats:       req.Seats,
-		Luggage:     req.Luggage,
-		RequestKm:   req.RequestKm,
-		PassengerID: req.PassengerID,
+		Origin:       match.Point{Lon: req.Origin.Lon, Lat: req.Origin.Lat},
+		Destination:  match.Point{Lon: req.Destination.Lon, Lat: req.Destination.Lat},
+		WindowStart:  req.WindowStart,
+		WindowEnd:    req.WindowEnd,
+		Seats:        req.Seats,
+		Luggage:      req.Luggage,
+		LuggageCount: req.LuggageCount,
+		RequestKm:    req.RequestKm,
+		PassengerID:  req.PassengerID,
 	})
 	if err != nil {
 		return uuid.Nil, err
@@ -122,8 +123,11 @@ type request struct {
 	Status      string
 	// Luggage is what this passenger is bringing, which decides which drivers
 	// are worth asking at all.
-	Luggage   domain.Luggage
-	RequestKm float64
+	Luggage domain.Luggage
+	// LuggageCount is how many of them. A driver who takes suitcases and has one
+	// place left is not worth asking about three.
+	LuggageCount int
+	RequestKm    float64
 	// Target names the one occurrence a repeat is aimed at. Nil for an ordinary
 	// request, which is free to go to whichever driver ranks best.
 	Target *uuid.UUID
@@ -136,12 +140,12 @@ func (s *Service) loadRequest(ctx context.Context, id uuid.UUID) (request, error
 		       ST_X(origin), ST_Y(origin), ST_X(destination), ST_Y(destination),
 		       window_start, window_end, seats, status, target_occurrence_id,
 		       ST_Distance(origin::geography, destination::geography) / 1000,
-		       luggage
+		       luggage, luggage_count
 		FROM ride_requests WHERE id = $1`, id).Scan(
 		&r.ID, &r.PassengerID,
 		&r.Origin.Lon, &r.Origin.Lat, &r.Destination.Lon, &r.Destination.Lat,
 		&r.WindowStart, &r.WindowEnd, &r.Seats, &r.Status, &r.Target, &r.RequestKm,
-		&r.Luggage)
+		&r.Luggage, &r.LuggageCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return request{}, ErrNoCandidates
 	}

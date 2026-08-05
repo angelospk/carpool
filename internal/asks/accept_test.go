@@ -502,3 +502,138 @@ func TestExpiringAnAskDoesNotRequeueARequestThatMovedOn(t *testing.T) {
 		t.Fatalf("queued %d ask_next messages for a request that already moved on, want 0", queued)
 	}
 }
+
+// luggageAsk is newAsk with a stated number of items to carry.
+func (f *fixture) luggageAsk(phone string, count int) (passenger, requestID, askID uuid.UUID) {
+	f.t.Helper()
+	ctx := context.Background()
+
+	must(f.t, f.pool.QueryRow(ctx,
+		`INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		 SELECT DATE '1990-01-01', $1, 'Επιβάτης', home_region_id FROM users WHERE id = $2
+		 RETURNING id`, phone, f.passengerID).Scan(&passenger), "passenger")
+
+	must(f.t, f.pool.QueryRow(ctx, `
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end,
+			seats, kind, status, luggage, luggage_count)
+		VALUES ($1, ST_SetSRID(ST_MakePoint(25.82,40.85),4326), ST_SetSRID(ST_MakePoint(25.98,40.85),4326),
+			'2026-07-30T04:00:00Z', '2026-07-30T06:00:00Z', 1, 'open', 'asking', 'suitcase', $2)
+		RETURNING id`, passenger, count).Scan(&requestID), "request")
+
+	must(f.t, f.pool.QueryRow(ctx, `
+		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
+			suggested_price_eur, itinerary_version, status, expires_at)
+		VALUES ($1, $2, 5, 2,
+			ST_SetSRID(ST_MakePoint(25.82,40.85),4326), ST_SetSRID(ST_MakePoint(25.98,40.85),4326),
+			2.50,
+			-- Whatever the plan is right now. Each accepted booking bumps the
+			-- version, so an ask quoted against 0 is stale the moment anybody
+			-- else has been let on.
+			(SELECT itinerary_version FROM trip_occurrences WHERE id = $2),
+			'pending', $3)
+		RETURNING id`, requestID, f.occurrenceID, f.clock.Now().Add(asks.DefaultTTL)).Scan(&askID), "ask")
+	return passenger, requestID, askID
+}
+
+// setCapacity puts a known number of luggage places on the departure.
+func (f *fixture) setCapacity(n int) {
+	f.t.Helper()
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE trip_occurrences SET luggage_capacity = $2 WHERE id = $1`, f.occurrenceID, n); err != nil {
+		f.t.Fatalf("setting capacity: %v", err)
+	}
+}
+
+// The boot is shared, not handed to each passenger in turn.
+//
+// Checking each booking against the whole capacity lets three passengers with
+// two suitcases each into a car with room for two, because every one of them
+// looks fine on their own. What has already been promised has to count.
+func TestLuggageCapacityIsSharedBetweenPassengers(t *testing.T) {
+	f := newFixture(t)
+	f.setCapacity(3)
+	svc := f.service()
+	ctx := context.Background()
+
+	_, _, firstAsk := f.luggageAsk("+306900000021", 2)
+	if _, err := svc.Accept(ctx, firstAsk, f.driverID); err != nil {
+		t.Fatalf("first booking of two places: %v", err)
+	}
+
+	// One place left, and this one wants two.
+	_, _, secondAsk := f.luggageAsk("+306900000022", 2)
+	if _, err := svc.Accept(ctx, secondAsk, f.driverID); !errors.Is(err, asks.ErrNoLuggageRoom) {
+		t.Errorf("accepting two more places into room for one: %v, want ErrNoLuggageRoom", err)
+	}
+
+	// And the one that does fit still goes in.
+	_, _, thirdAsk := f.luggageAsk("+306900000023", 1)
+	if _, err := svc.Accept(ctx, thirdAsk, f.driverID); err != nil {
+		t.Errorf("accepting the one place that is left: %v", err)
+	}
+}
+
+// Space is derived from the bookings that hold it, so a cancellation gives it
+// back by doing nothing in particular. This is the property that makes the
+// derived sum worth having over a counter.
+func TestCancellingABookingReleasesItsLuggage(t *testing.T) {
+	f := newFixture(t)
+	f.setCapacity(2)
+	svc := f.service()
+	ctx := context.Background()
+
+	_, _, first := f.luggageAsk("+306900000024", 2)
+	bookingID, err := svc.Accept(ctx, first, f.driverID)
+	if err != nil {
+		t.Fatalf("first booking: %v", err)
+	}
+
+	_, _, second := f.luggageAsk("+306900000025", 1)
+	if _, err := svc.Accept(ctx, second, f.driverID); !errors.Is(err, asks.ErrNoLuggageRoom) {
+		t.Fatalf("the boot should be full: %v", err)
+	}
+
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE bookings SET status = 'cancelled_by_passenger' WHERE id = $1`, bookingID); err != nil {
+		t.Fatalf("cancelling: %v", err)
+	}
+
+	_, _, third := f.luggageAsk("+306900000026", 1)
+	if _, err := svc.Accept(ctx, third, f.driverID); err != nil {
+		t.Errorf("the cancelled booking did not give its luggage back: %v", err)
+	}
+}
+
+// Two drivers' worth of the same last place. Exactly one gets it.
+func TestTwoBookingsCannotShareTheLastLuggagePlace(t *testing.T) {
+	f := newFixture(t)
+	f.setCapacity(1)
+	svc := f.service()
+
+	_, _, a := f.luggageAsk("+306900000027", 1)
+	_, _, b := f.luggageAsk("+306900000028", 1)
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	start := make(chan struct{})
+	for i, ask := range []uuid.UUID{a, b} {
+		wg.Add(1)
+		go func(i int, ask uuid.UUID) {
+			defer wg.Done()
+			<-start
+			_, errs[i] = svc.Accept(context.Background(), ask, f.driverID)
+		}(i, ask)
+	}
+	close(start)
+	wg.Wait()
+
+	won := 0
+	for _, err := range errs {
+		if err == nil {
+			won++
+		}
+	}
+	if won != 1 {
+		t.Errorf("%d of two racing bookings took the last luggage place, want 1 (%v)", won, errs)
+	}
+}

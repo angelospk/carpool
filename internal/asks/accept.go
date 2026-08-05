@@ -33,6 +33,10 @@ var (
 	ErrAskExpired = errors.New("asks: the ask has expired")
 	// ErrNoSeats means the occurrence filled up first.
 	ErrNoSeats = errors.New("asks: the trip has no free seats")
+	// ErrNoLuggageRoom means the seats are there but the boot is not. A separate
+	// error from ErrNoSeats because it is a separate conversation: the driver
+	// may well take this person with one bag instead of three.
+	ErrNoLuggageRoom = errors.New("asks: the trip has no room left for that much luggage")
 	// ErrStaleItinerary means the driver's plan changed while the detour was
 	// being verified, so the quoted detour no longer applies.
 	ErrStaleItinerary = errors.New("asks: the itinerary changed during verification")
@@ -161,12 +165,23 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		version         int
 		templateDriver  uuid.UUID
 	)
+	// luggageFree is derived rather than counted: space taken is the sum over the
+	// bookings that hold it, so all six paths that cancel a booking give it back
+	// by doing what they already do. The FOR UPDATE below is what makes reading
+	// the sum and writing the new booking one indivisible thing — two people
+	// racing for the last place in the boot serialise on this row exactly as they
+	// already do for the last seat.
+	var luggageFree int
 	err = tx.QueryRow(ctx, `
-		SELECT o.seats_free, o.status, o.itinerary_version, t.driver_id
+		SELECT o.seats_free, o.status, o.itinerary_version, t.driver_id,
+		       o.luggage_capacity - COALESCE((
+		           SELECT sum(b.luggage_count) FROM bookings b
+		           WHERE b.occurrence_id = o.id AND b.status IN ('confirmed', 'completed')
+		       ), 0)
 		FROM trip_occurrences o
 		JOIN route_templates t ON t.id = o.template_id
 		WHERE o.id = $1
-		FOR UPDATE OF o`, occurrenceID).Scan(&seatsFree, &occurrenceState, &version, &templateDriver)
+		FOR UPDATE OF o`, occurrenceID).Scan(&seatsFree, &occurrenceState, &version, &templateDriver, &luggageFree)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("asks: locking occurrence: %w", err)
 	}
@@ -175,9 +190,10 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	var requestState string
 	var passengerID uuid.UUID
 	var seats int
+	var luggage int
 	err = tx.QueryRow(ctx, `
-		SELECT status, passenger_id, seats FROM ride_requests WHERE id = $1 FOR UPDATE`,
-		requestID).Scan(&requestState, &passengerID, &seats)
+		SELECT status, passenger_id, seats, luggage_count FROM ride_requests WHERE id = $1 FOR UPDATE`,
+		requestID).Scan(&requestState, &passengerID, &seats, &luggage)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("asks: locking request: %w", err)
 	}
@@ -215,6 +231,9 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	if seatsFree < seats {
 		return uuid.Nil, ErrNoSeats
 	}
+	if luggageFree < luggage {
+		return uuid.Nil, ErrNoLuggageRoom
+	}
 	if version != quotedVersion {
 		// The plan moved under us while OSRM was being consulted.
 		return uuid.Nil, ErrStaleItinerary
@@ -223,11 +242,11 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	var bookingID uuid.UUID
 	err = tx.QueryRow(ctx, `
 		INSERT INTO bookings (occurrence_id, request_id, passenger_id, ask_id, seats, price_eur,
-		                      pricing_basis, pickup_point, dropoff_point)
+		                      pricing_basis, pickup_point, dropoff_point, luggage_count)
 		SELECT a.occurrence_id, a.request_id, $2, a.id, $3, a.suggested_price_eur,
-		       a.pricing_basis, a.pickup_point, a.dropoff_point
+		       a.pricing_basis, a.pickup_point, a.dropoff_point, $4
 		FROM asks a WHERE a.id = $1
-		RETURNING id`, askID, passengerID, seats).Scan(&bookingID)
+		RETURNING id`, askID, passengerID, seats, luggage).Scan(&bookingID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("asks: creating booking: %w", err)
 	}
