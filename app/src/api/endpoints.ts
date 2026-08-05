@@ -54,6 +54,25 @@ export type PointProposal = {
   created_at: string;
 };
 
+/** A car in the driver's garage. */
+export type Vehicle = {
+  id: string;
+  /** The label the driver gave it, or the make and model. */
+  name: string;
+  label: string;
+  make: string;
+  model: string;
+  fuel: string;
+  colour: string;
+  plate: string;
+  /** What contributions are worked out from, and how firm that figure is. */
+  consumption_l_100km: number;
+  consumption_source: 'dataset' | 'co2' | 'band' | 'legacy';
+  /** True when the figure was brought down to the ceiling for its fuel class. */
+  consumption_capped: boolean;
+  is_default: boolean;
+};
+
 export type Me = {
   id: string;
   phone: string;
@@ -226,6 +245,26 @@ export const api = {
 
   myRoutes: () => request<{ routes: MyRoute[] }>('/v1/me/routes'),
 
+  /** The garage. Empty until the driver has said what they drive. */
+  vehicles: () => request<{ vehicles: Vehicle[] }>('/v1/me/vehicles').then((r) => r.vehicles),
+
+  addVehicle: (body: {
+    make: string;
+    model: string;
+    fuel: string;
+    engine_cc?: number;
+    co2_g_km?: number;
+    colour?: string;
+    plate: string;
+    label?: string;
+  }) => request<Vehicle>('/v1/me/vehicles', { method: 'POST', body }),
+
+  setDefaultVehicle: (id: string) =>
+    request<void>(`/v1/me/vehicles/${id}/default`, { method: 'POST' }),
+
+  /** Retires rather than deletes: a past trip still names the car it ran in. */
+  retireVehicle: (id: string) => request<void>(`/v1/me/vehicles/${id}`, { method: 'DELETE' }),
+
   /** Where exactly, once a settlement has been chosen. Often empty: four in
       five settlements have no landmark anybody would recognise. */
   meetingPoints: (placeId: string) =>
@@ -269,6 +308,8 @@ export const api = {
     /** Omitted means "use my profile defaults". */
     allow_stops?: boolean;
     detour_km?: number;
+    /** Which car. Omitted means the default, which is what a driver with one sends. */
+    vehicle_id?: string;
   }) => request<{ template_id: string; route_km: number; ends_at_port: boolean }>('/v1/routes', {
       method: 'POST',
       body,

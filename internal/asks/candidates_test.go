@@ -14,6 +14,7 @@ import (
 	"carpool/internal/asks"
 	"carpool/internal/domain"
 	"carpool/internal/geo"
+	"carpool/internal/store/testdb"
 )
 
 // straightLineRouter stands in for OSRM at a fixed 60 km/h so expected detours
@@ -316,24 +317,25 @@ func (f *fixture) addSecondDriver(t *testing.T) uuid.UUID {
 		`INSERT INTO users (phone, name, home_region_id) VALUES ('+306900000009','Driver2',$1) RETURNING id`,
 		regionID).Scan(&driverID), "second driver")
 	if _, err := f.pool.Exec(ctx,
-		`INSERT INTO driver_profiles (user_id, car_model, car_plate) VALUES ($1,'Clio','ZZZ-9999')`,
+		`INSERT INTO driver_profiles (user_id, car_model, car_plate) VALUES ($1, 'Clio','ZZZ-9999')`,
 		driverID); err != nil {
 		t.Fatalf("second driver profile: %v", err)
 	}
+	testdb.GiveEveryDriverACar(t, f.pool)
 
 	var templateID uuid.UUID
 	must(t, f.pool.QueryRow(ctx, `
-		INSERT INTO route_templates (driver_id, origin, destination, origin_label, destination_label,
+		INSERT INTO route_templates (driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 			route_geom, route_km, route_min, seats, osrm_data_version)
-		VALUES ($1, ST_SetSRID(ST_MakePoint(25.80,40.85),4326), ST_SetSRID(ST_MakePoint(26.00,40.85),4326),
+		VALUES ($1, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default), ST_SetSRID(ST_MakePoint(25.80,40.85),4326), ST_SetSRID(ST_MakePoint(26.00,40.85),4326),
 			'A','B', ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 3, 'test')
 		RETURNING id`, driverID).Scan(&templateID), "second template")
 
 	var occurrenceID uuid.UUID
 	must(t, f.pool.QueryRow(ctx, `
-		INSERT INTO trip_occurrences (template_id, service_date, depart_earliest, depart_latest,
+		INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest, depart_latest,
 			seats_total, seats_free, template_revision, route_geom, route_km, route_min, pricing_mode)
-		VALUES ($1, '2026-07-30', '2026-07-30T04:35:00Z', '2026-07-30T05:05:00Z',
+		VALUES ($1, (SELECT vehicle_id FROM route_templates WHERE id = $1), '2026-07-30', '2026-07-30T04:35:00Z', '2026-07-30T05:05:00Z',
 			3, 3, 1, ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 'formula')
 		RETURNING id`, templateID).Scan(&occurrenceID), "second occurrence")
 	return occurrenceID
@@ -579,7 +581,7 @@ func TestThePriceIsBuiltFromTheFuelAndThePrefectureTheTripStartsIn(t *testing.T)
 	ctx := context.Background()
 	f := newFixture(t)
 
-	mustExec(t, f, `UPDATE driver_profiles SET vehicle_fuel = 'diesel'`)
+	mustExec(t, f, `UPDATE vehicles SET fuel = 'diesel'`)
 
 	// Two prefectures, so that "where the trip starts" is a different answer
 	// from "where it ends". The seeded rectangle is cut back to the western
@@ -631,18 +633,26 @@ func TestThePriceIsBuiltFromTheFuelAndThePrefectureTheTripStartsIn(t *testing.T)
 	}
 }
 
-// And a car whose fuel nobody recorded — every profile created during the
-// pilot, before the app asked what the car was — takes the cheaper of the two.
-// Everything unknown in this formula leans the same way: a contribution that is
-// too low costs the driver a little, and one that is too high is the thing the
-// law is interested in.
-func TestACarOfUnknownFuelIsPricedAtTheCheaperPump(t *testing.T) {
+// The car on the trip, not the car the driver drives today.
+//
+// A driver who buys a van in March must not reprice a seat somebody booked in
+// February — and the passenger is standing at the kerb looking for the car they
+// were told about. So the occurrence carries its own vehicle, and pricing reads
+// that one rather than the template's or the driver's current default.
+func TestThePriceFollowsTheCarOnTheTripNotTheDriversLatest(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
 
-	mustExec(t, f, `UPDATE driver_profiles SET vehicle_fuel = NULL`)
-	mustExec(t, f, `UPDATE fuel_prices SET price_eur = 1.999 WHERE fuel = 'petrol'`)
-	mustExec(t, f, `UPDATE fuel_prices SET price_eur = 1.111 WHERE fuel = 'diesel'`)
+	// A second, much thirstier car, made the default and put on the template —
+	// but not on the departure that already exists.
+	mustExec(t, f, `
+		INSERT INTO vehicles (owner_id, make, model, fuel, consumption_l_100km,
+			consumption_source, plate, is_default)
+		SELECT t.driver_id, 'Fiat', 'Ducato', 'diesel', 9.0, 'dataset', 'ΖΗΘ-9999', false
+		  FROM route_templates t LIMIT 1`)
+	mustExec(t, f, `
+		UPDATE route_templates SET vehicle_id = (
+			SELECT id FROM vehicles WHERE model = 'Ducato')`)
 
 	mustExec(t, f, `DELETE FROM asks`)
 	mustExec(t, f, `UPDATE ride_requests SET status = 'open'`)
@@ -658,7 +668,12 @@ func TestACarOfUnknownFuelIsPricedAtTheCheaperPump(t *testing.T) {
 	if err := json.Unmarshal(raw, &basis); err != nil {
 		t.Fatalf("decoding the basis: %v", err)
 	}
-	if basis.FuelPriceEUR != 1.111 {
-		t.Errorf("fuel price = %v, want the cheaper 1.111", basis.FuelPriceEUR)
+
+	if basis.Fuel != "petrol" {
+		t.Errorf("basis fuel = %q; the trip was priced off the template's new car, not its own", basis.Fuel)
+	}
+	if basis.ConsumptionLPer100Km >= 9.0 {
+		t.Errorf("consumption = %v, the van's — this departure goes out in the Yaris",
+			basis.ConsumptionLPer100Km)
 	}
 }

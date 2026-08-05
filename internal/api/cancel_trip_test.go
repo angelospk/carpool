@@ -25,9 +25,9 @@ func bookedTrip(t *testing.T, h *harness, driverPhone, passengerPhone string) (d
 
 	h.mustQuery(`
 		INSERT INTO route_templates (
-			driver_id, origin, destination, origin_label, destination_label,
+			driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 			route_geom, route_km, route_min, seats, pricing_mode, osrm_data_version)
-		VALUES ($1::uuid,
+		VALUES ($1::uuid, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default),
 		        ST_SetSRID(ST_MakePoint(25.8743, 40.8476), 4326),
 		        ST_SetSRID(ST_MakePoint(26.1717, 40.8975), 4326),
 		        'Αλεξανδρούπολη', 'Φέρες',
@@ -39,9 +39,9 @@ func bookedTrip(t *testing.T, h *harness, driverPhone, passengerPhone string) (d
 	depart := h.clock.Now().Add(24 * time.Hour)
 	h.mustQuery(`
 		INSERT INTO trip_occurrences (
-			template_id, service_date, depart_earliest, depart_latest,
+			template_id, vehicle_id, service_date, depart_earliest, depart_latest,
 			seats_total, seats_free, template_revision, route_geom, route_km, route_min, pricing_mode)
-		VALUES ($1::uuid, $2::date, $2, $3, 3, 2, 1,
+		VALUES ($1::uuid, (SELECT vehicle_id FROM route_templates WHERE id = $1), $2::date, $2, $3, 3, 2, 1,
 		        ST_SetSRID(ST_MakeLine(ST_MakePoint(25.8743, 40.8476), ST_MakePoint(26.1717, 40.8975)), 4326),
 		        31.2, 28, 'formula')
 		RETURNING id::text`, &tripID, templateID, depart, depart.Add(30*time.Minute))

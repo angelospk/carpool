@@ -76,6 +76,7 @@ func setup(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatalf("seeding driver profile: %v", err)
 	}
+	testdb.GiveEveryDriverACar(t, pool)
 
 	return f
 }
@@ -100,9 +101,9 @@ func (f *fixture) addOccurrence(t *testing.T, routeWKT string, opts ...func(*occ
 	var templateID uuid.UUID
 	err := f.pool.QueryRow(ctx, `
 		INSERT INTO route_templates (
-			driver_id, origin, destination, origin_label, destination_label,
+			driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 			route_geom, route_km, route_min, osrm_data_version)
-		VALUES ($1,
+		VALUES ($1, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default),
 			ST_StartPoint(ST_GeomFromText($2, 4326)),
 			ST_EndPoint(ST_GeomFromText($2, 4326)),
 			'A', 'B',
@@ -115,10 +116,10 @@ func (f *fixture) addOccurrence(t *testing.T, routeWKT string, opts ...func(*occ
 	var occurrenceID uuid.UUID
 	err = f.pool.QueryRow(ctx, `
 		INSERT INTO trip_occurrences (
-			template_id, service_date, depart_earliest, depart_latest,
+			template_id, vehicle_id, service_date, depart_earliest, depart_latest,
 			seats_total, seats_free, status, template_revision,
 			route_geom, route_km, route_min, pricing_mode)
-		VALUES ($1, $2::date, $3, $4, 3, $5, $6, 1,
+		VALUES ($1, (SELECT vehicle_id FROM route_templates WHERE id = $1), $2::date, $3, $4, 3, $5, $6, 1,
 			ST_GeomFromText($7, 4326), $8, 20, 'formula')
 		RETURNING id`,
 		templateID, o.departEarliest.Format("2006-01-02"), o.departEarliest, o.departLatest,

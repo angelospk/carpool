@@ -26,8 +26,8 @@ func seed(t *testing.T) (*pgxpool.Pool, *drivers.Service, uuid.UUID) {
 
 	var regionID, userID uuid.UUID
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO regions (name, boundary, fuel_price_eur)
-		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25 40, 27 40, 27 42, 25 42, 25 40))', 4326)), 1.8)
+		INSERT INTO regions (name, boundary)
+		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25 40, 27 40, 27 42, 25 42, 25 40))', 4326)))
 		RETURNING id`).Scan(&regionID); err != nil {
 		t.Fatalf("seeding the region: %v", err)
 	}

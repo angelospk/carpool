@@ -215,3 +215,38 @@ func Assess(c Car) (Assessment, error) {
 	}
 	return Assessment{LPer100Km: l, Source: SourceBand}, nil
 }
+
+// PricingCeiling is the most a car of this fuel class may be priced at,
+// whatever the dataset says it drinks.
+//
+// It is a pilot control against the one lever a driver still has. Consumption
+// is derived rather than typed, so nobody can claim their Yaris drinks twenty
+// litres — but they can claim to drive a thirstier car than they do, and the
+// fuel component of a contribution moves with it. A 4.5 l/100km hybrid against
+// a 12 l/100km V8 is a factor of nearly three.
+//
+// The numbers are the upper edge of what a private car in Greece plausibly
+// burns on a long road trip, which is what these trips are. A driver who really
+// does own something thirstier recovers a little less of their fuel, and that
+// is the direction to be wrong in: άρθρο 18 ν. 1903/1990 is interested in a
+// driver who came out ahead, not one who came out behind.
+//
+// It is a ceiling on what may be charged for, not a claim about the car. The
+// stored figure keeps its source so that a capped assessment is still legible
+// as one.
+func PricingCeiling(f Fuel) float64 {
+	switch f {
+	case Petrol:
+		return 11.0
+	case Diesel:
+		return 9.0
+	case PetrolHybrid:
+		return 8.0
+	case DieselHybrid:
+		return 7.0
+	default:
+		// An unknown fuel has no price and should never reach here; the lowest
+		// ceiling is the safe answer if it does.
+		return 7.0
+	}
+}

@@ -35,7 +35,11 @@ type RouteTemplate struct {
 
 // CreateRouteTemplateParams is the input to CreateRouteTemplate.
 type CreateRouteTemplateParams struct {
-	DriverID         uuid.UUID
+	DriverID uuid.UUID
+	// VehicleID is which of the driver's cars this route goes out in. Not
+	// optional: a route with no car cannot be priced, and the database enforces
+	// both that it is present and that it belongs to this driver.
+	VehicleID        uuid.UUID
 	Origin           geo.Point
 	Destination      geo.Point
 	OriginLabel      string
@@ -72,10 +76,10 @@ func CreateRouteTemplate(ctx context.Context, pool *pgxpool.Pool, p CreateRouteT
 	var templateID uuid.UUID
 	err = tx.QueryRow(ctx, `
 		INSERT INTO route_templates (
-			driver_id, origin, destination, origin_label, destination_label,
+			driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 			route_geom, route_km, route_min, seats, pricing_mode, osrm_data_version, ends_at_port,
 			allow_stops, detour_km, detour_min)
-		VALUES ($1,
+		VALUES ($1, $18,
 			ST_SetSRID(ST_MakePoint($2, $3), 4326),
 			ST_SetSRID(ST_MakePoint($4, $5), 4326),
 			$6, $7,
@@ -86,7 +90,7 @@ func CreateRouteTemplate(ctx context.Context, pool *pgxpool.Pool, p CreateRouteT
 		p.Destination.Lon, p.Destination.Lat,
 		p.OriginLabel, p.DestinationLabel,
 		p.RouteWKT, p.RouteKm, p.RouteMin, p.Seats, string(p.PricingMode), p.OSRMDataVersion, p.EndsAtPort,
-		p.Detour.AllowStops, p.Detour.Km, p.Detour.Min,
+		p.Detour.AllowStops, p.Detour.Km, p.Detour.Min, p.VehicleID,
 	).Scan(&templateID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("store: inserting route template: %w", err)

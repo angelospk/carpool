@@ -10,6 +10,7 @@ import (
 	"carpool/internal/domain"
 	"github.com/google/uuid"
 
+	"carpool/internal/drivers"
 	"carpool/internal/geo"
 	"carpool/internal/match"
 	"carpool/internal/store"
@@ -32,6 +33,11 @@ type routeBody struct {
 	AllowStops *bool    `json:"allow_stops"`
 	DetourKm   *float64 `json:"detour_km"`
 	DetourMin  *int     `json:"detour_min"`
+
+	// VehicleID names which of the driver's cars this route goes out in.
+	// Absent means their default, which is what somebody with one car sends and
+	// what the app sends until the driver has a second.
+	VehicleID string `json:"vehicle_id"`
 
 	Kind           string   `json:"kind"` // oneoff | recurring
 	OneOffDate     string   `json:"oneoff_date"`
@@ -117,8 +123,20 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	vehicle, err := d.chooseVehicle(r.Context(), userID, body.VehicleID)
+	if errors.Is(err, drivers.ErrNoVehicle) {
+		writeError(w, http.StatusBadRequest, "no_vehicle",
+			"tell us what you drive before publishing a route")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not read your cars")
+		return
+	}
+
 	templateID, err := store.CreateRouteTemplate(r.Context(), d.Pool, store.CreateRouteTemplateParams{
 		DriverID:         userID,
+		VehicleID:        vehicle.ID,
 		Origin:           origin,
 		Destination:      destination,
 		OriginLabel:      body.OriginLabel,
@@ -274,4 +292,21 @@ func (d Deps) detourFor(ctx context.Context, driverID uuid.UUID, body routeBody)
 		out.Min = *body.DetourMin
 	}
 	return out, nil
+}
+
+// chooseVehicle resolves which car a route goes out in.
+//
+// An id names one of the driver's own — the database would refuse somebody
+// else's, but refusing it here gives a 400 rather than a 500. No id means their
+// default, which is what a driver with one car sends and what the app sends
+// until they have a second.
+func (d Deps) chooseVehicle(ctx context.Context, driverID uuid.UUID, id string) (drivers.Vehicle, error) {
+	if id == "" {
+		return d.Drivers.DefaultVehicle(ctx, driverID)
+	}
+	vehicleID, err := uuid.Parse(id)
+	if err != nil {
+		return drivers.Vehicle{}, drivers.ErrNoVehicle
+	}
+	return d.Drivers.Vehicle(ctx, driverID, vehicleID)
 }

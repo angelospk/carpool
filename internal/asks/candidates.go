@@ -252,14 +252,19 @@ func (s *Service) pricingInputs(ctx context.Context, occurrenceID uuid.UUID, tri
 
 	var mode string
 	var lon, lat float64
-	var fuel *string
+	var fuel string
 	err := s.pool.QueryRow(ctx, `
-		SELECT d.fuel_consumption_l_100km, d.consumption_source, d.wear_factor, d.free_below_km,
+		SELECT v.consumption_l_100km, v.consumption_source, d.wear_factor, d.free_below_km,
 		       o.pricing_mode, o.seats_total,
-		       ST_X(t.origin), ST_Y(t.origin), d.vehicle_fuel
+		       ST_X(t.origin), ST_Y(t.origin), v.fuel
 		FROM trip_occurrences o
 		JOIN route_templates t ON t.id = o.template_id
 		JOIN driver_profiles d ON d.user_id = t.driver_id
+		-- The occurrence's car, not the template's and not the driver's current
+		-- default. A driver who swaps cars in March must not reprice a trip
+		-- somebody booked in February, and a passenger is looking for the car
+		-- they were told about.
+		JOIN vehicles v ON v.id = o.vehicle_id
 		WHERE o.id = $1`, occurrenceID).Scan(
 		&in.FuelConsumptionLPer100Km, &in.ConsumptionSource, &in.WearFactor, &in.FreeBelowKm,
 		&mode, &in.OfferedSeats, &lon, &lat, &fuel)
@@ -268,40 +273,17 @@ func (s *Service) pricingInputs(ctx context.Context, occurrenceID uuid.UUID, tri
 	}
 	in.Mode = domain.PricingMode(mode)
 
-	price, err := s.fuelPrice(ctx, lon, lat, fuel)
+	price, err := store.FuelPriceAt(ctx, s.pool, lon, lat, vehicles.Fuel(fuel))
 	if err != nil {
-		return domain.PricingInputs{}, err
+		return domain.PricingInputs{}, fmt.Errorf("asks: pricing fuel at the origin: %w", err)
 	}
 	in.FuelPriceEUR = price.PriceEUR
-	in.Fuel = string(fuelOf(fuel))
+	in.Fuel = fuel
 	in.RegionName = price.RegionName
 	in.PriceIsRegional = price.Regional
 	in.PriceSource = price.Source
 
 	return in, nil
-}
-
-// fuelOf reads the car's fuel class, defaulting when the profile predates the
-// column.
-//
-// Those rows are the ones created by hand during the pilot, before the app
-// asked what the car was. Diesel is the default because it is the cheaper of
-// the two at the pump, and every other unknown in this formula already leans
-// the same way: a contribution that is too low costs the driver a little, and
-// one that is too high is the thing the law is interested in.
-func fuelOf(recorded *string) vehicles.Fuel {
-	if recorded == nil || *recorded == "" {
-		return vehicles.Diesel
-	}
-	return vehicles.Fuel(*recorded)
-}
-
-func (s *Service) fuelPrice(ctx context.Context, lon, lat float64, recorded *string) (store.FuelPrice, error) {
-	price, err := store.FuelPriceAt(ctx, s.pool, lon, lat, fuelOf(recorded))
-	if err != nil {
-		return store.FuelPrice{}, fmt.Errorf("asks: pricing fuel at the origin: %w", err)
-	}
-	return price, nil
 }
 
 // tollShare works out this passenger's part of the motorway tolls on the

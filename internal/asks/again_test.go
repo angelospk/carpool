@@ -13,9 +13,9 @@ func (f *fixture) nextWeek(t *testing.T) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
 	must(t, f.pool.QueryRow(context.Background(), `
-		INSERT INTO trip_occurrences (template_id, service_date, depart_earliest, depart_latest,
+		INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest, depart_latest,
 			seats_total, seats_free, template_revision, route_geom, route_km, route_min, pricing_mode)
-		SELECT template_id, '2026-08-06', '2026-08-06T04:30:00Z', '2026-08-06T05:00:00Z',
+		SELECT template_id, vehicle_id, '2026-08-06', '2026-08-06T04:30:00Z', '2026-08-06T05:00:00Z',
 			3, 3, 1, route_geom, route_km, route_min, pricing_mode
 		FROM trip_occurrences WHERE id = $1
 		RETURNING id`, f.occurrenceID).Scan(&id), "next week")

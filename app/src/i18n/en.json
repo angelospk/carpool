@@ -39,6 +39,35 @@
     "retry": "Try again",
     "save": "Save"
   },
+  "garage": {
+    "add": "Add a car",
+    "addTitle": "The car",
+    "capped": "capped for pricing",
+    "consumptionNotAsked": "We do not ask how much it drinks. We work it out from the car — which is what keeps the contribution below cost.",
+    "drinks": "Priced at {{litres}} l/100 km",
+    "empty": "You have not said what you drive yet.",
+    "engineCC": "Engine cc",
+    "fuel": {
+      "petrol": "Petrol",
+      "diesel": "Diesel",
+      "petrol_hybrid": "Petrol hybrid",
+      "diesel_hybrid": "Diesel hybrid"
+    },
+    "hint": "One car is enough. Add a second only if you really drive one, and pick which you are taking on each trip.",
+    "inUse": "A route you have published still uses this car. Take the route down first.",
+    "isDefault": "default",
+    "label": "What you call it",
+    "labelPlaceholder": "e.g. the van",
+    "make": "Make",
+    "makeDefault": "Make it the default",
+    "model": "Model",
+    "notACar": "I cannot work out what that drinks. Check the make, model and fuel.",
+    "plate": "Plate",
+    "retire": "Retire it",
+    "sourceBand": "a floor for its class",
+    "title": "My cars",
+    "tooMany": "That is as many cars as one account may keep."
+  },
   "home": {
     "asDriver": "Driving",
     "asPassenger": "Riding",
@@ -119,8 +148,15 @@
     "you": "You"
   },
   "publish": {
+    "allowStops": "I accept stops",
     "departWindow": "Departure time",
+    "detour": "Intermediate stops",
+    "detourChange": "Change it just for this trip",
+    "detourFromProfile": "As set on your profile",
+    "detourHint": "Extra kilometres over your own journey. There is a time limit too, because 15 km on the motorway is not 15 km on a mountain road.",
+    "detourKm": "Detour up to",
     "from": "From",
+    "noStopsHint": "You will not be offered anyone who is not already on your route.",
     "oneoff": "One-off",
     "publish": "Publish",
     "published": "Route published",
@@ -131,13 +167,7 @@
     "seatsN": "{{count}} seats",
     "title": "Publish a route",
     "until": "Until",
-    "detour": "Intermediate stops",
-    "allowStops": "I accept stops",
-    "detourKm": "Detour up to",
-    "noStopsHint": "You will not be offered anyone who is not already on your route.",
-    "detourHint": "Extra kilometres over your own journey. There is a time limit too, because 15 km on the motorway is not 15 km on a mountain road.",
-    "detourFromProfile": "As set on your profile",
-    "detourChange": "Change it just for this trip"
+    "whichCar": "Which car?"
   },
   "request": {
     "title": "Your request"

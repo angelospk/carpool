@@ -201,6 +201,13 @@ export default function ProfileScreen() {
             value=""
             onPress={() => router.push('/profile/routes')}
           />
+          <View style={styles.divider} />
+          <Row
+            testID="my-vehicles"
+            label={t('garage.title')}
+            value=""
+            onPress={() => router.push('/profile/vehicles')}
+          />
         </Card>
 
         <Button

@@ -50,18 +50,19 @@ func newWorld(t *testing.T) *world {
 	scan(&w.passengerID, `INSERT INTO users (phone, name, home_region_id)
 		VALUES ('+306900000002','Επιβάτης',$1) RETURNING id`, regionID)
 	if _, err := pool.Exec(ctx, `INSERT INTO driver_profiles (user_id, car_model, car_plate)
-		VALUES ($1,'Yaris','ΑΒΓ-1234')`, w.driverID); err != nil {
+		VALUES ($1, 'Yaris','ΑΒΓ-1234')`, w.driverID); err != nil {
 		t.Fatalf("seeding driver profile: %v", err)
 	}
-	scan(&w.templateID, `INSERT INTO route_templates (driver_id, origin, destination,
+	testdb.GiveEveryDriverACar(t, pool)
+	scan(&w.templateID, `INSERT INTO route_templates (driver_id, vehicle_id, origin, destination,
 		origin_label, destination_label, route_geom, route_km, route_min, seats, osrm_data_version)
-		VALUES ($1, ST_SetSRID(ST_MakePoint(25.80,40.85),4326), ST_SetSRID(ST_MakePoint(26.00,40.85),4326),
+		VALUES ($1, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default), ST_SetSRID(ST_MakePoint(25.80,40.85),4326), ST_SetSRID(ST_MakePoint(26.00,40.85),4326),
 		'Αλεξ/πολη','Φέρες', ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326),
 		17, 20, 3, 'test') RETURNING id`, w.driverID)
-	scan(&w.occurrenceID, `INSERT INTO trip_occurrences (template_id, service_date,
+	scan(&w.occurrenceID, `INSERT INTO trip_occurrences (template_id, vehicle_id, service_date,
 		depart_earliest, depart_latest, seats_total, seats_free, template_revision,
 		route_geom, route_km, route_min, pricing_mode)
-		VALUES ($1, DATE '2026-08-04', '2026-08-04T06:30:00Z', '2026-08-04T07:00:00Z', 3, 2, 1,
+		VALUES ($1, (SELECT vehicle_id FROM route_templates WHERE id = $1), DATE '2026-08-04', '2026-08-04T06:30:00Z', '2026-08-04T07:00:00Z', 3, 2, 1,
 		ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 'formula')
 		RETURNING id`, w.templateID)
 
@@ -72,18 +73,18 @@ func newWorld(t *testing.T) *world {
 		'2026-08-04T03:00:00Z','2026-08-04T07:00:00Z',1,'open','matched') RETURNING id`, w.passengerID)
 	scan(&askID, `INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km,
 		pickup_point, dropoff_point, suggested_price_eur, itinerary_version, status, expires_at)
-		VALUES ($1,$2,5,2, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+		VALUES ($1, $2,5,2, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
 		ST_SetSRID(ST_MakePoint(25.98,40.85),4326), 2.50, 0,'accepted','2026-08-04T03:00:00Z')
 		RETURNING id`, requestID, w.occurrenceID)
 	if _, err := pool.Exec(ctx, `INSERT INTO bookings (occurrence_id, request_id, passenger_id,
 		ask_id, seats, price_eur, pickup_point, dropoff_point)
-		VALUES ($1,$2,$3,$4,1,2.50, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+		VALUES ($1, $2,$3,$4,1,2.50, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
 		ST_SetSRID(ST_MakePoint(25.98,40.85),4326))`,
 		w.occurrenceID, requestID, w.passengerID, askID); err != nil {
 		t.Fatalf("seeding booking: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO trip_messages (occurrence_id, sender_id, body)
-		VALUES ($1,$2,'Θα είμαι στη στάση στις 07:35')`, w.occurrenceID, w.passengerID); err != nil {
+		VALUES ($1, $2,'Θα είμαι στη στάση στις 07:35')`, w.occurrenceID, w.passengerID); err != nil {
 		t.Fatalf("seeding message: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO push_tokens (token, user_id, platform)
@@ -146,7 +147,7 @@ func TestErasureKeepsWhatBelongsToOtherPeople(t *testing.T) {
 	}
 	if _, err := w.pool.Exec(ctx, `
 		INSERT INTO reports (reporter_id, reported_id, reason)
-		VALUES ($1,$2,'test')`, w.driverID, w.passengerID); err != nil {
+		VALUES ($1, $2,'test')`, w.driverID, w.passengerID); err != nil {
 		t.Fatalf("seeding report: %v", err)
 	}
 

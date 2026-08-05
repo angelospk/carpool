@@ -57,22 +57,23 @@ func newFixture(t *testing.T) *fixture {
 		regionID).Scan(&f.passengerID), "passenger")
 
 	_, err := pool.Exec(ctx,
-		`INSERT INTO driver_profiles (user_id, car_model, car_plate) VALUES ($1,'Yaris','ABC-1234')`, f.driverID)
+		`INSERT INTO driver_profiles (user_id, car_model, car_plate) VALUES ($1, 'Yaris','ABC-1234')`, f.driverID)
 	must(t, err, "driver profile")
+	testdb.GiveEveryDriverACar(t, pool)
 
 	var templateID uuid.UUID
 	must(t, pool.QueryRow(ctx, `
-		INSERT INTO route_templates (driver_id, origin, destination, origin_label, destination_label,
+		INSERT INTO route_templates (driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 			route_geom, route_km, route_min, seats, osrm_data_version)
-		VALUES ($1,
+		VALUES ($1, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default),
 			ST_SetSRID(ST_MakePoint(25.80,40.85),4326), ST_SetSRID(ST_MakePoint(26.00,40.85),4326),
 			'A','B', ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 3, 'test')
 		RETURNING id`, f.driverID).Scan(&templateID), "template")
 
 	must(t, pool.QueryRow(ctx, `
-		INSERT INTO trip_occurrences (template_id, service_date, depart_earliest, depart_latest,
+		INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest, depart_latest,
 			seats_total, seats_free, template_revision, route_geom, route_km, route_min, pricing_mode)
-		VALUES ($1, '2026-07-30', '2026-07-30T04:30:00Z', '2026-07-30T05:00:00Z',
+		VALUES ($1, (SELECT vehicle_id FROM route_templates WHERE id = $1), '2026-07-30', '2026-07-30T04:30:00Z', '2026-07-30T05:00:00Z',
 			3, 3, 1, ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 'formula')
 		RETURNING id`, templateID).Scan(&f.occurrenceID), "occurrence")
 

@@ -48,6 +48,10 @@ type Car struct {
 	CO2GramsPerKm int
 
 	Colour, Plate string
+
+	// Label is what the driver calls this one, so that two Yarises are tellable
+	// apart in a list. Optional; the make and model are the fallback.
+	Label string
 }
 
 // Profile is a driver profile as stored.
@@ -61,10 +65,15 @@ type Profile struct {
 	Verified bool
 }
 
-// Upsert records the driver's car and stores what the app concluded it drinks.
+// Upsert records the driver's car: the profile row, and the car itself.
 //
-// It is the only writer of fuel_consumption_l_100km. The column is still what
-// pricing reads, but it is now an output.
+// This is the one-car path — "here is what I drive" — and it stays because it
+// is what most drivers do and what the app asks for when somebody first offers
+// a ride. A driver who keeps two adds the second through the garage, and this
+// then edits whichever is their default.
+//
+// It is the only writer of fuel_consumption_l_100km, which remains on the
+// profile as the legacy column. Pricing reads the vehicle.
 func (s *Service) Upsert(ctx context.Context, userID uuid.UUID, car Car) (Profile, error) {
 	car.Make = strings.TrimSpace(car.Make)
 	car.Model = strings.TrimSpace(car.Model)
@@ -126,6 +135,30 @@ func (s *Service) Upsert(ctx context.Context, userID uuid.UUID, car Car) (Profil
 		assessed.LPer100Km, string(assessed.Source), now,
 	); err != nil {
 		return Profile{}, fmt.Errorf("drivers: saving the profile: %w", err)
+	}
+
+	// And the car itself, as their default. Without this a driver could set up
+	// a profile and then have nothing to publish a route with, because a route
+	// names a vehicle and there would be none.
+	//
+	// Upserted on the default rather than inserted, so that editing a profile
+	// twice does not fill the garage with near-identical Yarises.
+	capped, _ := atMost(assessed.LPer100Km, fuel)
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO vehicles (owner_id, make, model, fuel, engine_cc, co2_g_km,
+			consumption_l_100km, consumption_source, assessed_at, colour, plate, is_default)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true)
+		ON CONFLICT (owner_id) WHERE is_default AND retired_at IS NULL DO UPDATE SET
+			make = EXCLUDED.make, model = EXCLUDED.model, fuel = EXCLUDED.fuel,
+			engine_cc = EXCLUDED.engine_cc, co2_g_km = EXCLUDED.co2_g_km,
+			consumption_l_100km = EXCLUDED.consumption_l_100km,
+			consumption_source = EXCLUDED.consumption_source,
+			assessed_at = EXCLUDED.assessed_at,
+			colour = EXCLUDED.colour, plate = EXCLUDED.plate,
+			updated_at = now()`,
+		userID, car.Make, car.Model, string(fuel), nullableCC(car.EngineCC), nullableCO2(car.CO2GramsPerKm),
+		capped, string(assessed.Source), now, car.Colour, car.Plate); err != nil {
+		return Profile{}, fmt.Errorf("drivers: saving the car: %w", err)
 	}
 
 	return Profile{

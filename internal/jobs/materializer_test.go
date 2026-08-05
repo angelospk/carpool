@@ -71,6 +71,7 @@ func newFixture(t *testing.T, weekdays ...time.Weekday) *fixture {
 
 	templateID, err := store.CreateRouteTemplate(ctx, pool, store.CreateRouteTemplateParams{
 		DriverID:         driverID,
+		VehicleID:        testdb.DefaultCar(t, pool, driverID),
 		Origin:           geo.Point{Lon: 25.80, Lat: 40.85},
 		Destination:      geo.Point{Lon: 26.00, Lat: 40.85},
 		OriginLabel:      "A",
@@ -500,9 +501,9 @@ func TestMaterializeLeavesOccurrencesBeyondTheHorizonAlone(t *testing.T) {
 	// earlier run would have left behind.
 	var beyondID uuid.UUID
 	if err := f.pool.QueryRow(ctx, `
-		INSERT INTO trip_occurrences (template_id, service_date, depart_earliest, depart_latest,
+		INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest, depart_latest,
 			seats_total, seats_free, template_revision, route_geom, route_km, route_min, pricing_mode)
-		SELECT template_id, '2026-08-24', '2026-08-24T04:30:00Z', '2026-08-24T05:00:00Z',
+		SELECT template_id, vehicle_id, '2026-08-24', '2026-08-24T04:30:00Z', '2026-08-24T05:00:00Z',
 			seats_total, seats_free, template_revision, route_geom, route_km, route_min, pricing_mode
 		FROM trip_occurrences LIMIT 1
 		RETURNING id`).Scan(&beyondID); err != nil {

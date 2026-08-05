@@ -187,6 +187,7 @@ func (f *janitorFixture) seedThread(departed time.Time, messages ...time.Time) u
 
 	templateID, err := store.CreateRouteTemplate(ctx, f.pool, store.CreateRouteTemplateParams{
 		DriverID:         f.user,
+		VehicleID:        testdb.DefaultCar(f.t, f.pool, f.user),
 		Origin:           geo.Point{Lon: 25.80, Lat: 40.85},
 		Destination:      geo.Point{Lon: 26.00, Lat: 40.85},
 		OriginLabel:      "Αλεξανδρούπολη",
@@ -212,10 +213,10 @@ func (f *janitorFixture) seedThread(departed time.Time, messages ...time.Time) u
 
 	var occurrenceID uuid.UUID
 	if err := f.pool.QueryRow(ctx, `
-		INSERT INTO trip_occurrences (template_id, service_date, depart_earliest, depart_latest,
+		INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest, depart_latest,
 		                              seats_total, seats_free, template_revision,
 		                              route_geom, route_km, route_min, pricing_mode)
-		VALUES ($1, $2::date, $2, $2, 3, 3, 1,
+		VALUES ($1, (SELECT vehicle_id FROM route_templates WHERE id = $1), $2::date, $2, $2, 3, 3, 1,
 		        ST_GeomFromText('`+corridorWKT+`', 4326), 17, 20, 'formula')
 		RETURNING id`, templateID, departed).Scan(&occurrenceID); err != nil {
 		f.t.Fatalf("seeding occurrence: %v", err)

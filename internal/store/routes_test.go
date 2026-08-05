@@ -34,8 +34,8 @@ func seedDriver(t *testing.T, pool *pgxpool.Pool, phone string) (*pgxpool.Pool, 
 	// same database would otherwise trip over the unique name.
 	var regionID uuid.UUID
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO regions (name, boundary, fuel_price_eur)
-		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25.3 40.3, 26.7 40.3, 26.7 41.8, 25.3 41.8, 25.3 40.3))', 4326)), 1.8)
+		INSERT INTO regions (name, boundary)
+		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25.3 40.3, 26.7 40.3, 26.7 41.8, 25.3 41.8, 25.3 40.3))', 4326)))
 		ON CONFLICT (name) DO UPDATE SET updated_at = now()
 		RETURNING id`).Scan(&regionID); err != nil {
 		t.Fatalf("seeding region: %v", err)
@@ -55,9 +55,11 @@ func seedDriver(t *testing.T, pool *pgxpool.Pool, phone string) (*pgxpool.Pool, 
 	return pool, driverID
 }
 
-func templateParams(driverID uuid.UUID, detour match.Budget) store.CreateRouteTemplateParams {
+func templateParams(t *testing.T, pool *pgxpool.Pool, driverID uuid.UUID, detour match.Budget) store.CreateRouteTemplateParams {
+	t.Helper()
 	return store.CreateRouteTemplateParams{
 		DriverID:         driverID,
+		VehicleID:        testdb.DefaultCar(t, pool, driverID),
 		Origin:           geo.Point{Lon: 25.80, Lat: 40.85},
 		Destination:      geo.Point{Lon: 26.00, Lat: 40.85},
 		OriginLabel:      "Αλεξανδρούπολη",
@@ -87,7 +89,7 @@ func TestARouteKeepsTheDetourItWasCreatedWith(t *testing.T) {
 	pool, driverID := driverAndPool(t)
 
 	want := match.Budget{AllowStops: true, Km: 7.5, Min: 12}
-	id, err := store.CreateRouteTemplate(ctx, pool, templateParams(driverID, want))
+	id, err := store.CreateRouteTemplate(ctx, pool, templateParams(t, pool, driverID, want))
 	if err != nil {
 		t.Fatalf("CreateRouteTemplate: %v", err)
 	}
@@ -111,7 +113,7 @@ func TestARouteThatRefusesStopsSaysSo(t *testing.T) {
 	pool, driverID := driverAndPool(t)
 
 	id, err := store.CreateRouteTemplate(ctx, pool,
-		templateParams(driverID, match.Budget{AllowStops: false, Km: 0, Min: 0}))
+		templateParams(t, pool, driverID, match.Budget{AllowStops: false, Km: 0, Min: 0}))
 	if err != nil {
 		t.Fatalf("CreateRouteTemplate: %v", err)
 	}
@@ -140,6 +142,8 @@ func TestTheDetourMigrationKeepsWhatDriversHadAlreadyChosen(t *testing.T) {
 		t.Fatalf("MigrateTo(15): %v", err)
 	}
 
+	// The price column is still mandatory at this point in the history — 00019
+	// is what gives it a default, and this test deliberately stops before it.
 	var regionID uuid.UUID
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO regions (name, boundary, fuel_price_eur)
@@ -189,5 +193,76 @@ func TestTheDetourMigrationKeepsWhatDriversHadAlreadyChosen(t *testing.T) {
 			t.Errorf("%s: default_allow_stops=%v detour_budget_min=%d, want %v and %d",
 				tc.name, allow, min, tc.allow, tc.min)
 		}
+	}
+}
+
+// The car a route names is the one it is published with, and it must be the
+// driver's own.
+//
+// The second half is a composite foreign key rather than a check in a handler:
+// a route naming somebody else's Yaris would price a trip off a car that is not
+// there, and "the handler remembers" is not the same guarantee as "the database
+// refuses".
+func TestARouteCarriesTheCarItWasPublishedWith(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.Fresh(t)
+	if err := store.Migrate(ctx, pool); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	_, driverID := seedDriver(t, pool, "+306900000401")
+
+	var second uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO vehicles (owner_id, make, model, fuel, consumption_l_100km,
+			consumption_source, plate, is_default)
+		VALUES ($1, 'Fiat', 'Ducato', 'diesel', 9.0, 'dataset', 'ΖΗΘ-9999', false)
+		RETURNING id`, driverID).Scan(&second); err != nil {
+		t.Fatalf("adding a second car: %v", err)
+	}
+
+	params := templateParams(t, pool, driverID, match.Budget{AllowStops: true, Km: 15, Min: 20})
+	params.VehicleID = second
+	id, err := store.CreateRouteTemplate(ctx, pool, params)
+	if err != nil {
+		t.Fatalf("CreateRouteTemplate: %v", err)
+	}
+
+	var stored uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`SELECT vehicle_id FROM route_templates WHERE id = $1`, id).Scan(&stored); err != nil {
+		t.Fatalf("reading the route: %v", err)
+	}
+	if stored != second {
+		t.Errorf("the route went out in %v, want the van %v", stored, second)
+	}
+}
+
+func TestARouteCannotBePublishedWithSomebodyElsesCar(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.Fresh(t)
+	if err := store.Migrate(ctx, pool); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	_, driverID := seedDriver(t, pool, "+306900000402")
+
+	var strangerID, theirCar uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO users (phone, name, home_region_id)
+		SELECT '+306900000403', 'Άλλος', home_region_id FROM users WHERE id = $1
+		RETURNING id`, driverID).Scan(&strangerID); err != nil {
+		t.Fatalf("seeding a stranger: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO vehicles (owner_id, make, model, fuel, consumption_l_100km,
+			consumption_source, plate, is_default)
+		VALUES ($1, 'Fiat', 'Ducato', 'diesel', 9.0, 'dataset', 'ΖΗΘ-1111', true)
+		RETURNING id`, strangerID).Scan(&theirCar); err != nil {
+		t.Fatalf("seeding their car: %v", err)
+	}
+
+	params := templateParams(t, pool, driverID, match.Budget{AllowStops: true, Km: 15, Min: 20})
+	params.VehicleID = theirCar
+	if _, err := store.CreateRouteTemplate(ctx, pool, params); err == nil {
+		t.Fatal("a route was published with somebody else's car")
 	}
 }

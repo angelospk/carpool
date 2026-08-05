@@ -59,20 +59,21 @@ func newWorld(t *testing.T) *world {
 	scan(&w.passengerID, `INSERT INTO users (phone, name, home_region_id)
 		VALUES ('+306900000002','Επιβάτης',$1) RETURNING id`, regionID)
 	if _, err := pool.Exec(ctx, `INSERT INTO driver_profiles (user_id, car_model, car_plate)
-		VALUES ($1,'Yaris','ΑΒΓ-1234')`, w.driverID); err != nil {
+		VALUES ($1, 'Yaris','ΑΒΓ-1234')`, w.driverID); err != nil {
 		t.Fatalf("seeding driver profile: %v", err)
 	}
-	scan(&templateID, `INSERT INTO route_templates (driver_id, origin, destination,
+	testdb.GiveEveryDriverACar(t, pool)
+	scan(&templateID, `INSERT INTO route_templates (driver_id, vehicle_id, origin, destination,
 		origin_label, destination_label, route_geom, route_km, route_min, seats, osrm_data_version)
-		VALUES ($1, ST_SetSRID(ST_MakePoint(25.80,40.85),4326), ST_SetSRID(ST_MakePoint(26.00,40.85),4326),
+		VALUES ($1, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default), ST_SetSRID(ST_MakePoint(25.80,40.85),4326), ST_SetSRID(ST_MakePoint(26.00,40.85),4326),
 		'A','B', ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 3, 'test')
 		RETURNING id`, w.driverID)
 
 	occ := func(dest *uuid.UUID, date string) {
-		scan(dest, `INSERT INTO trip_occurrences (template_id, service_date, depart_earliest,
+		scan(dest, `INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest,
 			depart_latest, seats_total, seats_free, template_revision, route_geom, route_km,
 			route_min, pricing_mode)
-			VALUES ($1, $2::date, ($2::date + time '06:30')::timestamptz,
+			VALUES ($1, (SELECT vehicle_id FROM route_templates WHERE id = $1), $2::date, ($2::date + time '06:30')::timestamptz,
 			        ($2::date + time '07:00')::timestamptz, 3, 2, 1,
 			        ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 'formula')
 			RETURNING id`, templateID, date)
@@ -87,23 +88,23 @@ func newWorld(t *testing.T) *world {
 		'2026-08-04T03:00:00Z','2026-08-04T07:00:00Z', 1, 'open', 'matched') RETURNING id`, w.passengerID)
 	scan(&askID, `INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km,
 		pickup_point, dropoff_point, suggested_price_eur, itinerary_version, status, expires_at)
-		VALUES ($1,$2,5,2, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+		VALUES ($1, $2,5,2, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
 		ST_SetSRID(ST_MakePoint(25.98,40.85),4326), 2.50, 0, 'accepted','2026-08-04T03:00:00Z')
 		RETURNING id`, requestID, w.occurrenceID)
 	scan(&w.fromAsk, `INSERT INTO bookings (occurrence_id, request_id, passenger_id, ask_id,
 		seats, price_eur, pickup_point, dropoff_point)
-		VALUES ($1,$2,$3,$4,1,2.50, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+		VALUES ($1, $2,$3,$4,1,2.50, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
 		ST_SetSRID(ST_MakePoint(25.98,40.85),4326)) RETURNING id`,
 		w.occurrenceID, requestID, w.passengerID, askID)
 
 	scan(&w.arrangementID, `INSERT INTO standing_arrangements (template_id, passenger_id, weekday,
 		seats, pickup_point, dropoff_point, price_eur, until_date, status)
-		VALUES ($1,$2,2,1, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+		VALUES ($1, $2,2,1, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
 		ST_SetSRID(ST_MakePoint(25.98,40.85),4326), 2.50, DATE '2026-08-22', 'active')
 		RETURNING id`, templateID, w.passengerID)
 	scan(&w.fromArrangement, `INSERT INTO bookings (occurrence_id, passenger_id, arrangement_id,
 		seats, price_eur, pickup_point, dropoff_point)
-		VALUES ($1,$2,$3,1,2.50, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+		VALUES ($1, $2,$3,1,2.50, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
 		ST_SetSRID(ST_MakePoint(25.98,40.85),4326)) RETURNING id`,
 		w.secondOccurrence, w.passengerID, w.arrangementID)
 

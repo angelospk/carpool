@@ -156,6 +156,14 @@ func NewRouter(deps Deps) http.Handler {
 			// rather than an honest 404.
 			if deps.Drivers != nil {
 				r.Put("/me/driver", deps.handlePutDriver)
+
+				// The garage. A driver with one car never opens it; a driver
+				// with a van at the weekend chooses per trip.
+				r.Get("/me/vehicles", deps.handleListVehicles)
+				r.Post("/me/vehicles", deps.handleAddVehicle)
+				r.Post("/me/vehicles/{id}/default", deps.handleSetDefaultVehicle)
+				r.Delete("/me/vehicles/{id}", deps.handleRetireVehicle)
+
 				r.Get("/vehicles/makes", deps.handleListVehicleMakes)
 				r.Get("/vehicles/models", deps.handleListVehicleModels)
 			}

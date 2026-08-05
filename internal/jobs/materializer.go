@@ -107,11 +107,11 @@ func (m *Materializer) reconcile(ctx context.Context, templateID uuid.UUID) erro
 	var tmpl templateSnapshot
 	err = tx.QueryRow(ctx, `
 		SELECT revision, seats, route_km, route_min, pricing_mode, ends_at_port,
-		       allow_stops, detour_km, detour_min, ST_AsText(route_geom)
+		       allow_stops, detour_km, detour_min, ST_AsText(route_geom), vehicle_id
 		FROM route_templates WHERE id = $1 AND active
 		FOR UPDATE`, templateID).Scan(
 		&tmpl.revision, &tmpl.seats, &tmpl.routeKm, &tmpl.routeMin, &tmpl.pricingMode, &tmpl.endsAtPort,
-		&tmpl.allowStops, &tmpl.detourKm, &tmpl.detourMin, &tmpl.routeWKT)
+		&tmpl.allowStops, &tmpl.detourKm, &tmpl.detourMin, &tmpl.routeWKT, &tmpl.vehicleID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil // deactivated between listing and locking
 	}
@@ -161,6 +161,12 @@ type templateSnapshot struct {
 	detourKm    float64
 	detourMin   int
 	routeWKT    string
+	// vehicleID is the car the route is published with. It is copied onto each
+	// occurrence rather than read through the template, so that changing the
+	// car on a route does not change the car named on a trip somebody has
+	// already booked — which is the make and colour they will be standing at
+	// the kerb looking for.
+	vehicleID uuid.UUID
 }
 
 // upsert creates the occurrences the schedule wants, and brings mutable
@@ -176,9 +182,9 @@ func (m *Materializer) upsert(
 				template_id, service_date, depart_earliest, depart_latest,
 				seats_total, seats_free, template_revision,
 				route_geom, route_km, route_min, pricing_mode, ends_at_port,
-				allow_stops, detour_km, detour_min)
+				allow_stops, detour_km, detour_min, vehicle_id)
 			VALUES ($1, $2::date, $3, $4,
-			        $5, $5, $6, ST_GeomFromText($7, 4326), $8, $9, $10, $12, $13, $14, $15)
+			        $5, $5, $6, ST_GeomFromText($7, 4326), $8, $9, $10, $12, $13, $14, $15, $16)
 			ON CONFLICT (template_id, service_date) DO UPDATE
 			SET depart_earliest   = EXCLUDED.depart_earliest,
 			    depart_latest     = EXCLUDED.depart_latest,
@@ -196,11 +202,12 @@ func (m *Materializer) upsert(
 			    allow_stops       = EXCLUDED.allow_stops,
 			    detour_km         = EXCLUDED.detour_km,
 			    detour_min        = EXCLUDED.detour_min,
+			    vehicle_id        = EXCLUDED.vehicle_id,
 			    updated_at        = now()
 			WHERE `+mutablePredicate("$11"),
 			templateID, p.ServiceDate.String(), p.DepartEarliest, p.DepartLatest,
 			tmpl.seats, tmpl.revision, tmpl.routeWKT, tmpl.routeKm, tmpl.routeMin, tmpl.pricingMode,
-			now, tmpl.endsAtPort, tmpl.allowStops, tmpl.detourKm, tmpl.detourMin)
+			now, tmpl.endsAtPort, tmpl.allowStops, tmpl.detourKm, tmpl.detourMin, tmpl.vehicleID)
 		if err != nil {
 			return fmt.Errorf("jobs: upserting occurrence %s: %w", p.ServiceDate, err)
 		}

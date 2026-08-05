@@ -64,10 +64,11 @@ func newWorld(t *testing.T) *world {
 		VALUES ($1, 'Toyota Yaris', 'ΑΒΓ-1234')`, w.driverID); err != nil {
 		t.Fatalf("seeding driver profile: %v", err)
 	}
+	testdb.GiveEveryDriverACar(t, pool)
 	must(&w.templateID, `INSERT INTO route_templates
-		(driver_id, origin, destination, origin_label, destination_label,
+		(driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 		 route_geom, route_km, route_min, seats, osrm_data_version)
-		VALUES ($1, ST_SetSRID(ST_MakePoint(25.87, 40.85), 4326),
+		VALUES ($1, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default), ST_SetSRID(ST_MakePoint(25.87, 40.85), 4326),
 		            ST_SetSRID(ST_MakePoint(26.17, 40.90), 4326), 'Αλεξ/πολη', 'Φέρες',
 		        ST_SetSRID(ST_GeomFromText('LINESTRING(25.87 40.85, 26.17 40.90)'), 4326),
 		        28.6, 25, 3, 'test') RETURNING id`, w.driverID)
@@ -75,9 +76,9 @@ func newWorld(t *testing.T) *world {
 	for _, day := range []string{"2026-08-04", "2026-08-11", "2026-08-18"} {
 		var id uuid.UUID
 		must(&id, `INSERT INTO trip_occurrences
-			(template_id, service_date, depart_earliest, depart_latest, seats_total, seats_free,
+			(template_id, vehicle_id, service_date, depart_earliest, depart_latest, seats_total, seats_free,
 			 template_revision, route_geom, route_km, route_min, pricing_mode)
-			VALUES ($1, $2::date, ($2::date + time '04:30')::timestamptz,
+			VALUES ($1, (SELECT vehicle_id FROM route_templates WHERE id = $1), $2::date, ($2::date + time '04:30')::timestamptz,
 			        ($2::date + time '05:30')::timestamptz, 3, 3, 1,
 			        ST_SetSRID(ST_GeomFromText('LINESTRING(25.87 40.85, 26.17 40.90)'), 4326),
 			        28.6, 25, 'formula') RETURNING id`, w.templateID, day)

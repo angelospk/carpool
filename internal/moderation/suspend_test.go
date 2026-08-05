@@ -64,21 +64,22 @@ func newWorld(t *testing.T) *world {
 	scan(&w.moderator, `INSERT INTO users (phone, name, home_region_id, is_moderator)
 		VALUES ('+306900000003','Επόπτης',$1,true) RETURNING id`, regionID)
 
-	exec(`INSERT INTO driver_profiles (user_id, car_model, car_plate) VALUES ($1,'Yaris','ΑΒΓ-1234')`, w.driver)
+	exec(`INSERT INTO driver_profiles (user_id, car_model, car_plate) VALUES ($1, 'Yaris','ΑΒΓ-1234')`, w.driver)
+	testdb.GiveEveryDriverACar(t, pool)
 
 	var templateID uuid.UUID
 	scan(&templateID, `
-		INSERT INTO route_templates (driver_id, origin, destination, origin_label, destination_label,
+		INSERT INTO route_templates (driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 			route_geom, route_km, route_min, seats, osrm_data_version)
-		VALUES ($1, ST_SetSRID(ST_MakePoint(25.80,40.85),4326), ST_SetSRID(ST_MakePoint(26.00,40.85),4326),
+		VALUES ($1, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default), ST_SetSRID(ST_MakePoint(25.80,40.85),4326), ST_SetSRID(ST_MakePoint(26.00,40.85),4326),
 			'A','B', ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 3, 'test')
 		RETURNING id`, w.driver)
 
 	occurrence := func(dest *uuid.UUID, date string, departs time.Time) {
 		scan(dest, `
-			INSERT INTO trip_occurrences (template_id, service_date, depart_earliest, depart_latest,
+			INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest, depart_latest,
 				seats_total, seats_free, template_revision, route_geom, route_km, route_min, pricing_mode)
-			VALUES ($1, $2, $3::timestamptz, $3::timestamptz + interval '30 minutes', 3, 2, 1,
+			VALUES ($1, (SELECT vehicle_id FROM route_templates WHERE id = $1), $2, $3::timestamptz, $3::timestamptz + interval '30 minutes', 3, 2, 1,
 				ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 'formula')
 			RETURNING id`, templateID, date, departs)
 	}

@@ -54,11 +54,12 @@ func seed(t *testing.T) fixture {
 		VALUES ($1, 'Toyota Yaris', 'ΑΒΓ-1234')`, f.driverID); err != nil {
 		t.Fatalf("seeding driver profile: %v", err)
 	}
+	testdb.GiveEveryDriverACar(t, pool)
 
 	scan(&f.templateID, `INSERT INTO route_templates
-		(driver_id, origin, destination, origin_label, destination_label,
+		(driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 		 route_geom, route_km, route_min, osrm_data_version)
-		VALUES ($1, ST_SetSRID(ST_MakePoint(25.87, 40.85), 4326),
+		VALUES ($1, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default), ST_SetSRID(ST_MakePoint(25.87, 40.85), 4326),
 		            ST_SetSRID(ST_MakePoint(26.17, 40.90), 4326),
 		        'Αλεξανδρούπολη', 'Φέρες',
 		        ST_SetSRID(ST_GeomFromText('LINESTRING(25.87 40.85, 26.17 40.90)'), 4326),
@@ -66,17 +67,17 @@ func seed(t *testing.T) fixture {
 		RETURNING id`, f.driverID)
 
 	scan(&f.occurrence, `INSERT INTO trip_occurrences
-		(template_id, service_date, depart_earliest, depart_latest, seats_total, seats_free,
+		(template_id, vehicle_id, service_date, depart_earliest, depart_latest, seats_total, seats_free,
 		 template_revision, route_geom, route_km, route_min, pricing_mode)
-		VALUES ($1, DATE '2026-08-04', '2026-08-04T04:30:00Z', '2026-08-04T05:30:00Z', 3, 3, 1,
+		VALUES ($1, (SELECT vehicle_id FROM route_templates WHERE id = $1), DATE '2026-08-04', '2026-08-04T04:30:00Z', '2026-08-04T05:30:00Z', 3, 3, 1,
 		        ST_SetSRID(ST_GeomFromText('LINESTRING(25.87 40.85, 26.17 40.90)'), 4326),
 		        28.6, 25, 'formula')
 		RETURNING id`, f.templateID)
 
 	scan(&f.nextWeek, `INSERT INTO trip_occurrences
-		(template_id, service_date, depart_earliest, depart_latest, seats_total, seats_free,
+		(template_id, vehicle_id, service_date, depart_earliest, depart_latest, seats_total, seats_free,
 		 template_revision, route_geom, route_km, route_min, pricing_mode)
-		VALUES ($1, DATE '2026-08-11', '2026-08-11T04:30:00Z', '2026-08-11T05:30:00Z', 3, 3, 1,
+		VALUES ($1, (SELECT vehicle_id FROM route_templates WHERE id = $1), DATE '2026-08-11', '2026-08-11T04:30:00Z', '2026-08-11T05:30:00Z', 3, 3, 1,
 		        ST_SetSRID(ST_GeomFromText('LINESTRING(25.87 40.85, 26.17 40.90)'), 4326),
 		        28.6, 25, 'formula')
 		RETURNING id`, f.templateID)
@@ -165,9 +166,9 @@ func TestABookingComesFromAnAskOrAnArrangementButNeverBoth(t *testing.T) {
 			var occ uuid.UUID
 			if err := f.pool.QueryRow(context.Background(), `
 				INSERT INTO trip_occurrences
-				(template_id, service_date, depart_earliest, depart_latest, seats_total, seats_free,
+				(template_id, vehicle_id, service_date, depart_earliest, depart_latest, seats_total, seats_free,
 				 template_revision, route_geom, route_km, route_min, pricing_mode)
-				VALUES ($1, DATE '2026-09-01' + $2::int, '2026-09-01T04:30:00Z', '2026-09-01T05:30:00Z',
+				VALUES ($1, (SELECT vehicle_id FROM route_templates WHERE id = $1), DATE '2026-09-01' + $2::int, '2026-09-01T04:30:00Z', '2026-09-01T05:30:00Z',
 				        3, 3, 1, ST_SetSRID(ST_GeomFromText('LINESTRING(25.87 40.85, 26.17 40.90)'), 4326),
 				        28.6, 25, 'formula')
 				RETURNING id`, f.templateID, i).Scan(&occ); err != nil {

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"carpool/internal/store/testdb"
 )
 
 // bookedTrip drives the real flow to a confirmed booking and returns the
@@ -24,21 +26,22 @@ func (h *harness) bookedTrip(t *testing.T) (driverToken, passengerToken string, 
 
 	h.mustExec(`INSERT INTO driver_profiles (user_id, car_model, car_plate)
 	            VALUES ($1, 'Yaris', 'ABC-1234')`, driverID)
+	testdb.GiveEveryDriverACar(t, h.pool)
 
 	var templateID uuid.UUID
 	if err := h.pool.QueryRow(ctx, `
-		INSERT INTO route_templates (driver_id, origin, destination, origin_label, destination_label,
+		INSERT INTO route_templates (driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 			route_geom, route_km, route_min, seats, osrm_data_version)
-		VALUES ($1, ST_SetSRID(ST_MakePoint(25.80,40.85),4326), ST_SetSRID(ST_MakePoint(26.00,40.85),4326),
+		VALUES ($1, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default), ST_SetSRID(ST_MakePoint(25.80,40.85),4326), ST_SetSRID(ST_MakePoint(26.00,40.85),4326),
 			'A','B', ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 3, 'test')
 		RETURNING id`, driverID).Scan(&templateID); err != nil {
 		t.Fatalf("seeding template: %v", err)
 	}
 
 	if err := h.pool.QueryRow(ctx, `
-		INSERT INTO trip_occurrences (template_id, service_date, depart_earliest, depart_latest,
+		INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest, depart_latest,
 			seats_total, seats_free, template_revision, route_geom, route_km, route_min, pricing_mode)
-		VALUES ($1, '2026-07-30', '2026-07-30T04:30:00Z', '2026-07-30T05:00:00Z',
+		VALUES ($1, (SELECT vehicle_id FROM route_templates WHERE id = $1), '2026-07-30', '2026-07-30T04:30:00Z', '2026-07-30T05:00:00Z',
 			3, 2, 1, ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 'formula')
 		RETURNING id`, templateID).Scan(&occurrenceID); err != nil {
 		t.Fatalf("seeding occurrence: %v", err)
@@ -55,14 +58,14 @@ func (h *harness) bookedTrip(t *testing.T) (driverToken, passengerToken string, 
 	if err := h.pool.QueryRow(ctx, `
 		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
 			suggested_price_eur, itinerary_version, status, expires_at)
-		VALUES ($1,$2,5,2, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+		VALUES ($1, $2,5,2, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
 			ST_SetSRID(ST_MakePoint(25.98,40.85),4326), 2.50, 0, 'accepted', now()+interval '1 hour')
 		RETURNING id`, requestID, occurrenceID).Scan(&askID); err != nil {
 		t.Fatalf("seeding ask: %v", err)
 	}
 	h.mustExec(`INSERT INTO bookings (occurrence_id, request_id, passenger_id, ask_id, seats, price_eur,
 	                                  pickup_point, dropoff_point)
-	            VALUES ($1,$2,$3,$4,1,2.50, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+	            VALUES ($1, $2,$3,$4,1,2.50, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
 	                    ST_SetSRID(ST_MakePoint(25.98,40.85),4326))`,
 		occurrenceID, requestID, passengerID, askID)
 
@@ -476,14 +479,14 @@ func (h *harness) addSecondPassenger(t *testing.T, occurrenceID uuid.UUID) strin
 	if err := h.pool.QueryRow(context.Background(), `
 		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
 			suggested_price_eur, itinerary_version, status, expires_at)
-		VALUES ($1,$2,5,2, ST_SetSRID(ST_MakePoint(25.83,40.85),4326),
+		VALUES ($1, $2,5,2, ST_SetSRID(ST_MakePoint(25.83,40.85),4326),
 			ST_SetSRID(ST_MakePoint(25.97,40.85),4326), 2.50, 0, 'accepted', now()+interval '1 hour')
 		RETURNING id`, requestID, occurrenceID).Scan(&askID); err != nil {
 		t.Fatalf("seeding second ask: %v", err)
 	}
 	h.mustExec(`INSERT INTO bookings (occurrence_id, request_id, passenger_id, ask_id, seats, price_eur,
 	                                  pickup_point, dropoff_point)
-	            VALUES ($1,$2,$3,$4,1,2.50, ST_SetSRID(ST_MakePoint(25.83,40.85),4326),
+	            VALUES ($1, $2,$3,$4,1,2.50, ST_SetSRID(ST_MakePoint(25.83,40.85),4326),
 	                    ST_SetSRID(ST_MakePoint(25.97,40.85),4326))`,
 		occurrenceID, requestID, passengerID, askID)
 	return token

@@ -16,6 +16,7 @@ import {
   Stepper,
   Title,
 } from '../../src/components/ui';
+import { VehiclePicker } from '../../src/components/VehiclePicker';
 import { colors, space, type } from '../../src/design/tokens';
 import { type Pin } from '../../src/design/pin';
 import { PlaceField } from '../../src/components/PlaceField';
@@ -53,6 +54,9 @@ export default function PublishScreen() {
   // default rather than having the screen's idea of one imposed on them.
   const [allowStops, setAllowStops] = useState<boolean | null>(null);
   const [detourKm, setDetourKm] = useState<number | null>(null);
+  // null means "whichever is my default", which is what a driver with one car
+  // sends and what the server would have chosen anyway.
+  const [vehicleID, setVehicleID] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
 
 
@@ -75,11 +79,14 @@ export default function PublishScreen() {
         depart_latest: latest,
         ...(allowStops !== null ? { allow_stops: allowStops } : {}),
         ...(detourKm !== null ? { detour_km: detourKm } : {}),
+        ...(vehicleID !== null ? { vehicle_id: vehicleID } : {}),
       }),
     onSuccess: (r) => setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`),
     onError: (e) =>
       setOutcome(
-        e instanceof ApiError && e.code === 'no_driver_profile' ? e.message : t('common.error'),
+        e instanceof ApiError && (e.code === 'no_driver_profile' || e.code === 'no_vehicle')
+          ? e.message
+          : t('common.error'),
       ),
   });
 
@@ -159,6 +166,8 @@ export default function PublishScreen() {
               compact
             />
           </View>
+
+          <VehiclePicker testID="publish-vehicle" value={vehicleID} onChange={setVehicleID} />
 
           <View style={styles.seats}>
             <Text style={styles.seatsLabel}>{t('publish.seats')}</Text>

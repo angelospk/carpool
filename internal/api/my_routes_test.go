@@ -43,9 +43,9 @@ func driverWithRoute(t *testing.T, h *harness, phone string) (token, routeID str
 
 	h.mustQuery(`
 		INSERT INTO route_templates (
-			driver_id, origin, destination, origin_label, destination_label,
+			driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 			route_geom, route_km, route_min, seats, pricing_mode, osrm_data_version)
-		VALUES ($1::uuid,
+		VALUES ($1::uuid, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default),
 		        ST_SetSRID(ST_MakePoint(25.8743, 40.8476), 4326),
 		        ST_SetSRID(ST_MakePoint(26.1717, 40.8975), 4326),
 		        'Αλεξανδρούπολη', 'Φέρες',
