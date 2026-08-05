@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"carpool/internal/domain"
 )
 
 // TripRole is which side of a trip a user is on.
@@ -111,6 +114,10 @@ type TripDetail struct {
 	// already covers this weekday of this route.
 	TemplateID uuid.UUID
 	Weekday    int
+	// Basis is the frozen receipt for the caller's own seat: why that price was
+	// that price. Nil for the driver, and for anybody whose booking predates
+	// the column.
+	Basis *domain.Basis
 	// BookingID is the caller's own booking, and the thing a repeat is founded
 	// on. It is empty for the driver, who has no booking of their own.
 	BookingID *uuid.UUID
@@ -171,7 +178,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		       (SELECT encode(substring(sha256 from 1 for 6), 'hex') FROM profile_photos WHERE user_id = u.id),
 		       u.facebook_handle, u.instagram_handle,
 		       (SELECT round(avg(stars)::numeric, 2) FROM ratings WHERE ratee_id = u.id),
-		       b.price_eur, b.seats
+		       b.price_eur, b.seats, b.pricing_basis
 		FROM bookings b JOIN users u ON u.id = b.passenger_id
 		WHERE b.occurrence_id = $1 AND b.status IN ('confirmed','completed')
 		ORDER BY b.created_at`, occurrenceID)
@@ -182,12 +189,24 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 
 	for rows.Next() {
 		var p TripParticipant
+		var raw []byte
 		if err := rows.Scan(&p.UserID, &p.Name, &p.PhotoVersion, &p.FacebookHandle, &p.InstagramHandle, &p.Rating,
-			&p.PriceEUR, &p.Seats); err != nil {
+			&p.PriceEUR, &p.Seats, &raw); err != nil {
 			return TripDetail{}, fmt.Errorf("store: scanning passenger: %w", err)
 		}
 		if p.UserID == userID && p.PriceEUR != nil {
 			d.PriceEUR = *p.PriceEUR
+			// Only the caller's own. A receipt says what somebody paid and what
+			// their driver's car drinks; it is not a thing to hand the rest of
+			// the car.
+			if len(raw) > 0 {
+				var basis domain.Basis
+				if err := json.Unmarshal(raw, &basis); err == nil {
+					d.Basis = &basis
+				}
+				// A receipt that will not parse is a receipt that cannot be
+				// shown, not a trip that cannot be loaded.
+			}
 		}
 		d.Passengers = append(d.Passengers, p)
 	}

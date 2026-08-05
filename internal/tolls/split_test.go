@@ -244,3 +244,53 @@ func TestARiderWithNoIdIsRefused(t *testing.T) {
 		t.Fatal("Split accepted a rider with no id; that rider is the driver as far as the split is concerned")
 	}
 }
+
+// The driver pays a share of every barrier they drive through.
+//
+// This is the invariant that keeps tolls from breaking the thing the fuel
+// formula exists for. The fuel share divides by the whole car and floors, so a
+// full car recovers less than the trip cost; if the toll share were divided
+// among passengers only, a driver carrying three people would recover every
+// cent of a barrier and the total would climb back over cost.
+//
+// Checked across every combination rather than on one example, because the
+// number aboard changes at each gate and the failure would be a specific
+// arrangement rather than the rule in general.
+func TestTheDriverIsNeverCarriedThroughABarrierForFree(t *testing.T) {
+	gateList := []tolls.Gate{
+		{MetresAlong: 10_000, Cents: 280},
+		{MetresAlong: 60_000, Cents: 320},
+		{MetresAlong: 90_000, Cents: 190},
+	}
+
+	// Everyone aboard for a different stretch, so each gate has a different
+	// number of people at it.
+	all := []tolls.Rider{
+		{ID: "a", FromMetres: 0, ToMetres: 100_000},
+		{ID: "b", FromMetres: 5_000, ToMetres: 70_000},
+		{ID: "c", FromMetres: 50_000, ToMetres: 100_000},
+	}
+
+	for n := 1; n <= len(all); n++ {
+		riders := all[:n]
+		shares, err := tolls.Split(gateList, riders)
+		if err != nil {
+			t.Fatalf("%d riders: %v", n, err)
+		}
+
+		var toPassengers int
+		for _, r := range riders {
+			toPassengers += shares.Riders[r.ID]
+		}
+
+		var total int
+		for _, g := range gateList {
+			total += g.Cents
+		}
+
+		if toPassengers >= total {
+			t.Errorf("%d riders paid %d cents of a %d cent toll bill; the driver paid %d",
+				n, toPassengers, total, total-toPassengers)
+		}
+	}
+}

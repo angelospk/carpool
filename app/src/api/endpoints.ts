@@ -114,6 +114,36 @@ export type Participant = {
   seats?: number | null;
 };
 
+/**
+ * Why a seat costs what it costs, as the server worked it out.
+ *
+ * Every figure comes off the receipt frozen when the seat was booked. Nothing
+ * here is recomputed on the phone: a client doing its own arithmetic would
+ * disagree with the price beside it the day a fuel figure moved.
+ */
+export type PriceBreakdownData = {
+  v: number;
+  basis_v: number;
+  consumption_l_100km: number;
+  consumption_source: 'dataset' | 'co2' | 'band' | 'legacy';
+  fuel: string;
+  fuel_price_eur: number;
+  region_name?: string;
+  price_is_regional: boolean;
+  trip_km: number;
+  /** The whole trip's fuel, before it was divided. */
+  fuel_cost_cents: number;
+  /** Every seat the driver offered, plus the driver. */
+  divisor: number;
+  share_cents: number;
+  rounded_cents: number;
+  toll_share_cents: number;
+  total_cents: number;
+  /** The trip was under the driver's own free-below threshold. */
+  waived: boolean;
+  mode: 'formula' | 'free_contribution' | 'free';
+};
+
 export type TripDetail = TripSummary & {
   route_polyline: string;
   driver: Participant;
@@ -125,6 +155,8 @@ export type TripDetail = TripSummary & {
   booking_id: string | null;
   /** The route ran into a ferry and was cut at the port. */
   ends_at_port: boolean;
+  /** The caller's own seat, explained. Absent for the driver. */
+  price_breakdown?: PriceBreakdownData;
 };
 
 export type PastTrip = TripSummary & {

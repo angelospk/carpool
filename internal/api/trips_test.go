@@ -491,3 +491,78 @@ func (h *harness) addSecondPassenger(t *testing.T, occurrenceID uuid.UUID) strin
 		occurrenceID, requestID, passengerID, askID)
 	return token
 }
+
+// "3.50 €" answers nothing. The question a passenger has is whether that is a
+// fare, and the answer is the division — the whole car's fuel over every seat
+// plus the driver, floored, plus the barriers they are in the car for.
+func TestAPassengerCanSeeWhatTheyArePayingFor(t *testing.T) {
+	h := newHarness(t)
+	_, passenger, occurrenceID := h.bookedTrip(t)
+
+	// The receipt the ask flow freezes beside the price, restated here as
+	// arithmetic that actually holds: 5.6 l/100km at 1.729 €/l over 103 km is
+	// 9.97 €, over four (three seats and the driver) is 2.49, floored to 2.00.
+	h.mustExec(`UPDATE bookings SET price_eur = 2.00, pricing_basis = $1::jsonb`,
+		`{"v":2,"consumption_l_100km":5.6,"consumption_source":"dataset",
+		  "fuel_price_eur":1.729,"fuel":"diesel","region_name":"Περιφερειακή Ενότητα Έβρου",
+		  "trip_km":103,"wear_factor":1.0,"offered_seats":3,"free_below_km":5,
+		  "toll_share_cents":0,"mode":"formula","cost_eur":9.97,"seat_price_cents":200}`)
+
+	rec := h.do(http.MethodGet, "/v1/trips/"+occurrenceID.String(), nil, passenger)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		PriceEUR  float64 `json:"price_eur"`
+		Breakdown *struct {
+			FuelCostCents int     `json:"fuel_cost_cents"`
+			Divisor       int     `json:"divisor"`
+			RoundedCents  int     `json:"rounded_cents"`
+			TotalCents    int     `json:"total_cents"`
+			TripKm        float64 `json:"trip_km"`
+			Fuel          string  `json:"fuel"`
+		} `json:"price_breakdown"`
+	}
+	h.decode(rec, &body)
+
+	if body.Breakdown == nil {
+		t.Fatalf("no breakdown, so the price is unexplainable: %s", rec.Body.String())
+	}
+	if body.Breakdown.Divisor < 2 {
+		t.Errorf("divisor = %d; it is every offered seat plus the driver", body.Breakdown.Divisor)
+	}
+	if body.Breakdown.FuelCostCents <= 0 || body.Breakdown.TripKm <= 0 {
+		t.Errorf("the breakdown has no arithmetic in it: %+v", *body.Breakdown)
+	}
+	// The whole point: what the passenger pays is a fraction of the trip.
+	if body.Breakdown.TotalCents >= body.Breakdown.FuelCostCents {
+		t.Errorf("a seat at %d cents on a %d cent trip is not a share of it",
+			body.Breakdown.TotalCents, body.Breakdown.FuelCostCents)
+	}
+}
+
+// The receipt says what one person paid and what their driver's car drinks. It
+// is not a thing to hand the rest of the car, and the driver's own view of the
+// trip has no seat to explain.
+func TestTheDriverDoesNotGetSomebodyElsesReceipt(t *testing.T) {
+	h := newHarness(t)
+	driver, _, occurrenceID := h.bookedTrip(t)
+
+	// The passenger's seat does have a receipt, so this cannot pass merely
+	// because there was nothing to hand over.
+	h.mustExec(`UPDATE bookings SET pricing_basis = $1::jsonb`,
+		`{"v":2,"consumption_l_100km":5.6,"fuel_price_eur":1.729,"trip_km":103,
+		  "wear_factor":1.0,"offered_seats":3,"free_below_km":5,"toll_share_cents":0,
+		  "mode":"formula","cost_eur":9.97,"seat_price_cents":200}`)
+
+	rec := h.do(http.MethodGet, "/v1/trips/"+occurrenceID.String(), nil, driver)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var body map[string]any
+	h.decode(rec, &body)
+	if _, present := body["price_breakdown"]; present {
+		t.Error("the driver was shown a passenger's receipt")
+	}
+}

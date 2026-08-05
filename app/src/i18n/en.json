@@ -117,6 +117,23 @@
     "proposeBadName": "That name cannot be used.",
     "proposeTooFar": "That point is not in this area."
   },
+  "price": {
+    "consumptionIsAFloor": "The consumption is an approximation for the car's class.",
+    "dividedBy": "Divided by {{divisor}} — every seat and the driver",
+    "explain": "How is this worked out?",
+    "fuelForTheTrip": "Fuel: {{litres}} l/100 km × {{price}} €/l × {{km}} km",
+    "mode": {
+      "free": "The driver asks for nothing.",
+      "free_contribution": "Give what you think is right.",
+      "formula": ""
+    },
+    "nationalFuelPrice": "The fuel price is the national figure, not this region's.",
+    "notAFare": "This is a contribution to the cost, not a fare. The driver always recovers less than they spend.",
+    "roundedDown": "Rounded down",
+    "tolls": "Tolls you pass",
+    "total": "Total",
+    "waived": "The driver asks for nothing on a trip this short."
+  },
   "profile": {
     "car": "Your car",
     "detourBudget": "Maximum detour",

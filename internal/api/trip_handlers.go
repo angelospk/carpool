@@ -100,7 +100,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"id":                trip.OccurrenceID,
 		"role":              trip.Role,
 		"depart_earliest":   trip.DepartEarliest,
@@ -124,7 +124,18 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 			"car_plate": trip.Driver.CarPlate,
 		},
 		"passengers": passengers,
-	})
+	}
+
+	// Why this seat costs what it costs, for the person paying for it.
+	//
+	// Derived from the frozen receipt rather than recomputed, so it cannot
+	// disagree with the price beside it the day a fuel figure moves. Absent for
+	// the driver and for bookings made before receipts were kept.
+	if trip.Basis != nil {
+		out["price_breakdown"] = domain.BreakdownOf(*trip.Basis)
+	}
+
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (d Deps) handleConfirmTrip(w http.ResponseWriter, r *http.Request) {
