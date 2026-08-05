@@ -46,9 +46,14 @@ func newWorld(t *testing.T) *world {
 		}
 	}
 	var regionID, templateID uuid.UUID
-	scan(&regionID, `INSERT INTO regions (name, boundary, fuel_price_eur)
-		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25 40, 27 40, 27 42, 25 42, 25 40))', 4326)), 1.8)
+	scan(&regionID, `INSERT INTO regions (name, boundary)
+		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25 40, 27 40, 27 42, 25 42, 25 40))', 4326)))
 		RETURNING id`)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO fuel_prices (region_id, fuel, price_eur, source)
+		VALUES (NULL, 'petrol', 1.859, 'test'), (NULL, 'diesel', 1.729, 'test')`); err != nil {
+		t.Fatalf("seeding fuel prices: %v", err)
+	}
 	scan(&w.driverID, `INSERT INTO users (phone, name, home_region_id)
 		VALUES ('+306900000001','Οδηγός',$1) RETURNING id`, regionID)
 	scan(&w.passengerID, `INSERT INTO users (phone, name, home_region_id)

@@ -29,8 +29,12 @@ type geoJSONFile struct {
 // SeedRegionsFromFile loads region boundaries from a GeoJSON FeatureCollection.
 //
 // Seeding is idempotent and keyed on the region name, so redeploying does not
-// duplicate regions and an updated boundary or fuel price is picked up.
-func SeedRegionsFromFile(ctx context.Context, pool *pgxpool.Pool, path string, fuelPriceEUR float64) error {
+// duplicate regions and an updated boundary is picked up.
+//
+// It says nothing about fuel. A region used to carry one price for every fuel,
+// which could not tell petrol from diesel and would have meant seventy-five
+// copies of one national figure pretending to be local; see fuel_prices.go.
+func SeedRegionsFromFile(ctx context.Context, pool *pgxpool.Pool, path string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("store: reading region fixture: %w", err)
@@ -74,22 +78,12 @@ func SeedRegionsFromFile(ctx context.Context, pool *pgxpool.Pool, path string, f
 		// ST_MakeValid repairs the self-intersections that raw OSM boundaries
 		// occasionally carry.
 		_, err := tx.Exec(ctx, `
-			INSERT INTO regions (name, boundary, fuel_price_eur)
-			VALUES ($1,
-			        ST_Multi(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($2), 4326))),
-			        $3)
+			INSERT INTO regions (name, boundary)
+			VALUES ($1, ST_Multi(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($2), 4326))))
 			ON CONFLICT (name) DO UPDATE
-			SET boundary       = EXCLUDED.boundary,
-			    fuel_price_eur = EXCLUDED.fuel_price_eur,
-			    -- Only when the figure actually moves. A reseed that reasserts
-			    -- the same price has not made it any fresher, and stamping it
-			    -- anyway would hide exactly the staleness the column exists to
-			    -- show.
-			    fuel_price_updated_at = CASE
-			        WHEN regions.fuel_price_eur IS DISTINCT FROM EXCLUDED.fuel_price_eur
-			        THEN now() ELSE regions.fuel_price_updated_at END,
-			    updated_at     = now()`,
-			f.Properties.Name, string(f.Geometry), fuelPriceEUR)
+			SET boundary   = EXCLUDED.boundary,
+			    updated_at = now()`,
+			f.Properties.Name, string(f.Geometry))
 		if err != nil {
 			return fmt.Errorf("store: seeding region %q: %w", f.Properties.Name, err)
 		}

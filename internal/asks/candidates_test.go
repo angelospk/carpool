@@ -565,3 +565,100 @@ func TestABookingCarriesAReceiptThatStillAddsUp(t *testing.T) {
 		t.Errorf("replaying the receipt gave %d cents, the booking says %d", replayed, want)
 	}
 }
+
+// The fuel price follows the trip, and the fuel the car actually burns.
+//
+// It used to follow neither. The price was joined on the driver's home region,
+// so a resident of Έβρος driving Αθήνα → Πάτρα was quoted Έβρος' fuel; and
+// there was one figure for petrol and diesel alike, on top of a consumption
+// figure that is already fuel-specific. The receipt now says which fuel, which
+// prefecture, and whether that prefecture's figure was looked up or is the
+// national one standing in — because every one of those moves under a booking
+// that has already happened.
+func TestThePriceIsBuiltFromTheFuelAndThePrefectureTheTripStartsIn(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+
+	mustExec(t, f, `UPDATE driver_profiles SET vehicle_fuel = 'diesel'`)
+
+	// Two prefectures, so that "where the trip starts" is a different answer
+	// from "where it ends". The seeded rectangle is cut back to the western
+	// half, which holds the template's origin at 25.80, and a second region
+	// takes the eastern half, which holds its destination at 26.00.
+	//
+	// Without this the fixture's whole world is one region and the two answers
+	// coincide, which is the kind of test that passes for a lookup taking
+	// either end.
+	mustExec(t, f, `UPDATE regions SET boundary = ST_Multi(ST_GeomFromText(
+		'POLYGON((25 40, 25.9 40, 25.9 42, 25 42, 25 40))', 4326))`)
+	mustExec(t, f, `INSERT INTO regions (name, boundary) VALUES ('Ανατολικά',
+		ST_Multi(ST_GeomFromText('POLYGON((25.9 40, 27 40, 27 42, 25.9 42, 25.9 40))', 4326)))`)
+
+	mustExec(t, f, `
+		INSERT INTO fuel_prices (region_id, fuel, price_eur, source)
+		SELECT id, 'diesel', 1.999, 'checked at the pump' FROM regions WHERE name <> 'Ανατολικά'`)
+	mustExec(t, f, `
+		INSERT INTO fuel_prices (region_id, fuel, price_eur, source)
+		SELECT id, 'diesel', 1.222, 'checked at the pump' FROM regions WHERE name = 'Ανατολικά'`)
+
+	mustExec(t, f, `DELETE FROM asks`)
+	mustExec(t, f, `UPDATE ride_requests SET status = 'open'`)
+	askID, err := f.matcher().AskNext(ctx, f.requestID)
+	if err != nil {
+		t.Fatalf("AskNext: %v", err)
+	}
+
+	var raw []byte
+	must(t, f.pool.QueryRow(ctx,
+		`SELECT pricing_basis FROM asks WHERE id = $1`, askID).Scan(&raw), "ask basis")
+	var basis domain.Basis
+	if err := json.Unmarshal(raw, &basis); err != nil {
+		t.Fatalf("decoding the basis: %v", err)
+	}
+
+	if basis.Fuel != "diesel" {
+		t.Errorf("basis fuel = %q, want diesel", basis.Fuel)
+	}
+	if basis.FuelPriceEUR != 1.999 {
+		t.Errorf("fuel price = %v, want 1.999 — the prefecture the trip starts in, not the 1.222 where it ends",
+			basis.FuelPriceEUR)
+	}
+	if !basis.PriceIsRegional {
+		t.Error("a figure looked up for this prefecture did not say so")
+	}
+	if basis.RegionName == "" {
+		t.Error("the basis does not name the prefecture the price came from")
+	}
+}
+
+// And a car whose fuel nobody recorded — every profile created during the
+// pilot, before the app asked what the car was — takes the cheaper of the two.
+// Everything unknown in this formula leans the same way: a contribution that is
+// too low costs the driver a little, and one that is too high is the thing the
+// law is interested in.
+func TestACarOfUnknownFuelIsPricedAtTheCheaperPump(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+
+	mustExec(t, f, `UPDATE driver_profiles SET vehicle_fuel = NULL`)
+	mustExec(t, f, `UPDATE fuel_prices SET price_eur = 1.999 WHERE fuel = 'petrol'`)
+	mustExec(t, f, `UPDATE fuel_prices SET price_eur = 1.111 WHERE fuel = 'diesel'`)
+
+	mustExec(t, f, `DELETE FROM asks`)
+	mustExec(t, f, `UPDATE ride_requests SET status = 'open'`)
+	askID, err := f.matcher().AskNext(ctx, f.requestID)
+	if err != nil {
+		t.Fatalf("AskNext: %v", err)
+	}
+
+	var raw []byte
+	must(t, f.pool.QueryRow(ctx,
+		`SELECT pricing_basis FROM asks WHERE id = $1`, askID).Scan(&raw), "ask basis")
+	var basis domain.Basis
+	if err := json.Unmarshal(raw, &basis); err != nil {
+		t.Fatalf("decoding the basis: %v", err)
+	}
+	if basis.FuelPriceEUR != 1.111 {
+		t.Errorf("fuel price = %v, want the cheaper 1.111", basis.FuelPriceEUR)
+	}
+}

@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"carpool/internal/asks"
+	"carpool/internal/store"
 )
 
 func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
@@ -41,31 +41,39 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A trip is admissible only if one endpoint lies in the passenger's home
-	// region. Checking it here keeps the matching SQL free of the concern.
-	var admissible bool
-	err := d.Pool.QueryRow(r.Context(), `
-		SELECT ST_Contains(g.boundary, ST_SetSRID(ST_MakePoint($2, $3), 4326))
-		    OR ST_Contains(g.boundary, ST_SetSRID(ST_MakePoint($4, $5), 4326))
-		FROM users u JOIN regions g ON g.id = u.home_region_id
-		WHERE u.id = $1`,
-		userID, body.OriginLon, body.OriginLat, body.DestinationLon, body.DestinationLat).Scan(&admissible)
-	if errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, http.StatusNotFound, "not_found", "the account no longer exists")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "could not check the region")
-		return
-	}
-	if !admissible {
-		writeError(w, http.StatusBadRequest, "outside_region",
-			"either the pickup or the destination must be inside your region")
-		return
+	// Both ends have to be in the country. Nothing narrower.
+	//
+	// This used to require one end inside the passenger's own prefecture, which
+	// was the pilot's geofence: the app served Έβρος, so a trip with neither end
+	// there was a trip the app could not match. With the whole country open that
+	// rule stops describing anything real — it refuses Θεσσαλονίκη → Αθήνα to
+	// somebody who lives in Ξάνθη, which is exactly the journey a carpool is
+	// for — and it quietly made a profile field into an authorisation boundary,
+	// which it was never designed to be.
+	//
+	// What is left is the honest limit: there is no map, no toll data and no
+	// routing outside Greece.
+	for _, end := range []struct {
+		what     string
+		lon, lat float64
+	}{
+		{"pickup", body.OriginLon, body.OriginLat},
+		{"destination", body.DestinationLon, body.DestinationLat},
+	} {
+		_, err := store.RegionAt(r.Context(), d.Pool, end.lon, end.lat)
+		if errors.Is(err, store.ErrOutsideGreece) {
+			writeError(w, http.StatusBadRequest, "outside_country",
+				"the "+end.what+" is outside Greece, which is as far as this app goes")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not locate the trip")
+			return
+		}
 	}
 
 	var requestID uuid.UUID
-	err = d.Pool.QueryRow(r.Context(), `
+	err := d.Pool.QueryRow(r.Context(), `
 		INSERT INTO ride_requests (passenger_id, origin, destination, origin_label, destination_label,
 		                           window_start, window_end, seats, kind, status)
 		VALUES ($1,

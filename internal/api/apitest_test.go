@@ -56,13 +56,19 @@ func newHarnessWith(t *testing.T, devMode bool) *harness {
 
 	var regionID uuid.UUID
 	err := pool.QueryRow(ctx, `
-		INSERT INTO regions (name, boundary, fuel_price_eur)
+		INSERT INTO regions (name, boundary)
 		VALUES ('Έβρος',
-		        ST_Multi(ST_GeomFromText('POLYGON((25.3 40.3, 26.7 40.3, 26.7 41.8, 25.3 41.8, 25.3 40.3))', 4326)),
-		        1.800)
+		        ST_Multi(ST_GeomFromText('POLYGON((25.3 40.3, 26.7 40.3, 26.7 41.8, 25.3 41.8, 25.3 40.3))', 4326)))
 		RETURNING id`).Scan(&regionID)
 	if err != nil {
 		t.Fatalf("seeding region: %v", err)
+	}
+	// Without these nothing can suggest a contribution to anybody, which is
+	// exactly what production would look like if a deployment forgot them.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO fuel_prices (region_id, fuel, price_eur, source)
+		VALUES (NULL, 'petrol', 1.859, 'test'), (NULL, 'diesel', 1.729, 'test')`); err != nil {
+		t.Fatalf("seeding fuel prices: %v", err)
 	}
 
 	c := clock.NewFake(time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC))

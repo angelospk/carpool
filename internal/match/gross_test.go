@@ -51,11 +51,16 @@ func setup(t *testing.T) *fixture {
 	// A crude region box around Evros is enough; admissibility is enforced at
 	// creation time, not during matching.
 	err := pool.QueryRow(ctx, `
-		INSERT INTO regions (name, boundary, fuel_price_eur)
-		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25.3 40.3, 26.7 40.3, 26.7 41.8, 25.3 41.8, 25.3 40.3))', 4326)), 1.800)
+		INSERT INTO regions (name, boundary)
+		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25.3 40.3, 26.7 40.3, 26.7 41.8, 25.3 41.8, 25.3 40.3))', 4326)))
 		RETURNING id`).Scan(&f.regionID)
 	if err != nil {
 		t.Fatalf("seeding region: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO fuel_prices (region_id, fuel, price_eur, source)
+		VALUES (NULL, 'petrol', 1.859, 'test'), (NULL, 'diesel', 1.729, 'test')`); err != nil {
+		t.Fatalf("seeding fuel prices: %v", err)
 	}
 
 	err = pool.QueryRow(ctx, `

@@ -32,11 +32,15 @@ type User struct {
 	InstagramHandle *string
 }
 
-// Region is a service area.
+// Region is a περιφερειακή ενότητα: the geography a fuel price is quoted for
+// and the one a person's home town resolves to.
+//
+// It carries no price. One number per region could not tell petrol from diesel,
+// and would have meant seventy-five copies of a national figure wearing local
+// badges. See fuel_prices.go.
 type Region struct {
-	ID           uuid.UUID
-	Name         string
-	FuelPriceEUR float64
+	ID   uuid.UUID
+	Name string
 }
 
 // EnsureUser returns the account for a verified phone number, creating it on
@@ -165,7 +169,7 @@ func UpdateUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, up UserUp
 // ListRegions returns every region, alphabetically.
 func ListRegions(ctx context.Context, pool *pgxpool.Pool) ([]Region, error) {
 	rows, err := pool.Query(ctx,
-		`SELECT id, name, fuel_price_eur FROM regions ORDER BY name`)
+		`SELECT id, name FROM regions ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("store: listing regions: %w", err)
 	}
@@ -174,7 +178,7 @@ func ListRegions(ctx context.Context, pool *pgxpool.Pool) ([]Region, error) {
 	var out []Region
 	for rows.Next() {
 		var r Region
-		if err := rows.Scan(&r.ID, &r.Name, &r.FuelPriceEUR); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name); err != nil {
 			return nil, fmt.Errorf("store: scanning region: %w", err)
 		}
 		out = append(out, r)

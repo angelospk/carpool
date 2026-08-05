@@ -32,7 +32,7 @@ func seededGreece(t *testing.T) (context.Context, *pgxpool.Pool) {
 	if err := store.Migrate(ctx, pool); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if err := store.SeedRegionsFromFile(ctx, pool, greecePath(t), 1.800); err != nil {
+	if err := store.SeedRegionsFromFile(ctx, pool, greecePath(t)); err != nil {
 		t.Fatalf("SeedRegionsFromFile: %v", err)
 	}
 	return ctx, pool
@@ -123,7 +123,7 @@ func TestRegionAtReachesAcrossASeamButNotAcrossABorder(t *testing.T) {
 	if err := os.WriteFile(fixture, []byte(square), 0o600); err != nil {
 		t.Fatalf("writing the fixture: %v", err)
 	}
-	if err := store.SeedRegionsFromFile(ctx, pool, fixture, 1.800); err != nil {
+	if err := store.SeedRegionsFromFile(ctx, pool, fixture); err != nil {
 		t.Fatalf("SeedRegionsFromFile: %v", err)
 	}
 
@@ -178,7 +178,7 @@ func TestSeedingGreeceAdoptsThePilotRegionRatherThanDuplicatingIt(t *testing.T) 
 	if err != nil {
 		t.Fatalf("resolving the pilot fixture: %v", err)
 	}
-	if err := store.SeedRegionsFromFile(ctx, pool, evros, 1.800); err != nil {
+	if err := store.SeedRegionsFromFile(ctx, pool, evros); err != nil {
 		t.Fatalf("seeding the pilot region: %v", err)
 	}
 
@@ -187,7 +187,7 @@ func TestSeedingGreeceAdoptsThePilotRegionRatherThanDuplicatingIt(t *testing.T) 
 		t.Fatalf("reading the pilot region: %v", err)
 	}
 
-	if err := store.SeedRegionsFromFile(ctx, pool, greecePath(t), 1.800); err != nil {
+	if err := store.SeedRegionsFromFile(ctx, pool, greecePath(t)); err != nil {
 		t.Fatalf("seeding the country: %v", err)
 	}
 

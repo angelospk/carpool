@@ -43,7 +43,7 @@ func RegionAt(ctx context.Context, pool *pgxpool.Pool, lon, lat float64) (Region
 	var r Region
 	err := pool.QueryRow(ctx, `
 		WITH p AS (SELECT ST_SetSRID(ST_MakePoint($1, $2), 4326) AS geom)
-		SELECT id, name, fuel_price_eur
+		SELECT id, name
 		FROM regions, p
 		WHERE ST_Covers(boundary, p.geom)
 		-- A point on a shared line is covered by both neighbours. Ordering by
@@ -51,7 +51,7 @@ func RegionAt(ctx context.Context, pool *pgxpool.Pool, lon, lat float64) (Region
 		-- resolves to the same region every time, which matters because the
 		-- answer is frozen into a booking's receipt.
 		ORDER BY name
-		LIMIT 1`, lon, lat).Scan(&r.ID, &r.Name, &r.FuelPriceEUR)
+		LIMIT 1`, lon, lat).Scan(&r.ID, &r.Name)
 	if err == nil {
 		return r, nil
 	}
@@ -63,13 +63,13 @@ func RegionAt(ctx context.Context, pool *pgxpool.Pool, lon, lat float64) (Region
 	// boundaries, or in the sea beside one, or in another country.
 	err = pool.QueryRow(ctx, `
 		WITH p AS (SELECT ST_SetSRID(ST_MakePoint($1, $2), 4326) AS geom)
-		SELECT id, name, fuel_price_eur
+		SELECT id, name
 		FROM regions, p
 		WHERE ST_DWithin(boundary::geography, p.geom::geography, $3)
 		-- <-> is the GiST distance operator, so this is an index scan rather
 		-- than 74 polygon comparisons.
 		ORDER BY boundary <-> p.geom, name
-		LIMIT 1`, lon, lat, nearestToleranceMetres).Scan(&r.ID, &r.Name, &r.FuelPriceEUR)
+		LIMIT 1`, lon, lat, nearestToleranceMetres).Scan(&r.ID, &r.Name)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Region{}, ErrOutsideGreece
 	}

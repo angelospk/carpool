@@ -3,7 +3,7 @@
 
 import { request, requestRaw } from './client';
 
-export type Region = { id: string; name: string; fuel_price_eur: number };
+export type Region = { id: string; name: string };
 
 export type MyRoute = {
   id: string;

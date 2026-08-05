@@ -40,6 +40,16 @@ type PricingInputs struct {
 	// how firm the answer is, so it travels with it. See internal/vehicles.
 	ConsumptionSource string
 
+	// Fuel is what the car burns, which decides which pump price applies.
+	Fuel string
+	// RegionName is the prefecture the trip starts in, and PriceIsRegional
+	// says whether its figure was looked up there or is the national one
+	// standing in. A contribution built on a national average must not read
+	// back a year later as though somebody had checked the pump in Ρόδο.
+	RegionName      string
+	PriceIsRegional bool
+	PriceSource     string
+
 	// TollShareCents is this passenger's share of the motorway barriers they
 	// will actually be in the car for, already divided among the people aboard
 	// at each one — see internal/tolls. Zero when the route passes none.
@@ -92,7 +102,12 @@ func SuggestedPriceCents(in PricingInputs) int {
 // Bump it whenever the arithmetic changes. Without it, a basis from before a
 // change replays through the new formula and disagrees with the price sitting
 // next to it, and there is no way to tell that from a bug.
-const BasisVersion = 1
+// Version 2 records what the price was for and where it came from: the fuel,
+// the prefecture the trip started in, and whether the figure was looked up
+// there or is the national one standing in. A version 1 receipt was built from
+// the driver's home region and one price for every fuel, which is a different
+// question answered, not the same question answered less precisely.
+const BasisVersion = 2
 
 // Basis is the receipt: every input the formula used, plus what it produced.
 //
@@ -106,12 +121,20 @@ type Basis struct {
 	ConsumptionLPer100Km float64 `json:"consumption_l_100km"`
 	ConsumptionSource    string  `json:"consumption_source,omitempty"`
 	FuelPriceEUR         float64 `json:"fuel_price_eur"`
-	TripKm               float64 `json:"trip_km"`
-	WearFactor           float64 `json:"wear_factor"`
-	OfferedSeats         int     `json:"offered_seats"`
-	FreeBelowKm          float64 `json:"free_below_km"`
-	TollShareCents       int     `json:"toll_share_cents"`
-	Mode                 string  `json:"mode"`
+	// What the price was for and where it came from. Every one of these moves
+	// under a booking that has already happened — the driver changes car, a
+	// prefecture gets its own figure, the national number is corrected — which
+	// is the whole reason the receipt is frozen rather than recomputed.
+	Fuel            string  `json:"fuel,omitempty"`
+	RegionName      string  `json:"region_name,omitempty"`
+	PriceIsRegional bool    `json:"price_is_regional,omitempty"`
+	PriceSource     string  `json:"price_source,omitempty"`
+	TripKm          float64 `json:"trip_km"`
+	WearFactor      float64 `json:"wear_factor"`
+	OfferedSeats    int     `json:"offered_seats"`
+	FreeBelowKm     float64 `json:"free_below_km"`
+	TollShareCents  int     `json:"toll_share_cents"`
+	Mode            string  `json:"mode"`
 
 	// CostEUR is the whole trip before it was divided or rounded. It is the
 	// number the no-profit argument is about, and reading it back should not
@@ -130,6 +153,10 @@ func SuggestedPrice(in PricingInputs) (int, Basis) {
 		ConsumptionLPer100Km: in.FuelConsumptionLPer100Km,
 		ConsumptionSource:    in.ConsumptionSource,
 		FuelPriceEUR:         in.FuelPriceEUR,
+		Fuel:                 in.Fuel,
+		RegionName:           in.RegionName,
+		PriceIsRegional:      in.PriceIsRegional,
+		PriceSource:          in.PriceSource,
 		TripKm:               in.TripKm,
 		WearFactor:           in.WearFactor,
 		OfferedSeats:         in.OfferedSeats,

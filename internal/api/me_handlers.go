@@ -118,9 +118,8 @@ func (d Deps) handleListRegions(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0, len(regions))
 	for _, region := range regions {
 		out = append(out, map[string]any{
-			"id":             region.ID,
-			"name":           region.Name,
-			"fuel_price_eur": region.FuelPriceEUR,
+			"id":   region.ID,
+			"name": region.Name,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"regions": out})

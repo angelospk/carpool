@@ -70,11 +70,24 @@ func run() error {
 	slog.Info("schema is up to date")
 
 	if cfg.RegionFixture != "" {
-		if err := store.SeedRegionsFromFile(ctx, pool, cfg.RegionFixture, cfg.FuelPriceEUR); err != nil {
+		if err := store.SeedRegionsFromFile(ctx, pool, cfg.RegionFixture); err != nil {
 			return err
 		}
 		slog.Info("regions seeded", "fixture", cfg.RegionFixture)
 	}
+
+	// Fuel prices are seeded unconditionally, unlike the boundaries: without
+	// them nothing can suggest a contribution to anybody, so a deployment that
+	// forgot would look healthy and quote nothing.
+	if err := store.SeedFuelPrices(ctx, pool, store.FuelPrices{
+		PetrolEUR: cfg.PetrolPriceEUR,
+		DieselEUR: cfg.DieselPriceEUR,
+		Source:    cfg.FuelPriceSource,
+	}); err != nil {
+		return err
+	}
+	slog.Info("fuel prices seeded",
+		"petrol", cfg.PetrolPriceEUR, "diesel", cfg.DieselPriceEUR, "source", cfg.FuelPriceSource)
 
 	// The SMS provider is a deployment choice. Only DEV_MODE may select the
 	// console sender, which prints codes instead of sending them.

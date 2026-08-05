@@ -25,8 +25,19 @@ type Config struct {
 
 	// RegionFixture, when set, is a GeoJSON file seeded into regions at boot.
 	RegionFixture string
-	// FuelPriceEUR is the price seeded regions start with; admins update it later.
-	FuelPriceEUR float64
+	// PetrolPriceEUR and DieselPriceEUR are the national figures the app prices
+	// contributions with. Two, not one: they differ by ten cents or more at the
+	// pump, and the consumption figure they multiply is already fuel-specific.
+	//
+	// National, not per prefecture. The Παρατηρητήριο Τιμών publishes by νομό
+	// and nothing here fetches it, so seventy-five rows would be seventy-five
+	// copies of the same number wearing a local badge. A prefecture gets its own
+	// figure when somebody goes and looks one up; see store.FuelPriceAt.
+	PetrolPriceEUR float64
+	DieselPriceEUR float64
+	// FuelPriceSource says where those numbers came from, in words. A price
+	// nobody can trace is a price nobody can correct.
+	FuelPriceSource string
 	// OSRMDataVersion is stamped onto stored routes so a map-data swap can
 	// trigger re-snapping.
 	OSRMDataVersion string
@@ -67,11 +78,16 @@ func Load(lookup LookupFunc) (Config, error) {
 			`{"sender":"{{sender}}","recipient":"{{phone}}","text":"{{message}}"}`),
 
 		RegionFixture:   optional(lookup, "REGION_FIXTURE", ""),
+		FuelPriceSource: optional(lookup, "FUEL_PRICE_SOURCE", "configured at deploy"),
 		OSRMDataVersion: optional(lookup, "OSRM_DATA_VERSION", "unknown"),
 	}
 
 	var err error
-	cfg.FuelPriceEUR, err = parseFloat(optional(lookup, "FUEL_PRICE_EUR", "1.800"), "FUEL_PRICE_EUR")
+	cfg.PetrolPriceEUR, err = parseFloat(optional(lookup, "PETROL_PRICE_EUR", "1.859"), "PETROL_PRICE_EUR")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.DieselPriceEUR, err = parseFloat(optional(lookup, "DIESEL_PRICE_EUR", "1.729"), "DIESEL_PRICE_EUR")
 	if err != nil {
 		return Config{}, err
 	}
