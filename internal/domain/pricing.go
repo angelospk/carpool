@@ -243,8 +243,14 @@ func suggest(in PricingInputs, basis *Basis) int {
 // alternative default would have a forgotten field silently publish a route
 // that asks for nothing, which is the same landmine the detour budget had.
 // Anything outside (0, 1] is a caller that got it wrong, and is read the same
-// way: the figure the app would have produced on its own.
+// way: the figure the app would have produced on its own. NaN is named
+// separately because it slips through a range check — it is neither <= 0 nor
+// > 1 — and would turn the whole price into a NaN, whose conversion to an int
+// is undefined in Go and lands on a huge negative number.
 func shareOf(in PricingInputs) float64 {
+	if math.IsNaN(in.ContributionShare) {
+		return 1
+	}
 	if in.ContributionShare <= 0 || in.ContributionShare > 1 {
 		return 1
 	}

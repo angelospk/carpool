@@ -195,3 +195,48 @@ func TestARouteCannotAskForMoreThanTheWholeShare(t *testing.T) {
 		}
 	}
 }
+
+// Zero is not "all of it", and it is not a share either.
+//
+// The field arrives as a plain number, so a client that omits it and a client
+// that sends 0 used to look identical to the handler — and both were quietly
+// read as "the whole share". That is the wrong direction to be wrong in: a
+// driver whose app sent 0 by mistake would ask each passenger for the full
+// figure. Asking for nothing already has its own representation
+// (pricing_mode = 'free'), so 0 here is a caller that got it wrong and is told
+// so, while an absent field keeps meaning what it always meant.
+func TestAShareOfZeroIsRefusedWhileAnAbsentOneIsAllOfIt(t *testing.T) {
+	h := newRoutingHarness(t)
+	token, _ := h.signUp("+306901000009", "Οδηγός")
+	h.becomeDriver(token)
+
+	route := func(extra map[string]any) map[string]any {
+		body := map[string]any{
+			"origin_lon": 25.80, "origin_lat": 40.85,
+			"destination_lon": 26.00, "destination_lat": 40.85,
+			"origin_label": "A", "destination_label": "B",
+			"seats": 3, "kind": "oneoff",
+			"oneoff_date":     h.clock.Now().Add(48 * time.Hour).Format("2006-01-02"),
+			"depart_earliest": "07:30", "depart_latest": "08:00",
+		}
+		for k, v := range extra {
+			body[k] = v
+		}
+		return body
+	}
+
+	rec := h.do(http.MethodPost, "/v1/routes", route(map[string]any{"contribution_share": 0}), token)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("an explicit share of 0 gave %d, want 400", rec.Code)
+	} else if code := h.errorCode(rec); code != "invalid_share" {
+		t.Errorf("an explicit share of 0 gave error %q, want invalid_share", code)
+	}
+
+	// And the client that never mentions it still publishes, asking for the
+	// whole share, which is what every route published before the field
+	// existed was implicitly asking for.
+	rec = h.do(http.MethodPost, "/v1/routes", route(nil), token)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("omitting the share gave %d: %s", rec.Code, rec.Body.String())
+	}
+}

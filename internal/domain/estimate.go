@@ -117,9 +117,15 @@ func Estimate(in EstimateInputs) PlanningEstimate {
 	perSeat := in.RouteKm * in.CostPerKmEUR / float64(in.Divisor)
 	out.ContributionCents = floorToStep(int(math.Round(perSeat * 100)))
 
+	// Compared after flooring rather than before. A car that drinks a little
+	// more than typical is dearer per kilometre and still lands on the same
+	// half euro, and "περίπου 2 €, έως 2 €" is noise where an upper bound was
+	// meant to be.
 	if in.CeilingCostPerKmEUR > in.CostPerKmEUR {
 		dearest := in.RouteKm * in.CeilingCostPerKmEUR / float64(in.Divisor)
-		out.CeilingCents = floorToStep(int(math.Round(dearest * 100)))
+		if ceiling := floorToStep(int(math.Round(dearest * 100))); ceiling > out.ContributionCents {
+			out.CeilingCents = ceiling
+		}
 	}
 	return out
 }

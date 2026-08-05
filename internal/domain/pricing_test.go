@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 // baseline is a 10 km trip in a 7 l/100km car at 1.80 €/l with no wear markup
 // and a single seat on offer:
@@ -423,5 +426,21 @@ func TestTheReceiptRecordsTheShareTheDriverChose(t *testing.T) {
 
 	if basis.ContributionShare != 0.5 {
 		t.Errorf("the receipt records %v, want 0.5", basis.ContributionShare)
+	}
+}
+
+// A share that is not a number is a caller that got it wrong, and must be read
+// like every other wrong value: as the figure the app would have produced on
+// its own. Without this, NaN survives the range check, being neither <= 0 nor
+// > 1, and multiplies the whole price into a NaN whose conversion to an int is
+// undefined in Go.
+func TestAShareThatIsNotANumberIsReadAsAllOfIt(t *testing.T) {
+	want := SuggestedPriceCents(baseline())
+
+	in := baseline()
+	in.ContributionShare = math.NaN()
+
+	if got := SuggestedPriceCents(in); got != want {
+		t.Errorf("a NaN share priced at %d, want the undivided %d", got, want)
 	}
 }

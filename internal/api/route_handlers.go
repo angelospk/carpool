@@ -43,7 +43,13 @@ type routeBody struct {
 	// is what every route published before drivers could choose was implicitly
 	// asking. The app computes the ceiling; this is the driver deciding where
 	// under it they sit.
-	ContributionShare float64 `json:"contribution_share"`
+	//
+	// A pointer, because zero is a real answer and not the same as silence. As
+	// a plain float the two arrived identically and both were read as "all of
+	// it", so a client that sent 0 by mistake asked each passenger for the full
+	// figure — the wrong direction to be wrong in. Asking for nothing already
+	// has its own representation in pricing_mode = 'free'.
+	ContributionShare *float64 `json:"contribution_share"`
 
 	// VehicleID names which of the driver's cars this route goes out in.
 	// Absent means their default, which is what somebody with one car sends and
@@ -78,10 +84,14 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 
 	// Above the ceiling is the one answer the app does not accept. Below it is
 	// entirely theirs.
-	if body.ContributionShare < 0 || body.ContributionShare > 1 {
-		writeError(w, http.StatusBadRequest, "invalid_share",
-			"you can ask for up to the whole share of the fuel, not more")
-		return
+	share := 1.0
+	if body.ContributionShare != nil {
+		share = *body.ContributionShare
+		if !(share > 0) || share > 1 {
+			writeError(w, http.StatusBadRequest, "invalid_share",
+				"you can ask for up to the whole share of the fuel, not more")
+			return
+		}
 	}
 
 	// Checked here, with the rest of the body, rather than after the route has
@@ -182,7 +192,7 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		EndsAtPort:        shaped.SeaCrossing,
 		Detour:            detour,
 		Luggage:           luggage,
-		ContributionShare: body.ContributionShare,
+		ContributionShare: share,
 		Schedule:          schedule,
 	})
 	if err != nil {

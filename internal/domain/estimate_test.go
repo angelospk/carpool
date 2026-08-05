@@ -184,3 +184,20 @@ func TestNoCeilingIsShownWhenThereIsNothingAboveTheEstimate(t *testing.T) {
 		t.Errorf("ceiling = %d with no headroom above the estimate", got.CeilingCents)
 	}
 }
+
+// "Περίπου 2 €, έως 2 €" is noise, and the guard against it cannot live on the
+// cost per kilometre alone. A car that drinks a little more than typical still
+// floors to the same half euro, and the ceiling then repeats the figure it was
+// supposed to be an upper bound on.
+func TestNoCeilingIsShownWhenItFloorsToTheSameFigure(t *testing.T) {
+	in := estimateInputs()
+	// 100 km, over four: 9,85 € becomes 2,46 → 2,00, and 9,95 € becomes 2,49 →
+	// also 2,00. Dearer per kilometre, identical once floored.
+	in.CeilingCostPerKmEUR = 0.0995
+
+	got := domain.Estimate(in)
+	if got.CeilingCents != 0 {
+		t.Errorf("ceiling = %d cents beside a contribution of %d",
+			got.CeilingCents, got.ContributionCents)
+	}
+}
