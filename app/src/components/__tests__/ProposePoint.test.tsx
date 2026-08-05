@@ -122,11 +122,15 @@ test('a refusal is reported as the reason it was refused', async () => {
 // Without a map, a suggestion is a name and the settlement's own coordinate,
 // and a moderator has to work out where it meant.
 describe('with a map configured', () => {
+  // Restored rather than deleted: a run that already had tiles configured
+  // should not lose them because this file borrowed the variable.
+  const wasConfigured = process.env.EXPO_PUBLIC_MAP_TILES_URL;
   beforeEach(() => {
     process.env.EXPO_PUBLIC_MAP_TILES_URL = 'https://tiles.example/{z}/{x}/{y}.png';
   });
   afterEach(() => {
-    delete process.env.EXPO_PUBLIC_MAP_TILES_URL;
+    if (wasConfigured === undefined) delete process.env.EXPO_PUBLIC_MAP_TILES_URL;
+    else process.env.EXPO_PUBLIC_MAP_TILES_URL = wasConfigured;
   });
 
   it('offers the map to say where exactly', () => {

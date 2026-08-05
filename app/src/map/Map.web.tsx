@@ -76,7 +76,15 @@ export function Map({
 
   useEffect(() => {
     const m = map.current;
-    if (!m || !encoded) return;
+    if (!m) return;
+
+    // A route that has gone has to be taken off, layer before source — the
+    // source cannot be removed while a layer still points at it.
+    if (!encoded) {
+      if (m.getLayer('route')) m.removeLayer('route');
+      if (m.getSource('route')) m.removeSource('route');
+      return;
+    }
 
     const draw = () => {
       // @mapbox/polyline yields [lat, lon]; GeoJSON wants the other order.
@@ -101,6 +109,12 @@ export function Map({
 
     if (m.isStyleLoaded()) draw();
     else m.once('load', draw);
+
+    // Unregistered on the way out, or a route that was cleared before the style
+    // finished loading comes back when it does.
+    return () => {
+      m.off('load', draw);
+    };
   }, [encoded]);
 
   if (!haveTiles()) return <MapFallback testID={testID} />;

@@ -33,6 +33,7 @@ export function Map({
 export function Camera() {
   return null;
 }
+export type CameraRef = { jumpTo: (o: unknown) => void };
 export function Marker({ children }: { children?: ReactNode }) {
   return <>{children}</>;
 }

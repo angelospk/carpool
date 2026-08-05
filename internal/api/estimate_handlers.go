@@ -50,11 +50,16 @@ func (d Deps) handleEstimate(w http.ResponseWriter, r *http.Request) {
 	destination := geo.Point{Lon: body.DestinationLon, Lat: body.DestinationLat}
 
 	// Both ends in the country, the same rule a real request answers to, so a
-	// trip the app would refuse is not quoted a price first.
+	// trip the app would refuse is not quoted a price first. Both, not just the
+	// pickup: quoting somebody 30 € for Θεσσαλονίκη → Σόφια and then refusing
+	// the request is worse than refusing it once.
 	region, err := store.RegionAt(r.Context(), d.Pool, origin.Lon, origin.Lat)
+	if err == nil {
+		_, err = store.RegionAt(r.Context(), d.Pool, destination.Lon, destination.Lat)
+	}
 	if errors.Is(err, store.ErrOutsideGreece) {
 		writeError(w, http.StatusBadRequest, "outside_country",
-			"the pickup is outside Greece, which is as far as this app goes")
+			"that trip leaves Greece, which is as far as this app goes")
 		return
 	}
 	if err != nil {
@@ -104,6 +109,15 @@ func (d Deps) handleEstimate(w http.ResponseWriter, r *http.Request) {
 			"nothing to estimate from")
 		return
 	}
+	// How far up the figure could go with a thirsty car. Not a lower bound as
+	// well: the thriftiest real car is five times cheaper than the ceiling, and
+	// a range that wide reads as "nobody knows".
+	dearest, err := vehicles.DearestCostPerKmEUR(petrol.PriceEUR, diesel.PriceEUR)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "no_estimate",
+			"nothing to estimate from")
+		return
+	}
 
 	// The older of the two prices, because the figure is only as current as its
 	// stalest input.
@@ -113,13 +127,14 @@ func (d Deps) handleEstimate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	estimate := domain.Estimate(domain.EstimateInputs{
-		RouteKm:       route.DistanceMeters / 1000,
-		RouteMin:      int(route.Duration.Minutes()) + 1,
-		CostPerKmEUR:  costPerKm,
-		Divisor:       typicalSeats + 1,
-		Version:       typical.Version,
-		FuelPriceAsOf: asOf.Format("2006-01-02"),
-		RegionName:    region.Name,
+		RouteKm:             route.DistanceMeters / 1000,
+		RouteMin:            int(route.Duration.Minutes()) + 1,
+		CostPerKmEUR:        costPerKm,
+		CeilingCostPerKmEUR: dearest,
+		Divisor:             typicalSeats + 1,
+		Version:             typical.Version,
+		FuelPriceAsOf:       asOf.Format("2006-01-02"),
+		RegionName:          region.Name,
 	})
 
 	// Nothing about this is worth keeping, and a cached estimate is a stale

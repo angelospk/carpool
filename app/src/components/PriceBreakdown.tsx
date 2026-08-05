@@ -16,9 +16,8 @@ import { StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
 import { type PriceBreakdownData } from '../api/endpoints';
+import { euros } from '../design/format';
 import { colors, space, type } from '../design/tokens';
-
-const euro = (cents: number) => `${(cents / 100).toFixed(2).replace('.', ',')} €`;
 
 export function PriceBreakdown({
   breakdown,
@@ -72,25 +71,25 @@ export function PriceBreakdown({
           price: b.fuel_price_eur.toFixed(3).replace('.', ','),
           km: b.trip_km.toFixed(0),
         })}
-        value={euro(b.fuel_cost_cents)}
+        value={euros(b.fuel_cost_cents)}
         testID={testID ? `${testID}-fuel` : undefined}
       />
       <Line
         label={t('price.dividedBy', { divisor: b.divisor })}
-        value={euro(b.share_cents)}
+        value={euros(b.share_cents)}
         testID={testID ? `${testID}-divided` : undefined}
       />
       {b.share_cents !== b.rounded_cents ? (
         <Line
           label={t('price.roundedDown')}
-          value={euro(b.rounded_cents)}
+          value={euros(b.rounded_cents)}
           testID={testID ? `${testID}-rounded` : undefined}
         />
       ) : null}
       {b.toll_share_cents > 0 ? (
         <Line
           label={t('price.tolls')}
-          value={euro(b.toll_share_cents)}
+          value={euros(b.toll_share_cents)}
           testID={testID ? `${testID}-tolls` : undefined}
         />
       ) : null}
@@ -98,7 +97,7 @@ export function PriceBreakdown({
       <View style={styles.rule} />
       <Line
         label={t('price.total')}
-        value={euro(b.total_cents)}
+        value={euros(b.total_cents)}
         strong
         testID={testID ? `${testID}-total` : undefined}
       />

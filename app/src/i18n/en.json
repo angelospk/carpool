@@ -43,7 +43,8 @@
   "estimate": {
     "about": "Estimated share of the fuel: about {{amount}}",
     "basis": "For {{km}} km, with a typical car and {{seats}} seats offered.",
-    "notAnOffer": "This is not an offer of a trip — no driver has been found or agreed. The real contribution appears with the specific car and may differ."
+    "notAnOffer": "This is not an offer of a trip — no driver has been found or agreed. The real contribution appears with the specific car and may differ.",
+    "upTo": "With a thirstier car, up to {{amount}}."
   },
   "garage": {
     "add": "Add a car",

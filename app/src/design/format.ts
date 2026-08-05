@@ -41,3 +41,19 @@ function calendarDate(instant: string): string {
   // en-CA gives YYYY-MM-DD, which compares as a string.
   return new Date(instant).toLocaleDateString('en-CA', { timeZone: ZONE });
 }
+
+/**
+ * Money, in the same pinned locale as the dates above.
+ *
+ * Pinned rather than following the device, for the reason the zone is pinned:
+ * a Greek user with an English phone should see the figure the way everybody
+ * around them writes it, and a price that changes shape with a system setting
+ * is a price people distrust.
+ */
+export function euros(cents: number): string {
+  return new Intl.NumberFormat(LOCALE, {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 2,
+  }).format(cents / 100);
+}

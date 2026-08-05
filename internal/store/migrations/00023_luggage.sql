@@ -42,6 +42,13 @@ ALTER TABLE ride_requests
 -- profile saying "big bags fine" beside a route that takes a cabin bag is two
 -- answers, and a passenger reading the friendlier one turns up with a suitcase.
 -- Preferences describe what somebody is like; this decides what happens.
+-- Kept rather than dropped, so that rolling this migration back restores what
+-- people actually chose. The rows are obsolete, not worthless: a down migration
+-- that silently loses somebody's answers is the kind of thing nobody notices
+-- until they are restoring a backup at two in the morning.
+CREATE TABLE user_preferences_luggage_backup AS
+    SELECT * FROM user_preferences WHERE tag IN ('big_luggage_ok', 'cabin_bag_only');
+
 DELETE FROM user_preferences WHERE tag IN ('big_luggage_ok', 'cabin_bag_only');
 
 ALTER TABLE user_preferences DROP CONSTRAINT user_preferences_tag_check;
@@ -64,6 +71,10 @@ ALTER TABLE user_preferences ADD CONSTRAINT user_preferences_tag_check CHECK (ta
     'air_conditioning',
     'big_luggage_ok', 'cabin_bag_only'
 ));
+
+INSERT INTO user_preferences SELECT * FROM user_preferences_luggage_backup
+    ON CONFLICT DO NOTHING;
+DROP TABLE IF EXISTS user_preferences_luggage_backup;
 
 ALTER TABLE ride_requests     DROP COLUMN IF EXISTS luggage;
 ALTER TABLE trip_occurrences  DROP COLUMN IF EXISTS luggage;

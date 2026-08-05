@@ -68,6 +68,19 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+
+	// Checked here, with the rest of the body, rather than after the route has
+	// been snapped: a typo in one field should not cost an OSRM call.
+	luggage := domain.LuggageSuitcase
+	if body.Luggage != "" {
+		parsed, err := domain.ParseLuggage(body.Luggage)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_luggage",
+				"that is not a luggage size this app knows")
+			return
+		}
+		luggage = parsed
+	}
 	if body.Seats <= 0 {
 		body.Seats = 3 // the wizard's default
 	}
@@ -125,17 +138,6 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "routing_failed",
 			"could not compute a driving route between those points")
 		return
-	}
-
-	luggage := domain.LuggageSuitcase
-	if body.Luggage != "" {
-		parsed, err := domain.ParseLuggage(body.Luggage)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_luggage",
-				"that is not a luggage size this app knows")
-			return
-		}
-		luggage = parsed
 	}
 
 	vehicle, err := d.chooseVehicle(r.Context(), userID, body.VehicleID)

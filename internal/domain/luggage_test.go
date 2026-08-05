@@ -75,3 +75,23 @@ func TestAnUnsetSizeIsNotTheSmallestOne(t *testing.T) {
 		t.Error("an unset driver allowance quietly accepted a passenger's bag")
 	}
 }
+
+// An unset value on either side of the comparison. The receiver was already
+// covered; the argument was not, and a driver taking anything at all would
+// have "fitted" a passenger whose size was never set — which is the field
+// somebody forgot, not a person travelling with nothing.
+func TestAnUnsetSizeFitsNothingFromEitherSide(t *testing.T) {
+	var unset domain.Luggage
+
+	for _, real := range domain.LuggageSizes() {
+		if real.Fits(unset) {
+			t.Errorf("a driver taking %s accepted a passenger whose size was never set", real)
+		}
+		if unset.Fits(real) {
+			t.Errorf("an unset allowance accepted somebody bringing %s", real)
+		}
+	}
+	if unset.Fits(unset) {
+		t.Error("two unset values fit each other")
+	}
+}

@@ -54,6 +54,16 @@ type PlanningEstimate struct {
 	// euro the real formula floors to, so the estimate and the eventual figure
 	// are at least made the same way.
 	ContributionCents int `json:"contribution_cents"`
+	// CeilingCents is the same trip in the thirstiest car the app will price,
+	// at the same number of seats.
+	//
+	// It is here because the honest failure of a single figure is upward: a
+	// passenger quoted 12 € and then asked for 25 € has been misled, even
+	// though both numbers were produced honestly from different cars. There is
+	// deliberately no matching floor — the thriftiest real car is five times
+	// cheaper than the ceiling, and a range that wide reads as "nobody knows"
+	// and gets ignored. Nobody is upset by paying less than they expected.
+	CeilingCents int `json:"ceiling_cents"`
 
 	Assumptions EstimateAssumptions `json:"assumptions"`
 }
@@ -65,6 +75,9 @@ type EstimateInputs struct {
 	// CostPerKmEUR is a typical car's fuel cost per kilometre at the pump
 	// prices where the trip starts. See vehicles.Typical.
 	CostPerKmEUR float64
+	// CeilingCostPerKmEUR is the same, for the thirstiest car the app will
+	// price. See vehicles.DearestCostPerKmEUR.
+	CeilingCostPerKmEUR float64
 	// Divisor is the whole car: the seats a route usually offers, plus the
 	// driver. Not a guess about this trip, which has no driver.
 	Divisor int
@@ -103,6 +116,11 @@ func Estimate(in EstimateInputs) PlanningEstimate {
 
 	perSeat := in.RouteKm * in.CostPerKmEUR / float64(in.Divisor)
 	out.ContributionCents = floorToStep(int(math.Round(perSeat * 100)))
+
+	if in.CeilingCostPerKmEUR > in.CostPerKmEUR {
+		dearest := in.RouteKm * in.CeilingCostPerKmEUR / float64(in.Divisor)
+		out.CeilingCents = floorToStep(int(math.Round(dearest * 100)))
+	}
 	return out
 }
 

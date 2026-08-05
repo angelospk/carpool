@@ -153,3 +153,34 @@ func (t Typical) CostPerKmEUR(petrolEUR, dieselEUR float64) (float64, error) {
 	// not silently drag the average towards zero.
 	return cost / weight, nil
 }
+
+// DearestCostPerKmEUR is the most a driver could be charged for per kilometre
+// without exceeding the pricing ceiling.
+//
+// It exists so an estimate can say how wrong it might be in the one direction
+// that matters. Nobody is upset by paying less than they expected; somebody
+// quoted 12 € and asked for 25 € has been misled, even though both figures were
+// produced honestly from different cars.
+//
+// The maximum across fuels rather than a blend, because this is not a property
+// of the fleet — it is the worst single car somebody could turn up in, and a
+// fleet-weighted worst case would be a number no individual driver could ever
+// charge.
+func DearestCostPerKmEUR(petrolEUR, dieselEUR float64) (float64, error) {
+	if petrolEUR <= 0 || dieselEUR <= 0 {
+		return 0, fmt.Errorf("vehicles: both pump prices are needed, got %v and %v",
+			petrolEUR, dieselEUR)
+	}
+
+	var dearest float64
+	for _, f := range Fuels() {
+		price := petrolEUR
+		if f == Diesel || f == DieselHybrid {
+			price = dieselEUR
+		}
+		if cost := PricingCeiling(f) * price / 100; cost > dearest {
+			dearest = cost
+		}
+	}
+	return dearest, nil
+}

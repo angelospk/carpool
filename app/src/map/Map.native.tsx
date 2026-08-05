@@ -16,9 +16,11 @@
 // The style is the same one the browser draws, out of tiles.ts, so one
 // environment variable configures both and neither can drift from the other.
 
+import { useEffect, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import {
   Camera,
+  type CameraRef,
   GeoJSONSource,
   Layer,
   Map as MapLibre,
@@ -45,6 +47,14 @@ export function Map({
   onPick?: (pin: MapPin) => void;
   testID?: string;
 }) {
+  // Held across renders so the map can be told to move rather than rebuilt.
+  // initialViewState is, as its name says, initial: without this the map stays
+  // where it first opened however far the pin travels.
+  const camera = useRef<CameraRef>(null);
+  useEffect(() => {
+    camera.current?.jumpTo({ center: [centre.lon, centre.lat] });
+  }, [centre.lon, centre.lat]);
+
   if (!haveTiles()) return <MapFallback testID={testID} />;
 
   // @mapbox/polyline yields [lat, lon]; GeoJSON wants the other order.
@@ -62,7 +72,7 @@ export function Map({
             : undefined
         }
       >
-        <Camera initialViewState={{ center: [centre.lon, centre.lat], zoom: 13 }} />
+        <Camera ref={camera} initialViewState={{ center: [centre.lon, centre.lat], zoom: 13 }} />
 
         {pins.map((p, i) => (
           <Marker key={`${p.lon},${p.lat},${i}`} lngLat={[p.lon, p.lat]}>

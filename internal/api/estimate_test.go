@@ -113,3 +113,63 @@ func TestAnEstimateNeedsASession(t *testing.T) {
 		t.Errorf("status = %d, want 401", rec.Code)
 	}
 }
+
+// A passenger quoted 12 € and then asked for 25 € has been misled, even though
+// both figures came honestly from different cars. The estimate says how far up
+// it might go.
+func TestTheEstimateSaysHowFarUpItCouldGo(t *testing.T) {
+	h := newRoutingHarness(t)
+	h.seedTheCountry()
+	token, _ := h.signUp("+306903000004", "Επιβάτης")
+
+	rec := h.do(http.MethodPost, "/v1/estimates", map[string]any{
+		"origin_lon": 25.8743, "origin_lat": 40.8476,
+		"destination_lon": 26.1717, "destination_lat": 40.8975,
+	}, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body %s", rec.Code, rec.Body.String())
+	}
+
+	var got struct {
+		ContributionCents int `json:"contribution_cents"`
+		CeilingCents      int `json:"ceiling_cents"`
+	}
+	h.decode(rec, &got)
+
+	if got.CeilingCents <= got.ContributionCents {
+		t.Errorf("ceiling %d is not above the typical %d", got.CeilingCents, got.ContributionCents)
+	}
+	if got.CeilingCents%50 != 0 {
+		t.Errorf("ceiling %d is not a whole half euro", got.CeilingCents)
+	}
+}
+
+// Both ends, not just the pickup. Quoting somebody 30 € for Θεσσαλονίκη → Σόφια
+// and then refusing the request is worse than refusing it once.
+func TestAnEstimateRefusesATripThatLeavesTheCountry(t *testing.T) {
+	h := newRoutingHarness(t)
+	h.seedTheCountry()
+	token, _ := h.signUp("+306903000005", "Ταξιδιώτης")
+
+	for _, tt := range []struct {
+		name                   string
+		oLon, oLat, dLon, dLat float64
+	}{
+		{"destination in Sofia", 22.9444, 40.6401, 23.3219, 42.6977},
+		{"pickup in Sofia", 23.3219, 42.6977, 22.9444, 40.6401},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := h.do(http.MethodPost, "/v1/estimates", map[string]any{
+				"origin_lon": tt.oLon, "origin_lat": tt.oLat,
+				"destination_lon": tt.dLon, "destination_lat": tt.dLat,
+			}, token)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body %s", rec.Code, rec.Body.String())
+			}
+			if code := h.errorCode(rec); code != "outside_country" {
+				t.Errorf("error code = %q, want outside_country", code)
+			}
+		})
+	}
+}

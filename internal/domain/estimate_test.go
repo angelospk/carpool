@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 
@@ -130,5 +131,56 @@ func TestAShortHopEstimatesAtNothingRatherThanAtTheStep(t *testing.T) {
 
 	if got := domain.Estimate(in); got.ContributionCents != 0 {
 		t.Errorf("a 4 km trip estimated at %d cents", got.ContributionCents)
+	}
+}
+
+// The honest failure of a single figure is upward. Somebody quoted 12 € and
+// then asked for 25 € has been misled, even though both numbers came honestly
+// from different cars — so the estimate says how far up it might go.
+func TestTheEstimateSaysHowFarUpItCouldGo(t *testing.T) {
+	in := estimateInputs()
+	in.CeilingCostPerKmEUR = 0.2045 // the thirstiest car the app will price
+
+	got := domain.Estimate(in)
+
+	if got.CeilingCents <= got.ContributionCents {
+		t.Errorf("ceiling %d is not above the typical %d", got.CeilingCents, got.ContributionCents)
+	}
+	// 100 km at 20,45 cents is 20,45 €, over four is 5,11, floored to 5,00.
+	if got.CeilingCents != 500 {
+		t.Errorf("ceiling = %d cents, want 500", got.CeilingCents)
+	}
+	// Floored the same way, so the two figures are made alike.
+	if got.CeilingCents%50 != 0 {
+		t.Errorf("ceiling %d is not a whole half euro", got.CeilingCents)
+	}
+}
+
+// There is deliberately no matching floor. The thriftiest real car is five
+// times cheaper than the ceiling, and a range that wide reads as "nobody knows"
+// and gets ignored — while the upper bound is the one that prevents a surprise.
+func TestThereIsNoLowerBoundToIgnore(t *testing.T) {
+	in := estimateInputs()
+	in.CeilingCostPerKmEUR = 0.2045
+
+	raw, err := json.Marshal(domain.Estimate(in))
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	for _, unwanted := range []string{"floor_cents", "low_cents", "contribution_low"} {
+		if bytes.Contains(raw, []byte(unwanted)) {
+			t.Errorf("the estimate carries %q", unwanted)
+		}
+	}
+}
+
+// A ceiling that is not above the typical figure is not a ceiling, and showing
+// "about 4 €, up to 4 €" would be noise.
+func TestNoCeilingIsShownWhenThereIsNothingAboveTheEstimate(t *testing.T) {
+	in := estimateInputs()
+	in.CeilingCostPerKmEUR = in.CostPerKmEUR // no headroom at all
+
+	if got := domain.Estimate(in); got.CeilingCents != 0 {
+		t.Errorf("ceiling = %d with no headroom above the estimate", got.CeilingCents)
 	}
 }

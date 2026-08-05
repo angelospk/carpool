@@ -104,6 +104,9 @@ export type PlanningEstimate = {
   route_km: number;
   route_min: number;
   contribution_cents: number;
+  /** The same trip in the thirstiest car the app will price. Zero when there
+      is no headroom above the typical figure. */
+  ceiling_cents: number;
   assumptions: {
     version: string;
     divisor: number;

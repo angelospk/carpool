@@ -16,9 +16,8 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api, type PlanningEstimate } from '../api/endpoints';
 import { type Pin } from '../design/pin';
+import { euros } from '../design/format';
 import { colors, radius, space, type } from '../design/tokens';
-
-const euro = (cents: number) => `${(cents / 100).toFixed(2).replace('.', ',')} €`;
 
 export function Estimate({
   from,
@@ -54,8 +53,17 @@ export function Estimate({
   return (
     <View testID={testID} style={styles.box}>
       <Text testID={testID ? `${testID}-headline` : undefined} style={styles.headline}>
-        {t('estimate.about', { amount: euro(data.contribution_cents) })}
+        {t('estimate.about', { amount: euros(data.contribution_cents) })}
       </Text>
+      {/* The upper bound, and only the upper bound. Nobody is upset by paying
+          less than they expected; somebody quoted 12 € and asked for 25 € has
+          been misled. A matching lower figure would make the pair five times
+          wide, which reads as "nobody knows" and gets ignored. */}
+      {data.ceiling_cents > data.contribution_cents ? (
+        <Text testID={testID ? `${testID}-ceiling` : undefined} style={styles.detail}>
+          {t('estimate.upTo', { amount: euros(data.ceiling_cents) })}
+        </Text>
+      ) : null}
       <Text style={styles.detail}>
         {t('estimate.basis', { km: data.route_km.toFixed(0), seats: data.assumptions.divisor - 1 })}
       </Text>

@@ -22,6 +22,7 @@ const estimate = {
   route_km: 29,
   route_min: 33,
   contribution_cents: 200,
+  ceiling_cents: 0,
   assumptions: {
     version: 'eea-2026-08',
     divisor: 4,
@@ -88,4 +89,27 @@ test('changing an end asks again', async () => {
 
   rerender(wrap(<Estimate from={alex} to={{ ...feres, lon: 26.3 }} testID="est" />));
   await waitFor(() => expect(api.estimate).toHaveBeenCalledTimes(2));
+});
+
+// The upper bound is what stops a surprise. There is no matching lower figure:
+// the thriftiest real car is five times cheaper than the ceiling, and a pair
+// that wide reads as "nobody knows".
+test('it says how far up the figure could go', async () => {
+  (api.estimate as jest.Mock).mockResolvedValue({ ...estimate, ceiling_cents: 500 });
+
+  render(wrap(<Estimate from={alex} to={feres} testID="est" />));
+
+  const ceiling = await screen.findByTestId('est-ceiling');
+  // \s rather than a literal space: Intl separates the amount from the symbol
+  // with a non-breaking one, which reads identically and compares differently.
+  expect(ceiling.props.children).toMatch(/5,00\s€/);
+});
+
+test('no upper bound is shown when there is nothing above the estimate', async () => {
+  (api.estimate as jest.Mock).mockResolvedValue({ ...estimate, ceiling_cents: 200 });
+
+  render(wrap(<Estimate from={alex} to={feres} testID="est" />));
+
+  await screen.findByTestId('est-headline');
+  expect(screen.queryByTestId('est-ceiling')).toBeNull();
 });

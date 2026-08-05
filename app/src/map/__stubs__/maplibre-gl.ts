@@ -17,6 +17,12 @@ export class Map {
   getSource(): unknown {
     return null;
   }
+  getLayer(): unknown {
+    return null;
+  }
+  removeLayer() {}
+  removeSource() {}
+  off() {}
   addSource() {}
   addLayer() {}
   isStyleLoaded() {

@@ -55,6 +55,13 @@ func (l Luggage) rank() int { return slices.Index(LuggageSizes(), l) }
 // will not take a bicycle, and finding that out at the kerb is the failure this
 // exists to prevent.
 func (l Luggage) Fits(bringing Luggage) bool {
+	// Both sides checked, not just the receiver. An unset value ranks at -1, so
+	// without this a driver taking anything at all would "fit" a passenger whose
+	// size was never set — which is the field somebody forgot, not a person
+	// travelling with nothing.
+	if !l.Valid() || !bringing.Valid() {
+		return false
+	}
 	return l.rank() >= bringing.rank()
 }
 
