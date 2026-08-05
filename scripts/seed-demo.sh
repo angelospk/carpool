@@ -21,6 +21,10 @@ step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 # server reads the prefecture off it, so nothing here needs a region id.
 HOME_PLACE=${HOME_PLACE:-node/139260653}
 
+# Everybody this makes is an ordinary adult. The age gate refuses anybody
+# under eighteen and is tested where it lives, not here.
+DOB=${DOB:-1990-01-01}
+
 # Signing in is idempotent: the same number signs in as the same person, so
 # re-running this tops the world up rather than duplicating it.
 signin() {
@@ -48,7 +52,7 @@ signin() {
     return
   fi
   curl -s -X POST "$API/auth/signup/complete" -H 'Content-Type: application/json' \
-    -d "{\"signup_token\":\"$ticket\",\"name\":\"$name\",\"home_place_id\":\"$HOME_PLACE\"}" \
+    -d "{\"signup_token\":\"$ticket\",\"name\":\"$name\",\"home_place_id\":\"$HOME_PLACE\",\"date_of_birth\":\"$DOB\"}" \
     | j "d.access_token"
 }
 

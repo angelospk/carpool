@@ -50,10 +50,10 @@ func newFixture(t *testing.T) *fixture {
 	}
 
 	must(t, pool.QueryRow(ctx,
-		`INSERT INTO users (phone, name, home_region_id) VALUES ('+306900000001','Driver',$1) RETURNING id`,
+		`INSERT INTO users (date_of_birth, phone, name, home_region_id) VALUES (DATE '1990-01-01', '+306900000001','Driver',$1) RETURNING id`,
 		regionID).Scan(&f.driverID), "driver")
 	must(t, pool.QueryRow(ctx,
-		`INSERT INTO users (phone, name, home_region_id) VALUES ('+306900000002','Passenger',$1) RETURNING id`,
+		`INSERT INTO users (date_of_birth, phone, name, home_region_id) VALUES (DATE '1990-01-01', '+306900000002','Passenger',$1) RETURNING id`,
 		regionID).Scan(&f.passengerID), "passenger")
 
 	_, err := pool.Exec(ctx,
@@ -322,8 +322,8 @@ func TestConcurrentAcceptsForTheLastSeatLeaveNoOverbooking(t *testing.T) {
 
 	var otherPassenger uuid.UUID
 	must(t, f.pool.QueryRow(ctx, `
-		INSERT INTO users (phone, name, home_region_id)
-		SELECT '+306900000003', 'Other', home_region_id FROM users WHERE id = $1
+		INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		SELECT DATE '1990-01-01', '+306900000003', 'Other', home_region_id FROM users WHERE id = $1
 		RETURNING id`, f.passengerID).Scan(&otherPassenger), "other passenger")
 	_, secondAsk := f.newAsk("+306900000003", otherPassenger)
 

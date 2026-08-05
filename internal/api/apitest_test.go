@@ -84,6 +84,7 @@ func newHarnessWith(t *testing.T, devMode bool) *harness {
 		Ready:       pool.Ping,
 		Pool:        pool,
 		Clock:       c,
+		Location:    testLocation(),
 		Issuer:      issuer,
 		OTP:         auth.NewOTPService(pool, c, sms),
 		Signup:      auth.NewSignupService(pool, c),
@@ -185,6 +186,10 @@ func (h *harness) signUp(phone, name string) (accessToken, refreshToken string) 
 			"signup_token":  body.SignupToken,
 			"name":          name,
 			"home_place_id": feres,
+			// Old enough, and fixed rather than computed: every test that is not
+			// about age wants an ordinary adult, and a date derived from the
+			// clock would make the age gate untestable from here.
+			"date_of_birth": "1990-01-01",
 		}, "")
 		if rec.Code != http.StatusOK {
 			h.t.Fatalf("signup/complete: status %d, body %s", rec.Code, rec.Body.String())
@@ -246,7 +251,7 @@ func newRoutingHarness(t *testing.T) *harness {
 
 	h := newHarness(t)
 	h.router = api.NewRouter(api.Deps{
-		Ready: h.pool.Ping, Pool: h.pool, Clock: h.clock,
+		Ready: h.pool.Ping, Pool: h.pool, Clock: h.clock, Location: testLocation(),
 		Issuer:   auth.NewTokenIssuer(testSecret, h.clock),
 		OTP:      auth.NewOTPService(h.pool, h.clock, h.sms),
 		Signup:   auth.NewSignupService(h.pool, h.clock),
@@ -272,4 +277,18 @@ func (h *harness) countRows() map[string]int {
 		out[table] = n
 	}
 	return out
+}
+
+// testLocation is the same civil timezone the service runs in. Tests that reason
+// about days must not quietly use UTC, because that is exactly the bug the
+// Location field exists to prevent.
+func testLocation() *time.Location {
+	loc, err := time.LoadLocation("Europe/Athens")
+	if err != nil {
+		// A container without tzdata. UTC gets the arithmetic right for every
+		// case except the couple of hours either side of midnight, which is
+		// better than refusing to run the suite at all.
+		return time.UTC
+	}
+	return loc
 }

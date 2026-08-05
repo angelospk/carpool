@@ -57,12 +57,12 @@ func newWorld(t *testing.T) *world {
 		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25 40, 27 40, 27 42, 25 42, 25 40))', 4326)))
 		RETURNING id`)
 
-	scan(&w.driver, `INSERT INTO users (phone, name, home_region_id)
-		VALUES ('+306900000001','Οδηγός',$1) RETURNING id`, regionID)
-	scan(&w.passenger, `INSERT INTO users (phone, name, home_region_id)
-		VALUES ('+306900000002','Επιβάτης',$1) RETURNING id`, regionID)
-	scan(&w.moderator, `INSERT INTO users (phone, name, home_region_id, is_moderator)
-		VALUES ('+306900000003','Επόπτης',$1,true) RETURNING id`, regionID)
+	scan(&w.driver, `INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		VALUES (DATE '1990-01-01', '+306900000001','Οδηγός',$1) RETURNING id`, regionID)
+	scan(&w.passenger, `INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		VALUES (DATE '1990-01-01', '+306900000002','Επιβάτης',$1) RETURNING id`, regionID)
+	scan(&w.moderator, `INSERT INTO users (date_of_birth, phone, name, home_region_id, is_moderator)
+		VALUES (DATE '1990-01-01', '+306900000003','Επόπτης',$1,true) RETURNING id`, regionID)
 
 	exec(`INSERT INTO driver_profiles (user_id, car_model, car_plate) VALUES ($1, 'Yaris','ΑΒΓ-1234')`, w.driver)
 	testdb.GiveEveryDriverACar(t, pool)

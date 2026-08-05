@@ -44,11 +44,11 @@ func newWorld(t *testing.T) *world {
 	scan(&regionID, `INSERT INTO regions (name, boundary, fuel_price_eur)
 		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25 40, 27 40, 27 42, 25 42, 25 40))', 4326)), 1.8)
 		RETURNING id`)
-	scan(&w.driverID, `INSERT INTO users (phone, name, home_region_id, photo_url, facebook_handle, gender)
-		VALUES ('+306900000001','Οδηγός',$1,'https://example.gr/p.jpg',
+	scan(&w.driverID, `INSERT INTO users (date_of_birth, phone, name, home_region_id, photo_url, facebook_handle, gender)
+		VALUES (DATE '1990-01-01', '+306900000001','Οδηγός',$1,'https://example.gr/p.jpg',
 		        'odigos','male') RETURNING id`, regionID)
-	scan(&w.passengerID, `INSERT INTO users (phone, name, home_region_id)
-		VALUES ('+306900000002','Επιβάτης',$1) RETURNING id`, regionID)
+	scan(&w.passengerID, `INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		VALUES (DATE '1990-01-01', '+306900000002','Επιβάτης',$1) RETURNING id`, regionID)
 	if _, err := pool.Exec(ctx, `INSERT INTO driver_profiles (user_id, car_model, car_plate)
 		VALUES ($1, 'Yaris','ΑΒΓ-1234')`, w.driverID); err != nil {
 		t.Fatalf("seeding driver profile: %v", err)

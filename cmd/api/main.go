@@ -169,6 +169,7 @@ func run() error {
 		Ready:      pool.Ping,
 		Pool:       pool,
 		Clock:      clk,
+		Location:   athens,
 		Issuer:     issuer,
 		OTP:        auth.NewOTPService(pool, clk, sms),
 		Signup:     auth.NewSignupService(pool, clk),

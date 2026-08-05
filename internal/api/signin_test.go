@@ -3,6 +3,7 @@ package api_test
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -11,6 +12,12 @@ import (
 // rectangle the harness seeds as a region, so signing up with it can be checked
 // against a region the test knows the id of.
 const feres = "node/139260653"
+
+// adultDOB is an ordinary grown-up, for the tests that are about something
+// else. Fixed rather than derived from the clock: a date computed from "now"
+// would drift with the harness and would make the age gate impossible to test
+// from the other side.
+const adultDOB = "1990-01-01"
 
 // signupToken runs the first half of joining: a code is requested, the code is
 // verified, and what comes back for a number nobody has used is a ticket to
@@ -124,6 +131,7 @@ func TestSignupCompleteCreatesTheAccountAndReadsTheRegionOffTheTown(t *testing.T
 		"signup_token":  token,
 		"name":          "Χαράλαμπος",
 		"home_place_id": feres,
+		"date_of_birth": adultDOB,
 	}, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
@@ -154,7 +162,10 @@ func TestASignupTicketIsSpentTheFirstTimeItIsUsed(t *testing.T) {
 	h := newHarness(t)
 	token := h.signupToken(phone)
 
-	body := map[string]any{"signup_token": token, "name": "Χαράλαμπος", "home_place_id": feres}
+	body := map[string]any{
+		"signup_token": token, "name": "Χαράλαμπος", "home_place_id": feres,
+		"date_of_birth": adultDOB,
+	}
 	if rec := h.do(http.MethodPost, "/v1/auth/signup/complete", body, ""); rec.Code != http.StatusOK {
 		t.Fatalf("first exchange: %d %s", rec.Code, rec.Body.String())
 	}
@@ -176,6 +187,7 @@ func TestASignupTicketExpires(t *testing.T) {
 
 	rec := h.do(http.MethodPost, "/v1/auth/signup/complete", map[string]any{
 		"signup_token": token, "name": "Χαράλαμπος", "home_place_id": feres,
+		"date_of_birth": adultDOB,
 	}, "")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401; body %s", rec.Code, rec.Body.String())
@@ -196,6 +208,7 @@ func TestAskingForANewCodeVoidsAnOutstandingSignupTicket(t *testing.T) {
 
 	rec := h.do(http.MethodPost, "/v1/auth/signup/complete", map[string]any{
 		"signup_token": token, "name": "Χαράλαμπος", "home_place_id": feres,
+		"date_of_birth": adultDOB,
 	}, "")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401; body %s", rec.Code, rec.Body.String())
@@ -217,6 +230,7 @@ func TestSignupCompleteRefusesATownItDoesNotKnow(t *testing.T) {
 
 			rec := h.do(http.MethodPost, "/v1/auth/signup/complete", map[string]any{
 				"signup_token": token, "name": "Χαράλαμπος", "home_place_id": place,
+				"date_of_birth": adultDOB,
 			}, "")
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400; body %s", rec.Code, rec.Body.String())
@@ -229,6 +243,7 @@ func TestSignupCompleteRefusesATownItDoesNotKnow(t *testing.T) {
 			// their town, they do not start the whole sign-in again.
 			rec = h.do(http.MethodPost, "/v1/auth/signup/complete", map[string]any{
 				"signup_token": token, "name": "Χαράλαμπος", "home_place_id": feres,
+				"date_of_birth": adultDOB,
 			}, "")
 			if rec.Code != http.StatusOK {
 				t.Fatalf("retry after a bad town: %d %s", rec.Code, rec.Body.String())
@@ -244,11 +259,111 @@ func TestSignupCompleteRefusesAnEmptyName(t *testing.T) {
 
 	rec := h.do(http.MethodPost, "/v1/auth/signup/complete", map[string]any{
 		"signup_token": token, "name": "  ", "home_place_id": feres,
+		"date_of_birth": adultDOB,
 	}, "")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body %s", rec.Code, rec.Body.String())
 	}
 	if code := h.errorCode(rec); code != "invalid_request" {
 		t.Errorf("error code = %q, want invalid_request", code)
+	}
+}
+
+// Nobody under eighteen gets an account.
+//
+// Checked once, at the door, rather than at every departure. Age only goes one
+// way: if every account holder was eighteen on the day they signed up, every
+// account holder is eighteen for ever after, and there is no later moment at
+// which the answer can have changed. Checking at the door is the whole rule.
+func TestSignupRefusesAnybodyUnderEighteen(t *testing.T) {
+	h := newHarness(t)
+
+	// Measured against the harness clock rather than written in, so this does
+	// not start failing on its own eighteenth birthday.
+	today := h.clock.Now().In(time.UTC)
+	dayShort := today.AddDate(-18, 0, 1).Format("2006-01-02")
+	exactly := today.AddDate(-18, 0, 0).Format("2006-01-02")
+
+	rec := h.do(http.MethodPost, "/v1/auth/signup/complete", map[string]any{
+		"signup_token":  h.signupToken("+306944000001"),
+		"name":          "Νεαρός",
+		"home_place_id": feres,
+		"date_of_birth": dayShort,
+	}, "")
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("a day short of eighteen gave %d, want 403: %s", rec.Code, rec.Body.String())
+	} else if code := h.errorCode(rec); code != "underage" {
+		t.Errorf("error code %q, want underage", code)
+	}
+
+	// And the refusal left no account behind.
+	var n int
+	h.mustQuery(`SELECT count(*) FROM users WHERE phone = $1`, &n, "+306944000001")
+	if n != 0 {
+		t.Errorf("the refused signup created %d accounts", n)
+	}
+
+	// Eighteen on the day is eighteen.
+	rec = h.do(http.MethodPost, "/v1/auth/signup/complete", map[string]any{
+		"signup_token":  h.signupToken("+306944000002"),
+		"name":          "Ενήλικη",
+		"home_place_id": feres,
+		"date_of_birth": exactly,
+	}, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("exactly eighteen gave %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	// And what was stored is the date that was sent. Checking only the verdict
+	// would pass just as well against a column filled in with a constant.
+	var stored string
+	h.mustQuery(`SELECT to_char(date_of_birth, 'YYYY-MM-DD') FROM users WHERE phone = $1`,
+		&stored, "+306944000002")
+	if stored != exactly {
+		t.Errorf("stored date of birth = %q, want %q", stored, exactly)
+	}
+}
+
+// A missing or nonsensical birth date is refused rather than defaulted. There
+// is no sensible default for this, and a signup that quietly stores one is an
+// age gate that does nothing.
+func TestSignupNeedsARealBirthDate(t *testing.T) {
+	h := newHarness(t)
+
+	// A fresh number each time: three codes per number per fifteen minutes is
+	// the rate limit, and reusing one would fail this on the limiter rather
+	// than on the birth date.
+	for i, dob := range []any{nil, "", "15/03/2008", "2008-02-30", "2099-01-01"} {
+		body := map[string]any{
+			"signup_token":  h.signupToken(fmt.Sprintf("+30694401%04d", i)),
+			"name":          "Χωρίς ημερομηνία",
+			"home_place_id": feres,
+		}
+		if dob != nil {
+			body["date_of_birth"] = dob
+		}
+
+		rec := h.do(http.MethodPost, "/v1/auth/signup/complete", body, "")
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("a birth date of %v gave %d, want 400: %s", dob, rec.Code, rec.Body.String())
+			continue
+		}
+		if code := h.errorCode(rec); code != "invalid_birth_date" {
+			t.Errorf("a birth date of %v gave error %q, want invalid_birth_date", dob, code)
+		}
+	}
+}
+
+// Somebody's date of birth is not the app's to hand out. It is asked for once,
+// to answer one question, and then it stays put — including from the account's
+// own profile, which is the response that gets rendered in front of other
+// people.
+func TestABirthDateNeverLeavesInAProfile(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306944000004", "Επιβάτης")
+
+	rec := h.do(http.MethodGet, "/v1/me", nil, token)
+	if body := rec.Body.String(); strings.Contains(body, "date_of_birth") {
+		t.Errorf("/v1/me carries a birth date: %s", body)
 	}
 }

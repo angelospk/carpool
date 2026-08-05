@@ -44,10 +44,10 @@ func newGarageFixture(t *testing.T) *garageFixture {
 	scan(&regionID, `INSERT INTO regions (name, boundary)
 		VALUES ('Έβρος', ST_Multi(ST_GeomFromText('POLYGON((25 40, 27 40, 27 42, 25 42, 25 40))', 4326)))
 		RETURNING id`)
-	scan(&f.driver, `INSERT INTO users (phone, name, home_region_id)
-		VALUES ('+306900000001','Οδηγός',$1) RETURNING id`, regionID)
-	scan(&f.stranger, `INSERT INTO users (phone, name, home_region_id)
-		VALUES ('+306900000002','Άγνωστος',$1) RETURNING id`, regionID)
+	scan(&f.driver, `INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		VALUES (DATE '1990-01-01', '+306900000001','Οδηγός',$1) RETURNING id`, regionID)
+	scan(&f.stranger, `INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		VALUES (DATE '1990-01-01', '+306900000002','Άγνωστος',$1) RETURNING id`, regionID)
 
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO driver_profiles (user_id, car_model, car_plate) VALUES ($1,'Yaris','ΑΒΓ-0000')`,

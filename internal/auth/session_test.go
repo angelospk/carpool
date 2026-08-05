@@ -39,7 +39,7 @@ func newSessions(t *testing.T) (*auth.SessionService, *pgxpool.Pool, *clock.Fake
 
 	var userID uuid.UUID
 	err = pool.QueryRow(ctx, `
-		INSERT INTO users (phone, name, home_region_id) VALUES ($1, 'Test', $2) RETURNING id`,
+		INSERT INTO users (date_of_birth, phone, name, home_region_id) VALUES (DATE '1990-01-01', $1, 'Test', $2) RETURNING id`,
 		testPhone, regionID).Scan(&userID)
 	if err != nil {
 		t.Fatalf("seeding user: %v", err)

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"carpool/internal/domain"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -48,7 +50,7 @@ func seedCode(t *testing.T, pool *pgxpool.Pool, code string, maxUses int) {
 func TestANewAccountNeedsACodeWhenThePilotIsClosed(t *testing.T) {
 	svc, _, regionID := newWorld(t, true)
 
-	_, err := svc.Admit(context.Background(), "+306900000001", "Γιάννης", regionID, "")
+	_, err := svc.Admit(context.Background(), "+306900000001", "Γιάννης", regionID, adult, "")
 
 	if !errors.Is(err, invites.ErrCodeRequired) {
 		t.Fatalf("Admit returned %v, want ErrCodeRequired", err)
@@ -60,7 +62,7 @@ func TestAValidCodeAdmitsAndRecordsWhoLetThemIn(t *testing.T) {
 	seedCode(t, pool, "SEEDAAAA", 5)
 	ctx := context.Background()
 
-	user, err := svc.Admit(ctx, "+306900000001", "Γιάννης", regionID, "SEEDAAAA")
+	user, err := svc.Admit(ctx, "+306900000001", "Γιάννης", regionID, adult, "SEEDAAAA")
 	if err != nil {
 		t.Fatalf("Admit: %v", err)
 	}
@@ -88,14 +90,14 @@ func TestAValidCodeAdmitsAndRecordsWhoLetThemIn(t *testing.T) {
 func TestAnExistingMemberSignsInWithoutACode(t *testing.T) {
 	open, pool, regionID := newWorld(t, false)
 	ctx := context.Background()
-	if _, err := open.Admit(ctx, "+306900000001", "Γιάννης", regionID, ""); err != nil {
+	if _, err := open.Admit(ctx, "+306900000001", "Γιάννης", regionID, adult, ""); err != nil {
 		t.Fatalf("joining while the pilot was open: %v", err)
 	}
 
 	// The pilot closes behind them, against the same database.
 	closed := invites.NewService(pool, clock.NewFake(testNow), true)
 
-	if _, err := closed.Admit(ctx, "+306900000001", "Γιάννης", regionID, ""); err != nil {
+	if _, err := closed.Admit(ctx, "+306900000001", "Γιάννης", regionID, adult, ""); err != nil {
 		t.Fatalf("an existing member was locked out of their own account: %v", err)
 	}
 }
@@ -105,11 +107,11 @@ func TestACodeCannotBeSpentPastItsLimit(t *testing.T) {
 	seedCode(t, pool, "ONEONLYX", 1)
 	ctx := context.Background()
 
-	if _, err := svc.Admit(ctx, "+306900000001", "Πρώτος", regionID, "ONEONLYX"); err != nil {
+	if _, err := svc.Admit(ctx, "+306900000001", "Πρώτος", regionID, adult, "ONEONLYX"); err != nil {
 		t.Fatalf("first Admit: %v", err)
 	}
 
-	_, err := svc.Admit(ctx, "+306900000002", "Δεύτερος", regionID, "ONEONLYX")
+	_, err := svc.Admit(ctx, "+306900000002", "Δεύτερος", regionID, adult, "ONEONLYX")
 
 	if !errors.Is(err, invites.ErrCodeNotUsable) {
 		t.Fatalf("Admit returned %v, want the code refused", err)
@@ -137,7 +139,7 @@ func TestTwoPeopleRacingForTheLastUseOnlyOneGetsIn(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, results[i] = svc.Admit(ctx, phones[i], "Κάποιος", regionID, "RACEONEX")
+			_, results[i] = svc.Admit(ctx, phones[i], "Κάποιος", regionID, adult, "RACEONEX")
 		}(i)
 	}
 	wg.Wait()
@@ -182,7 +184,7 @@ func TestACodeThatIsSpentExpiredOrWithdrawnFailsTheSameWay(t *testing.T) {
 	// guessing codes which guesses were close.
 	for i, code := range []string{"EXPIREDX", "STOPPEDX", "NOSUCHXX"} {
 		phone := "+30690000000" + string(rune('1'+i))
-		if _, err := svc.Admit(ctx, phone, "Κάποιος", regionID, code); !errors.Is(err, invites.ErrCodeNotUsable) {
+		if _, err := svc.Admit(ctx, phone, "Κάποιος", regionID, adult, code); !errors.Is(err, invites.ErrCodeNotUsable) {
 			t.Errorf("%s returned %v, want ErrCodeNotUsable", code, err)
 		}
 	}
@@ -191,7 +193,7 @@ func TestACodeThatIsSpentExpiredOrWithdrawnFailsTheSameWay(t *testing.T) {
 func TestEveryMemberGetsOneCodeAndKeepsIt(t *testing.T) {
 	svc, pool, regionID := newWorld(t, false)
 	ctx := context.Background()
-	user, err := svc.Admit(ctx, "+306900000001", "Γιάννης", regionID, "")
+	user, err := svc.Admit(ctx, "+306900000001", "Γιάννης", regionID, adult, "")
 	if err != nil {
 		t.Fatalf("Admit: %v", err)
 	}
@@ -235,3 +237,7 @@ func containsRune(s string, r rune) bool {
 	}
 	return false
 }
+
+// adult is a birth date old enough to sign up with. These tests are about
+// invite codes, not about age, so it is the same date everywhere and says so.
+var adult = domain.Date{Year: 1990, Month: time.January, Day: 1}

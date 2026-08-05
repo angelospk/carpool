@@ -72,8 +72,8 @@ func newRouter(t *testing.T) (*pgxpool.Pool, *sender, uuid.UUID) {
 
 	var userID uuid.UUID
 	err = pool.QueryRow(ctx, `
-		INSERT INTO users (phone, name, home_region_id)
-		VALUES ('+306900000001', 'Οδηγός', $1) RETURNING id`, regionID).Scan(&userID)
+		INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		VALUES (DATE '1990-01-01', '+306900000001', 'Οδηγός', $1) RETURNING id`, regionID).Scan(&userID)
 	if err != nil {
 		t.Fatalf("seeding user: %v", err)
 	}
@@ -111,8 +111,8 @@ func TestAPushReachesOnlyTheRecipientsLiveDevices(t *testing.T) {
 
 	var otherID uuid.UUID
 	err := pool.QueryRow(context.Background(), `
-		INSERT INTO users (phone, name, home_region_id)
-		SELECT '+306900000002', 'Άλλος', home_region_id FROM users WHERE id = $1
+		INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		SELECT DATE '1990-01-01', '+306900000002', 'Άλλος', home_region_id FROM users WHERE id = $1
 		RETURNING id`, driverID).Scan(&otherID)
 	if err != nil {
 		t.Fatalf("seeding second user: %v", err)

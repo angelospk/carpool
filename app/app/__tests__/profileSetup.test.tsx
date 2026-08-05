@@ -54,6 +54,7 @@ describe('the profile screen', () => {
     render(<ProfileSetupScreen />);
 
     fireEvent.changeText(screen.getByTestId('name-input'), 'Χαράλαμπος');
+    fireEvent.changeText(screen.getByTestId('dob-input'), '01/01/1990');
     await pickHomeTown();
     fireEvent.press(screen.getByTestId('profile-submit'));
 
@@ -70,7 +71,7 @@ describe('the profile screen', () => {
     );
   });
 
-  it('will not submit without both a name and a town', async () => {
+  it('will not submit until the name, the age and the town are all there', async () => {
     render(<ProfileSetupScreen />);
 
     const submit = () => screen.getByTestId('profile-submit');
@@ -80,6 +81,9 @@ describe('the profile screen', () => {
     expect(submit().props.accessibilityState?.disabled).toBe(true);
 
     await pickHomeTown();
+    expect(submit().props.accessibilityState?.disabled).toBe(true);
+
+    fireEvent.changeText(screen.getByTestId('dob-input'), '01/01/1990');
     expect(submit().props.accessibilityState?.disabled).toBe(false);
   });
 
@@ -93,11 +97,73 @@ describe('the profile screen', () => {
 
     render(<ProfileSetupScreen />);
     fireEvent.changeText(screen.getByTestId('name-input'), 'Χαράλαμπος');
+    fireEvent.changeText(screen.getByTestId('dob-input'), '01/01/1990');
     await pickHomeTown();
     fireEvent.press(screen.getByTestId('profile-submit'));
 
     const error = await screen.findByTestId('profile-error');
     expect(error.props.children).toMatch(/ξανά|νέο/i);
     expect(mockSignIn).not.toHaveBeenCalled();
+  });
+});
+
+describe('the age gate on the profile screen', () => {
+  async function fillNameAndTown() {
+    fireEvent.changeText(screen.getByTestId('name-input'), 'Χαράλαμπος');
+    await pickHomeTown();
+  }
+
+  it('sends the date of birth alongside the rest', async () => {
+    render(<ProfileSetupScreen />);
+
+    await fillNameAndTown();
+    fireEvent.changeText(screen.getByTestId('dob-input'), '01/01/1990');
+    fireEvent.press(screen.getByTestId('profile-submit'));
+
+    await waitFor(() => expect(api.completeSignup).toHaveBeenCalled());
+    expect(api.completeSignup).toHaveBeenCalledWith(
+      expect.objectContaining({ date_of_birth: '1990-01-01' }),
+    );
+  });
+
+  // Typed the way a Greek person writes a date, sent the way the server reads
+  // one. Asking somebody to type 1990-01-01 is asking them to think in the
+  // server's format.
+  it('accepts a date typed the Greek way and does not send a half-typed one', async () => {
+    render(<ProfileSetupScreen />);
+
+    await fillNameAndTown();
+    fireEvent.changeText(screen.getByTestId('dob-input'), '01/01');
+
+    expect(screen.getByTestId('profile-submit').props.accessibilityState?.disabled).toBe(true);
+    expect(api.completeSignup).not.toHaveBeenCalled();
+  });
+
+  // The refusal has to say why. "Something went wrong" for an age limit sends
+  // somebody off to reinstall the app.
+  it('explains the age limit rather than showing a generic error', async () => {
+    const { ApiError } = jest.requireActual('../../src/api/client');
+    (api.completeSignup as jest.Mock).mockRejectedValue(new ApiError(403, 'underage', 'nope'));
+
+    render(<ProfileSetupScreen />);
+    await fillNameAndTown();
+    // A date this screen is happy with. The server is still the one that
+    // decides, and this is the branch for when the two disagree.
+    fireEvent.changeText(screen.getByTestId('dob-input'), '01/01/1990');
+    fireEvent.press(screen.getByTestId('profile-submit'));
+
+    const error = await screen.findByTestId('profile-error');
+    expect(error.props.children).toBe('Η εφαρμογή είναι για ενήλικες. Πρέπει να είσαι 18 ετών.');
+  });
+
+  // Caught in the app as well, so somebody plainly too young is told before a
+  // round trip rather than after one. The server is still the one that decides.
+  it('will not submit a date that is under eighteen', async () => {
+    render(<ProfileSetupScreen />);
+
+    await fillNameAndTown();
+    fireEvent.changeText(screen.getByTestId('dob-input'), '01/01/2020');
+
+    expect(screen.getByTestId('profile-submit').props.accessibilityState?.disabled).toBe(true);
   });
 });

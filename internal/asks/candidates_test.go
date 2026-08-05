@@ -314,7 +314,7 @@ func (f *fixture) addSecondDriver(t *testing.T) uuid.UUID {
 
 	var driverID uuid.UUID
 	must(t, f.pool.QueryRow(ctx,
-		`INSERT INTO users (phone, name, home_region_id) VALUES ('+306900000009','Driver2',$1) RETURNING id`,
+		`INSERT INTO users (date_of_birth, phone, name, home_region_id) VALUES (DATE '1990-01-01', '+306900000009','Driver2',$1) RETURNING id`,
 		regionID).Scan(&driverID), "second driver")
 	if _, err := f.pool.Exec(ctx,
 		`INSERT INTO driver_profiles (user_id, car_model, car_plate) VALUES ($1, 'Clio','ZZZ-9999')`,

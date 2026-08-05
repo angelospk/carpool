@@ -19,6 +19,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"carpool/internal/domain"
+
 	"carpool/internal/clock"
 	"carpool/internal/store"
 )
@@ -61,9 +63,9 @@ func NewService(pool *pgxpool.Pool, c clock.Clock, required bool) *Service {
 // transaction. Split apart, two people racing for the last use of a code would
 // both pass the check and both get in.
 func (s *Service) Admit(
-	ctx context.Context, phone, name string, regionID uuid.UUID, code string,
+	ctx context.Context, phone, name string, regionID uuid.UUID, born domain.Date, code string,
 ) (store.User, error) {
-	return s.AdmitWith(ctx, phone, name, regionID, code, nil)
+	return s.AdmitWith(ctx, phone, name, regionID, born, code, nil)
 }
 
 // AdmitWith is Admit with one more thing spent in the same transaction.
@@ -75,7 +77,7 @@ func (s *Service) Admit(
 // rejects costs nobody their sign-in — the whole transaction rolls back, ticket
 // included.
 func (s *Service) AdmitWith(
-	ctx context.Context, phone, name string, regionID uuid.UUID, code string,
+	ctx context.Context, phone, name string, regionID uuid.UUID, born domain.Date, code string,
 	alsoSpend func(context.Context, pgx.Tx) error,
 ) (store.User, error) {
 	now := s.clock.Now()
@@ -103,7 +105,7 @@ func (s *Service) AdmitWith(
 		}
 	}
 
-	user, err := store.EnsureUserTx(ctx, tx, phone, name, regionID)
+	user, err := store.EnsureUserTx(ctx, tx, phone, name, regionID, born)
 	if err != nil {
 		return store.User{}, err
 	}

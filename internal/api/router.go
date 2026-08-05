@@ -75,6 +75,12 @@ type Deps struct {
 	// Hub fans chat messages out to foregrounded apps. Optional.
 	Hub *ws.Hub
 
+	// Location is the civil timezone this service reasons about days in,
+	// Europe/Athens in production. A birthday, like a departure date, is a
+	// calendar day rather than an instant, and half past eleven at night here is
+	// already tomorrow in UTC.
+	Location *time.Location
+
 	// DevMode relaxes things that must stay strict in a deployment: OTP codes
 	// go to the log instead of an SMS, and the browser is allowed to call this
 	// API cross-origin so the Expo web build can be used for testing.

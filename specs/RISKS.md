@@ -439,3 +439,27 @@ mitigation, not an answer.
   frames unparsed) — research fallback is WebSearch until grok-cli is fixed.
 - Implementation plan: build on the mini PC; parallelize with Codex offload lanes
   (disjoint file scopes, tests as contract) per Harold's codex-offload workflow.
+
+## The age gate is self-reported (raised 2026-08-05)
+
+Signing up now asks for a date of birth and refuses anybody under eighteen.
+Nothing verifies it. Somebody who types 1990 instead of 2010 is in, and the app
+has no way to know.
+
+This is the same position every carpooling service in the country is in — GoRide
+asks and does not verify either — and the alternatives are worse than the
+problem: an ID check at signup would collect identity documents from every user
+for a service that handles no money, which is a far larger data-protection
+liability than the one it closes.
+
+What it does buy is a stated rule, a refusal that has to be actively lied to,
+and a record. What it does not buy is knowledge.
+
+Two related things are deliberately not built:
+
+- **Minors travelling with an adult family member**, which GoRide's terms allow.
+  Nothing in a booking can tell the app that the adult in the next seat is
+  somebody's parent, and a rule the app cannot check is a rule it should not
+  claim to have.
+- **A per-seat age check.** A booking is made by one account for one or more
+  seats. The account holder's age says nothing about who else gets in the car.

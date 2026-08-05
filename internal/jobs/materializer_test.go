@@ -49,7 +49,7 @@ func newFixture(t *testing.T, weekdays ...time.Weekday) *fixture {
 	newUser := func(phone, name string) uuid.UUID {
 		var id uuid.UUID
 		if err := pool.QueryRow(ctx,
-			`INSERT INTO users (phone, name, home_region_id) VALUES ($1, $2, $3) RETURNING id`,
+			`INSERT INTO users (date_of_birth, phone, name, home_region_id) VALUES (DATE '1990-01-01', $1, $2, $3) RETURNING id`,
 			phone, name, regionID).Scan(&id); err != nil {
 			t.Fatalf("seeding user %s: %v", name, err)
 		}

@@ -43,7 +43,7 @@ func seedDriver(t *testing.T, pool *pgxpool.Pool, phone string) (*pgxpool.Pool, 
 
 	var driverID uuid.UUID
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO users (phone, name, home_region_id) VALUES ($1, 'Οδηγός', $2) RETURNING id`,
+		`INSERT INTO users (date_of_birth, phone, name, home_region_id) VALUES (DATE '1990-01-01', $1, 'Οδηγός', $2) RETURNING id`,
 		phone, regionID).Scan(&driverID); err != nil {
 		t.Fatalf("seeding user: %v", err)
 	}
@@ -155,6 +155,8 @@ func TestTheDetourMigrationKeepsWhatDriversHadAlreadyChosen(t *testing.T) {
 	seed := func(phone string, budget int) uuid.UUID {
 		var id uuid.UUID
 		if err := pool.QueryRow(ctx,
+			// No date_of_birth here: this test stops at migration 15 on purpose,
+			// and the column does not arrive until 00025.
 			`INSERT INTO users (phone, name, home_region_id) VALUES ($1, 'Ο', $2) RETURNING id`,
 			phone, regionID).Scan(&id); err != nil {
 			t.Fatalf("seeding user: %v", err)
@@ -169,8 +171,12 @@ func TestTheDetourMigrationKeepsWhatDriversHadAlreadyChosen(t *testing.T) {
 	refuses := seed("+306900000001", 0)
 	accepts := seed("+306900000002", 20)
 
-	if err := store.Migrate(ctx, pool); err != nil {
-		t.Fatalf("Migrate: %v", err)
+	// Up to 00016 and no further. That is the migration under test, and 00025
+	// deliberately refuses to run over accounts that predate it — an account
+	// with no recorded age is exactly what the age gate exists to prevent, and
+	// there is no honest value to backfill one with.
+	if err := store.MigrateTo(ctx, pool, 16); err != nil {
+		t.Fatalf("MigrateTo(16): %v", err)
 	}
 
 	for _, tc := range []struct {
@@ -247,8 +253,8 @@ func TestARouteCannotBePublishedWithSomebodyElsesCar(t *testing.T) {
 
 	var strangerID, theirCar uuid.UUID
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO users (phone, name, home_region_id)
-		SELECT '+306900000403', 'Άλλος', home_region_id FROM users WHERE id = $1
+		INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		SELECT DATE '1990-01-01', '+306900000403', 'Άλλος', home_region_id FROM users WHERE id = $1
 		RETURNING id`, driverID).Scan(&strangerID); err != nil {
 		t.Fatalf("seeding a stranger: %v", err)
 	}

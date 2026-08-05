@@ -32,8 +32,8 @@ func seed(t *testing.T) (*pgxpool.Pool, *drivers.Service, uuid.UUID) {
 		t.Fatalf("seeding the region: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO users (phone, name, home_region_id)
-		VALUES ('+306900000001', 'Οδηγός', $1) RETURNING id`, regionID).Scan(&userID); err != nil {
+		INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		VALUES (DATE '1990-01-01', '+306900000001', 'Οδηγός', $1) RETURNING id`, regionID).Scan(&userID); err != nil {
 		t.Fatalf("seeding the user: %v", err)
 	}
 

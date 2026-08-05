@@ -56,8 +56,8 @@ type Region struct {
 //
 // Name and region are only applied at creation: a later sign-in must not let
 // whatever the client happens to send overwrite the stored profile.
-func EnsureUser(ctx context.Context, pool *pgxpool.Pool, phone, name string, regionID uuid.UUID) (User, error) {
-	return EnsureUserTx(ctx, pool, phone, name, regionID)
+func EnsureUser(ctx context.Context, pool *pgxpool.Pool, phone, name string, regionID uuid.UUID, born domain.Date) (User, error) {
+	return EnsureUserTx(ctx, pool, phone, name, regionID, born)
 }
 
 // querier is the part of pgx both a pool and a transaction satisfy, so a caller
@@ -67,17 +67,21 @@ type querier interface {
 }
 
 // EnsureUserTx is EnsureUser inside the caller's transaction.
-func EnsureUserTx(ctx context.Context, q querier, phone, name string, regionID uuid.UUID) (User, error) {
+//
+// The birth date is written on the way in and never on the way back. Somebody
+// signing in again is not re-stating how old they are, and an upsert that let
+// them would be an age gate anybody could walk around by signing in twice.
+func EnsureUserTx(ctx context.Context, q querier, phone, name string, regionID uuid.UUID, born domain.Date) (User, error) {
 	var u User
 	err := q.QueryRow(ctx, `
-		INSERT INTO users (phone, name, home_region_id)
-		VALUES ($1, $2, $3)
+		INSERT INTO users (phone, name, home_region_id, date_of_birth)
+		VALUES ($1, $2, $3, make_date($4, $5, $6))
 		ON CONFLICT (phone) DO UPDATE SET updated_at = now()
 		RETURNING id, phone, name, photo_url,
 		          (SELECT encode(substring(sha256 from 1 for 6), 'hex') FROM profile_photos WHERE user_id = users.id),
 		          gender, home_region_id, women_only, status,
 		          facebook_handle, instagram_handle`,
-		phone, name, regionID).Scan(
+		phone, name, regionID, born.Year, int(born.Month), born.Day).Scan(
 		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.PhotoVersion, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
 		&u.FacebookHandle, &u.InstagramHandle)
 	if err != nil {

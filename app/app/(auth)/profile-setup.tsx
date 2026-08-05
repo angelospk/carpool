@@ -1,4 +1,6 @@
 import { useState } from 'react';
+
+import { toISODate, isAdult, formatTypedDate } from '../../src/auth/birthDate';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useTranslation } from 'react-i18next';
@@ -24,6 +26,7 @@ export default function ProfileSetupScreen() {
   const signIn = useSession((s) => s.signIn);
 
   const [name, setName] = useState('');
+  const [dob, setDob] = useState('');
   const [home, setHome] = useState<Pin | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -32,8 +35,14 @@ export default function ProfileSetupScreen() {
   // only — so it is not a home town, however well-formed it looks.
   const placeID = home?.id ?? null;
 
+  // Null while the date is half typed, which is most of the time somebody is
+  // typing it. The button stays dark rather than flashing an error at every
+  // keystroke.
+  const isoDOB = toISODate(dob);
+  const oldEnough = isoDOB !== null && isAdult(isoDOB);
+
   const submit = async () => {
-    if (!placeID) return;
+    if (!placeID || !isoDOB) return;
     setBusy(true);
     setError(null);
     try {
@@ -41,6 +50,7 @@ export default function ProfileSetupScreen() {
         signup_token: signupToken,
         name: name.trim(),
         home_place_id: placeID,
+        date_of_birth: isoDOB,
       });
       await signIn({ accessToken: tokens.access_token, refreshToken: tokens.refresh_token });
       // The root layout redirects once the session flips to signedIn.
@@ -49,6 +59,10 @@ export default function ProfileSetupScreen() {
         setError(t('auth.signupExpired'));
       } else if (e instanceof ApiError && e.code === 'unknown_place') {
         setError(t('auth.unknownPlace'));
+      } else if (e instanceof ApiError && (e.code === 'underage' || e.code === 'invalid_birth_date')) {
+        // The server is the one that decides, and it can refuse a date this
+        // screen was happy with — a clock skewed by a day, or an older build.
+        setError(t('auth.underage'));
       } else {
         setError(t('common.error'));
       }
@@ -73,6 +87,19 @@ export default function ProfileSetupScreen() {
           />
         </Card>
 
+        <Card>
+          <Field
+            testID="dob-input"
+            label={t('auth.birthDate')}
+            value={dob}
+            onChangeText={(v) => setDob(formatTypedDate(v))}
+            placeholder={t('auth.birthDatePlaceholder')}
+            keyboardType="number-pad"
+            valid={oldEnough}
+          />
+        </Card>
+        <Hint>{t('auth.birthDateHint')}</Hint>
+
         <Hint>{t('auth.homeTownHint')}</Hint>
         <Card>
           <PlaceField
@@ -94,7 +121,7 @@ export default function ProfileSetupScreen() {
           testID="profile-submit"
           label={t('common.next')}
           onPress={submit}
-          disabled={!name.trim() || !placeID || busy}
+          disabled={!name.trim() || !placeID || !oldEnough || busy}
         />
       </ScrollView>
     </Screen>

@@ -65,8 +65,8 @@ func setup(t *testing.T) *fixture {
 	}
 
 	err = pool.QueryRow(ctx, `
-		INSERT INTO users (phone, name, home_region_id)
-		VALUES ('+306900000001', 'Driver', $1) RETURNING id`, f.regionID).Scan(&f.driverID)
+		INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		VALUES (DATE '1990-01-01', '+306900000001', 'Driver', $1) RETURNING id`, f.regionID).Scan(&f.driverID)
 	if err != nil {
 		t.Fatalf("seeding driver user: %v", err)
 	}

@@ -295,6 +295,8 @@ export const api = {
     name: string;
     /** A settlement id out of the place list. The server reads the region off it. */
     home_place_id: string;
+    /** YYYY-MM-DD. The server refuses anybody under eighteen. */
+    date_of_birth: string;
     invite_code?: string;
   }) =>
     request<{ access_token: string; refresh_token: string }>('/v1/auth/signup/complete', {

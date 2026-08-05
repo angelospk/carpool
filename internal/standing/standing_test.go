@@ -56,10 +56,10 @@ func newWorld(t *testing.T) *world {
 		VALUES (NULL, 'petrol', 1.859, 'test'), (NULL, 'diesel', 1.729, 'test')`); err != nil {
 		t.Fatalf("seeding fuel prices: %v", err)
 	}
-	must(&w.driverID, `INSERT INTO users (phone, name, home_region_id)
-		VALUES ('+306900000001', 'Οδηγός', $1) RETURNING id`, regionID)
-	must(&w.passengerID, `INSERT INTO users (phone, name, home_region_id)
-		VALUES ('+306900000002', 'Επιβάτης', $1) RETURNING id`, regionID)
+	must(&w.driverID, `INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		VALUES (DATE '1990-01-01', '+306900000001', 'Οδηγός', $1) RETURNING id`, regionID)
+	must(&w.passengerID, `INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		VALUES (DATE '1990-01-01', '+306900000002', 'Επιβάτης', $1) RETURNING id`, regionID)
 	if _, err := pool.Exec(ctx, `INSERT INTO driver_profiles (user_id, car_model, car_plate)
 		VALUES ($1, 'Toyota Yaris', 'ΑΒΓ-1234')`, w.driverID); err != nil {
 		t.Fatalf("seeding driver profile: %v", err)
@@ -376,8 +376,8 @@ func TestAStrangerCannotEndSomeoneElsesArrangement(t *testing.T) {
 	}
 	var strangerID uuid.UUID
 	if err := w.pool.QueryRow(ctx, `
-		INSERT INTO users (phone, name, home_region_id)
-		SELECT '+306900000009', 'Ξένος', home_region_id FROM users WHERE id = $1
+		INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		SELECT DATE '1990-01-01', '+306900000009', 'Ξένος', home_region_id FROM users WHERE id = $1
 		RETURNING id`, w.passengerID).Scan(&strangerID); err != nil {
 		t.Fatalf("seeding a stranger: %v", err)
 	}

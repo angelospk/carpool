@@ -18,6 +18,10 @@ step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 # off it, so nothing here has to know what a region id is.
 HOME_PLACE=${HOME_PLACE:-node/139260653}
 
+# Everybody this makes is an ordinary adult. The age gate refuses anybody
+# under eighteen and is tested where it lives, not here.
+DOB=${DOB:-1990-01-01}
+
 # DEV_MODE prints the OTP to the log instead of sending an SMS.
 #
 # Verifying answers one of two ways: tokens for a number that is already an
@@ -35,7 +39,7 @@ signup_pair() {
     return
   fi
   curl -s -X POST "$API/auth/signup/complete" -H 'Content-Type: application/json' \
-    -d "{\"signup_token\":\"$ticket\",\"name\":\"$2\",\"home_place_id\":\"$HOME_PLACE\"}"
+    -d "{\"signup_token\":\"$ticket\",\"name\":\"$2\",\"home_place_id\":\"$HOME_PLACE\",\"date_of_birth\":\"$DOB\"}"
 }
 
 signup() { signup_pair "$1" "$2" | j "d.access_token"; }

@@ -26,7 +26,11 @@
     "signupExpired": "That took too long. Ask for a new code and start again.",
     "tooManyRequests": "Too many attempts. Try again shortly.",
     "unknownPlace": "I do not know that settlement. Pick one from the list.",
-    "unreachable": "Cannot reach the server at {{url}}. Is it running, and are you on the same network?"
+    "unreachable": "Cannot reach the server at {{url}}. Is it running, and are you on the same network?",
+    "birthDate": "Date of birth",
+    "birthDatePlaceholder": "DD/MM/YYYY",
+    "birthDateHint": "Needed to confirm you are an adult. It is never shown to anyone.",
+    "underage": "This app is for adults. You have to be 18."
   },
   "common": {
     "back": "Back",

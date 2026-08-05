@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"carpool/internal/auth"
+	"carpool/internal/domain"
 	"carpool/internal/invites"
 	"carpool/internal/places"
 	"carpool/internal/store"
@@ -162,6 +163,12 @@ func (d Deps) handleSignupComplete(w http.ResponseWriter, r *http.Request) {
 		Name        string `json:"name"`
 		HomePlaceID string `json:"home_place_id"`
 		Invite      string `json:"invite_code"`
+
+		// DateOfBirth is YYYY-MM-DD, and is the one thing here with no
+		// tolerable default. Asked once, checked once: age only goes one way, so
+		// somebody who was eighteen the day they signed up is eighteen for ever
+		// after and there is no later moment at which the answer changes.
+		DateOfBirth string `json:"date_of_birth"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -177,6 +184,25 @@ func (d Deps) handleSignupComplete(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "name is required")
+		return
+	}
+
+	// Today in Athens, because a birthday is a calendar day and half past eleven
+	// at night here is already tomorrow in UTC.
+	today := domain.DateIn(d.Clock.Now(), d.Location)
+
+	born, err := domain.ParseBirthDate(body.DateOfBirth, today)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_birth_date",
+			"your date of birth is needed, as YYYY-MM-DD")
+		return
+	}
+	// A separate answer from a separate question, and a separate status: the
+	// first was "is this a date", this is "does it let you in". 403 rather than
+	// 400 because nothing about the request was malformed.
+	if !domain.IsAdultOn(born, today) {
+		writeError(w, http.StatusForbidden, "underage",
+			"this app is for adults; you have to be 18 to travel with strangers")
 		return
 	}
 
@@ -196,7 +222,7 @@ func (d Deps) handleSignupComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := d.Invites.AdmitWith(r.Context(), phone, name, region.ID,
+	user, err := d.Invites.AdmitWith(r.Context(), phone, name, region.ID, born,
 		strings.ToUpper(strings.TrimSpace(body.Invite)),
 		func(ctx context.Context, tx pgx.Tx) error {
 			return d.Signup.SpendTx(ctx, tx, body.SignupToken)
