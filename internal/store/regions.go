@@ -15,6 +15,12 @@ type geoJSONFile struct {
 	Features []struct {
 		Properties struct {
 			Name string `json:"name"`
+			// PreviousName is what this same ground was called by an earlier
+			// fixture. Seeding is keyed on the name, so without it the country
+			// fixture would insert "Περιφερειακή Ενότητα Έβρου" alongside the
+			// pilot's "Έβρος" — two rows for one prefecture, with every account
+			// created during the pilot still pointing at the orphan.
+			PreviousName string `json:"previous_name"`
 		} `json:"properties"`
 		Geometry json.RawMessage `json:"geometry"`
 	} `json:"features"`
@@ -47,6 +53,21 @@ func SeedRegionsFromFile(ctx context.Context, pool *pgxpool.Pool, path string, f
 	for _, f := range parsed.Features {
 		if f.Properties.Name == "" {
 			return fmt.Errorf("store: region fixture %s has a feature without a name", path)
+		}
+
+		// Adopt the row this region used to be, if it is still under its old
+		// name. Guarded so that a rename which has already happened, or a
+		// database that somehow holds both, does not collide with the unique
+		// index and abort the whole seed.
+		if p := f.Properties.PreviousName; p != "" {
+			_, err := tx.Exec(ctx, `
+				UPDATE regions SET name = $1, updated_at = now()
+				WHERE name = $2
+				  AND NOT EXISTS (SELECT 1 FROM regions WHERE name = $1)`,
+				f.Properties.Name, p)
+			if err != nil {
+				return fmt.Errorf("store: renaming region %q to %q: %w", p, f.Properties.Name, err)
+			}
 		}
 
 		// ST_Multi normalises Polygon and MultiPolygon to the column's type, and
