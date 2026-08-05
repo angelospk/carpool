@@ -22,6 +22,7 @@ import { RepeatCard } from '../../src/components/RepeatCard';
 import { SocialLinks } from '../../src/components/SocialLink';
 import { PortNotice } from '../../src/components/PortNotice';
 import { PriceBreakdown } from '../../src/components/PriceBreakdown';
+import { PreferenceChips } from '../../src/components/Preferences';
 import { colors, radius, space, type } from '../../src/design/tokens';
 import { athensDay, athensTime } from '../../src/design/format';
 
@@ -188,6 +189,14 @@ export default function TripScreen() {
                       </View>
                     ) : null}
                   </View>
+
+                  {/* What the two hours will be like, which the photo and the
+                      rating do not say. */}
+                  <PreferenceChips
+                    testID="driver-preferences"
+                    bio={trip.data.driver.bio}
+                    tags={trip.data.driver.preferences}
+                  />
                 </Card>
 
                 <RepeatCard trip={trip.data} />

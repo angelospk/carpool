@@ -88,6 +88,11 @@ type TripParticipant struct {
 	// one to every other user's device is what the upload path exists to stop.
 	PhotoVersion *string
 	Rating       *float64
+	// Bio and Preferences say what the ride is like, which the photo and the
+	// rating do not. They travel with the trip because that is where somebody
+	// is deciding whether to get in.
+	Bio         *string
+	Preferences []string
 	// The handles are where this person says they can also be found. They travel
 	// only inside a trip both parties are on, for the same reason the plate
 	// does: it is theirs to hand to someone they are riding with, not to the
@@ -156,7 +161,8 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		       (SELECT encode(substring(sha256 from 1 for 6), 'hex') FROM profile_photos WHERE user_id = u.id),
 		       u.facebook_handle, u.instagram_handle,
 		       (SELECT round(avg(stars)::numeric, 2) FROM ratings WHERE ratee_id = u.id),
-		       dp.car_model, dp.car_color, dp.car_plate
+		       dp.car_model, dp.car_color, dp.car_plate, u.bio,
+		       coalesce((SELECT array_agg(p.tag) FROM user_preferences p WHERE p.user_id = u.id), '{}')
 		FROM trip_occurrences o
 		JOIN route_templates t  ON t.id = o.template_id
 		JOIN driver_profiles dp ON dp.user_id = t.driver_id
@@ -165,7 +171,8 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		&d.DepartEarliest, &d.DepartLatest, &d.Status, &d.RouteKm, &d.SeatsFree, &d.EndsAtPort,
 		&d.OriginLabel, &d.DestLabel, &d.TemplateID, &d.Weekday, &d.BookingID, &d.RoutePolyline,
 		&d.Driver.UserID, &d.Driver.Name, &d.Driver.PhotoVersion, &d.Driver.FacebookHandle, &d.Driver.InstagramHandle, &d.Driver.Rating,
-		&d.Driver.CarModel, &d.Driver.CarColor, &d.Driver.CarPlate)
+		&d.Driver.CarModel, &d.Driver.CarColor, &d.Driver.CarPlate,
+		&d.Driver.Bio, &d.Driver.Preferences)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TripDetail{}, ErrNotParticipant
 	}
@@ -178,7 +185,8 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		       (SELECT encode(substring(sha256 from 1 for 6), 'hex') FROM profile_photos WHERE user_id = u.id),
 		       u.facebook_handle, u.instagram_handle,
 		       (SELECT round(avg(stars)::numeric, 2) FROM ratings WHERE ratee_id = u.id),
-		       b.price_eur, b.seats, b.pricing_basis
+		       b.price_eur, b.seats, b.pricing_basis, u.bio,
+		       coalesce((SELECT array_agg(p.tag) FROM user_preferences p WHERE p.user_id = u.id), '{}')
 		FROM bookings b JOIN users u ON u.id = b.passenger_id
 		WHERE b.occurrence_id = $1 AND b.status IN ('confirmed','completed')
 		ORDER BY b.created_at`, occurrenceID)
@@ -191,7 +199,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		var p TripParticipant
 		var raw []byte
 		if err := rows.Scan(&p.UserID, &p.Name, &p.PhotoVersion, &p.FacebookHandle, &p.InstagramHandle, &p.Rating,
-			&p.PriceEUR, &p.Seats, &raw); err != nil {
+			&p.PriceEUR, &p.Seats, &raw, &p.Bio, &p.Preferences); err != nil {
 			return TripDetail{}, fmt.Errorf("store: scanning passenger: %w", err)
 		}
 		if p.UserID == userID && p.PriceEUR != nil {

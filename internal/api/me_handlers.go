@@ -43,11 +43,13 @@ func (d Deps) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		// let anybody point their avatar at any URL on the internet: an origin
 		// they control, serving whatever they like, fetched by every other
 		// user's device. Photos now go through the upload path and nowhere else.
-		FacebookHandle  *string `json:"facebook_handle"`
-		InstagramHandle *string `json:"instagram_handle"`
-		Gender          *string `json:"gender"`
-		WomenOnly       *bool   `json:"women_only"`
-		RegionID        *string `json:"home_region_id"`
+		FacebookHandle  *string   `json:"facebook_handle"`
+		InstagramHandle *string   `json:"instagram_handle"`
+		Gender          *string   `json:"gender"`
+		WomenOnly       *bool     `json:"women_only"`
+		RegionID        *string   `json:"home_region_id"`
+		Bio             *string   `json:"bio"`
+		Preferences     *[]string `json:"preferences"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -85,6 +87,29 @@ func (d Deps) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		*h.out = &handle
+	}
+	if body.Bio != nil {
+		bio, err := domain.NormaliseBio(*body.Bio)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bio_too_long",
+				"that is longer than a profile takes")
+			return
+		}
+		up.Bio = &bio
+	}
+	if body.Preferences != nil {
+		tags, err := domain.NormalisePreferences(*body.Preferences)
+		switch {
+		case errors.Is(err, domain.ErrContradictoryTags):
+			writeError(w, http.StatusBadRequest, "contradictory_preferences",
+				"those two cannot both be true")
+			return
+		case err != nil:
+			writeError(w, http.StatusBadRequest, "unknown_preference",
+				"that is not a preference this app knows")
+			return
+		}
+		up.Preferences = &tags
 	}
 	if body.RegionID != nil {
 		regionID, err := uuid.Parse(*body.RegionID)
@@ -158,6 +183,11 @@ func userResponse(u store.User) map[string]any {
 		"home_region_id": u.HomeRegionID,
 		"women_only":     u.WomenOnly,
 		"status":         u.Status,
+		"bio":            u.Bio,
+		// Never nil, so a client can render a list without a null check and
+		// somebody with no preferences is an empty row rather than a missing
+		// one.
+		"preferences": nonNil(u.Preferences),
 		// Composed rather than stored, from a fixed origin plus a handle that
 		// has already been checked, so nothing a user typed decides where a
 		// link points.
@@ -166,4 +196,13 @@ func userResponse(u store.User) map[string]any {
 		"facebook_url":     socialURL(domain.FacebookURL, u.FacebookHandle),
 		"instagram_url":    socialURL(domain.InstagramURL, u.InstagramHandle),
 	}
+}
+
+// nonNil turns a nil slice into an empty one, so that JSON carries [] rather
+// than null and every client renders "no preferences" the same way.
+func nonNil(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }

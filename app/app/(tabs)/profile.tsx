@@ -11,6 +11,8 @@ import { TooBigError } from '../../src/photo/limits';
 import { ApiError } from '../../src/api/client';
 import { useSession } from '../../src/state/session';
 import { Avatar, Button, Card, Field, Row, Screen, SectionHeader } from '../../src/components/ui';
+import { PreferencePicker } from '../../src/components/Preferences';
+import { type PreferenceTag } from '../../src/api/endpoints';
 import { colors, radius, space, type } from '../../src/design/tokens';
 
 export default function ProfileScreen() {
@@ -25,6 +27,11 @@ export default function ProfileScreen() {
   const [name, setName] = useState<string | null>(null);
   const [facebook, setFacebook] = useState<string | null>(null);
   const [instagram, setInstagram] = useState<string | null>(null);
+  const [bio, setBio] = useState<string | null>(null);
+  // Preferences are edited in place: there is no "unsaved" state to reason
+  // about because a tap is the whole decision, and the save button below
+  // carries them along with everything else.
+  const [tags, setTags] = useState<PreferenceTag[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const save = useMutation({
@@ -33,17 +40,23 @@ export default function ProfileScreen() {
         ...(name !== null ? { name } : {}),
         ...(facebook !== null ? { facebook_handle: facebook } : {}),
         ...(instagram !== null ? { instagram_handle: instagram } : {}),
+        ...(bio !== null ? { bio } : {}),
+        ...(tags !== null ? { preferences: tags } : {}),
       }),
     onSuccess: (updated) => {
       setMe(updated);
       setName(null);
       setFacebook(null);
       setInstagram(null);
+      setBio(null);
+      setTags(null);
       setError(null);
     },
     onError: (e) =>
       setError(
-        e instanceof ApiError && e.code === 'invalid_handle'
+        e instanceof ApiError && e.code === 'bio_too_long'
+          ? t('profile.bioTooLong')
+          : e instanceof ApiError && e.code === 'invalid_handle'
           ? t('profile.handleInvalid')
           : e instanceof ApiError && e.code === 'invalid_name'
             ? t('profile.nameInvalid')
@@ -101,7 +114,8 @@ export default function ProfileScreen() {
       .catch((e) => setError(t(e instanceof TooBigError ? 'profile.photoTooBig' : 'profile.photoFailed')));
   };
 
-  const dirty = name !== null || facebook !== null || instagram !== null;
+  const dirty =
+    name !== null || facebook !== null || instagram !== null || bio !== null || tags !== null;
 
   return (
     <Screen>
@@ -149,6 +163,25 @@ export default function ProfileScreen() {
             onPress={() => router.push('/profile/phone')}
             testID="change-phone"
           />
+        </Card>
+
+        <SectionHeader title={t('preferences.title')} />
+        <Card>
+          <Field
+            testID="bio-field"
+            label={t('preferences.bioLabel')}
+            value={bio ?? me?.bio ?? ''}
+            onChangeText={setBio}
+            placeholder={t('preferences.bioPlaceholder')}
+            multiline
+          />
+          <View style={styles.divider} />
+          <PreferencePicker
+            testID="preference-picker"
+            value={tags ?? me?.preferences ?? []}
+            onChange={setTags}
+          />
+          <Text style={styles.hint}>{t('preferences.hint')}</Text>
         </Card>
 
         <SectionHeader title={t('profile.social')} />

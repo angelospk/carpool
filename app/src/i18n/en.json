@@ -117,6 +117,23 @@
     "proposeBadName": "That name cannot be used.",
     "proposeTooFar": "That point is not in this area."
   },
+  "preferences": {
+    "air_conditioning": "Air conditioning",
+    "big_luggage_ok": "Big bags fine",
+    "bioLabel": "A few words about you",
+    "bioPlaceholder": "e.g. I work in Alexandroupoli and drive down Tuesdays and Thursdays.",
+    "cabin_bag_only": "Small bags only",
+    "chatty": "Happy to chat",
+    "hint": "These are not rules — they are what to expect.",
+    "keep_to_myself": "I keep to myself",
+    "music_on": "Music on",
+    "no_pets": "No pets",
+    "no_smoking": "I don't smoke",
+    "pets_ok": "Pets are fine",
+    "quiet_ride": "A quiet ride",
+    "smoking_ok": "Smoking is fine",
+    "title": "What your rides are like"
+  },
   "price": {
     "consumptionIsAFloor": "The consumption is an approximation for the car's class.",
     "dividedBy": "Divided by {{divisor}} — every seat and the driver",
@@ -135,6 +152,7 @@
     "waived": "The driver asks for nothing on a trip this short."
   },
   "profile": {
+    "bioTooLong": "That is longer than a profile takes. Keep it short.",
     "car": "Your car",
     "detourBudget": "Maximum detour",
     "handleInvalid": "That is not a username",

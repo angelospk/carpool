@@ -97,6 +97,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 			"facebook_url":  socialURL(domain.FacebookURL, p.FacebookHandle),
 			"instagram_url": socialURL(domain.InstagramURL, p.InstagramHandle),
 			"rating":        p.Rating, "price_eur": p.PriceEUR, "seats": p.Seats,
+			"bio": p.Bio, "preferences": nonNil(p.Preferences),
 		})
 	}
 
@@ -119,6 +120,8 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 			"photo_url": avatarURL(trip.Driver.UserID, trip.Driver.PhotoVersion), "rating": trip.Driver.Rating,
 			"facebook_url":  socialURL(domain.FacebookURL, trip.Driver.FacebookHandle),
 			"instagram_url": socialURL(domain.InstagramURL, trip.Driver.InstagramHandle),
+			"bio":           trip.Driver.Bio,
+			"preferences":   nonNil(trip.Driver.Preferences),
 			"car_model":     trip.Driver.CarModel, "car_color": trip.Driver.CarColor,
 			// Revealed only here, and only to people already on the trip.
 			"car_plate": trip.Driver.CarPlate,

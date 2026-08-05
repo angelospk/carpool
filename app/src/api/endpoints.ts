@@ -73,6 +73,32 @@ export type Vehicle = {
   is_default: boolean;
 };
 
+/** The closed vocabulary of what a ride is like. Describes; does not enforce. */
+export const PREFERENCE_TAGS = [
+  'no_smoking',
+  'smoking_ok',
+  'no_pets',
+  'pets_ok',
+  'quiet_ride',
+  'music_on',
+  'chatty',
+  'keep_to_myself',
+  'air_conditioning',
+  'big_luggage_ok',
+  'cabin_bag_only',
+] as const;
+
+export type PreferenceTag = (typeof PREFERENCE_TAGS)[number];
+
+/** The pairs that cannot both be true, so the picker can grey one out. */
+export const CONTRADICTIONS: Array<[PreferenceTag, PreferenceTag]> = [
+  ['no_smoking', 'smoking_ok'],
+  ['no_pets', 'pets_ok'],
+  ['quiet_ride', 'music_on'],
+  ['chatty', 'keep_to_myself'],
+  ['big_luggage_ok', 'cabin_bag_only'],
+];
+
 export type Me = {
   id: string;
   phone: string;
@@ -80,6 +106,8 @@ export type Me = {
   photo_url: string | null;
   home_region_id: string;
   women_only: boolean;
+  bio: string | null;
+  preferences: PreferenceTag[];
   facebook_handle: string | null;
   instagram_handle: string | null;
   facebook_url: string | null;
@@ -112,6 +140,9 @@ export type Participant = {
   car_plate?: string | null;
   price_eur?: number | null;
   seats?: number | null;
+  /** Their own words, and what their rides are like. */
+  bio?: string | null;
+  preferences?: PreferenceTag[];
 };
 
 /**
@@ -250,7 +281,12 @@ export const api = {
 
   me: () => request<Me>('/v1/me'),
   updateMe: (
-    patch: Partial<Pick<Me, 'name' | 'women_only' | 'facebook_handle' | 'instagram_handle'>>,
+    patch: Partial<
+      Pick<
+        Me,
+        'name' | 'women_only' | 'facebook_handle' | 'instagram_handle' | 'bio' | 'preferences'
+      >
+    >,
   ) => request<Me>('/v1/me', { method: 'PATCH', body: patch }),
 
   /** Uploads a photo. The server re-encodes it; this sends the bytes as they are. */

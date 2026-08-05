@@ -327,6 +327,7 @@ export function Field({
   autoCapitalize,
   valid,
   compact,
+  multiline,
 }: {
   label: string;
   value: string;
@@ -338,19 +339,23 @@ export function Field({
   /** Draws the pine underline once the value parses. */
   valid?: boolean;
   compact?: boolean;
+  /** For a few sentences rather than a name. */
+  multiline?: boolean;
 }) {
   return (
     <View style={[styles.field, compact && styles.fieldCompact, valid && styles.fieldValid]}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
         testID={testID}
-        style={styles.fieldInput}
+        style={[styles.fieldInput, multiline && styles.fieldMultiline]}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={colors.muted}
         keyboardType={keyboardType}
         autoCapitalize={autoCapitalize}
+        multiline={multiline}
+        textAlignVertical={multiline ? 'top' : undefined}
       />
     </View>
   );
@@ -573,6 +578,7 @@ const styles = StyleSheet.create({
   },
   fieldCompact: { flex: 1 },
   fieldValid: { borderBottomColor: colors.primary },
+  fieldMultiline: { minHeight: 88 },
   fieldLabel: { ...type.caption, fontSize: 12, color: colors.muted },
   fieldInput: { ...type.body, color: colors.ink, paddingVertical: 4, minHeight: 30 },
 

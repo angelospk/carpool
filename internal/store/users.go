@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"carpool/internal/domain"
 )
 
 // ErrNotFound is returned when a lookup matches no row.
@@ -30,6 +32,12 @@ type User struct {
 	Status          string
 	FacebookHandle  *string
 	InstagramHandle *string
+	// Bio is the two lines somebody wrote about themselves. Rendered as plain
+	// text and never as markup, which is why nothing here strips anything.
+	Bio *string
+	// Preferences is what their rides are like, from a closed vocabulary. It
+	// describes; it does not enforce.
+	Preferences []string
 }
 
 // Region is a περιφερειακή ενότητα: the geography a fuel price is quoted for
@@ -85,17 +93,50 @@ func GetUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (User, error
 		SELECT id, phone, name, photo_url,
 		       (SELECT encode(substring(sha256 from 1 for 6), 'hex') FROM profile_photos WHERE user_id = users.id),
 		       gender, home_region_id, women_only, status,
-		       facebook_handle, instagram_handle
+		       facebook_handle, instagram_handle, bio
 		FROM users WHERE id = $1`, id).Scan(
 		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.PhotoVersion, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
-		&u.FacebookHandle, &u.InstagramHandle)
+		&u.FacebookHandle, &u.InstagramHandle, &u.Bio)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
 	if err != nil {
 		return User{}, fmt.Errorf("store: loading user: %w", err)
 	}
+	if u.Preferences, err = preferencesOf(ctx, pool, id); err != nil {
+		return User{}, err
+	}
 	return u, nil
+}
+
+// preferencesOf reads somebody's chosen tags, in the vocabulary's own order so
+// that two profiles with the same preferences read the same way round.
+func preferencesOf(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) ([]string, error) {
+	rows, err := pool.Query(ctx, `SELECT tag FROM user_preferences WHERE user_id = $1`, id)
+	if err != nil {
+		return nil, fmt.Errorf("store: loading preferences: %w", err)
+	}
+	defer rows.Close()
+
+	chosen := map[string]bool{}
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			return nil, fmt.Errorf("store: scanning a preference: %w", err)
+		}
+		chosen[tag] = true
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("store: loading preferences: %w", rows.Err())
+	}
+
+	var out []string
+	for _, tag := range domain.PreferenceTags() {
+		if chosen[tag] {
+			out = append(out, tag)
+		}
+	}
+	return out, nil
 }
 
 // UserByPhone loads the account for a verified number, or ErrNotFound.
@@ -110,10 +151,10 @@ func UserByPhone(ctx context.Context, pool *pgxpool.Pool, phone string) (User, e
 		SELECT id, phone, name, photo_url,
 		       (SELECT encode(substring(sha256 from 1 for 6), 'hex') FROM profile_photos WHERE user_id = users.id),
 		       gender, home_region_id, women_only, status,
-		       facebook_handle, instagram_handle
+		       facebook_handle, instagram_handle, bio
 		FROM users WHERE phone = $1`, phone).Scan(
 		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.PhotoVersion, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
-		&u.FacebookHandle, &u.InstagramHandle)
+		&u.FacebookHandle, &u.InstagramHandle, &u.Bio)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -135,6 +176,12 @@ type UserUpdate struct {
 	Gender          *string
 	WomenOnly       *bool
 	RegionID        *uuid.UUID
+	// Bio follows the handles' rule: nil leaves it, an empty string clears it.
+	Bio *string
+	// Preferences is a replacement, not an addition. nil leaves them alone; a
+	// non-nil slice is the whole new set, because "untick the one I ticked by
+	// mistake" has to be expressible and a merge cannot express it.
+	Preferences *[]string
 }
 
 // UpdateUser applies a partial profile update and returns the new state.
@@ -148,22 +195,57 @@ func UpdateUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, up UserUp
 			home_region_id   = COALESCE($5, home_region_id),
 			facebook_handle  = CASE WHEN $6::text IS NULL THEN facebook_handle  ELSE NULLIF($6, '') END,
 			instagram_handle = CASE WHEN $7::text IS NULL THEN instagram_handle ELSE NULLIF($7, '') END,
+			bio              = CASE WHEN $8::text IS NULL THEN bio              ELSE NULLIF($8, '') END,
 			updated_at       = now()
 		WHERE id = $1
 		RETURNING id, phone, name, photo_url,
 		          (SELECT encode(substring(sha256 from 1 for 6), 'hex') FROM profile_photos WHERE user_id = users.id),
 		          gender, home_region_id, women_only, status,
-		          facebook_handle, instagram_handle`,
-		id, up.Name, up.Gender, up.WomenOnly, up.RegionID, up.FacebookHandle, up.InstagramHandle).Scan(
+		          facebook_handle, instagram_handle, bio`,
+		id, up.Name, up.Gender, up.WomenOnly, up.RegionID, up.FacebookHandle, up.InstagramHandle, up.Bio).Scan(
 		&u.ID, &u.Phone, &u.Name, &u.PhotoURL, &u.PhotoVersion, &u.Gender, &u.HomeRegionID, &u.WomenOnly, &u.Status,
-		&u.FacebookHandle, &u.InstagramHandle)
+		&u.FacebookHandle, &u.InstagramHandle, &u.Bio)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
 	if err != nil {
 		return User{}, fmt.Errorf("store: updating user: %w", err)
 	}
+
+	// Replaced wholesale rather than merged, in one statement pair, so that a
+	// half-applied set is not a state anybody can observe.
+	if up.Preferences != nil {
+		if err := replacePreferences(ctx, pool, id, *up.Preferences); err != nil {
+			return User{}, err
+		}
+	}
+	if u.Preferences, err = preferencesOf(ctx, pool, id); err != nil {
+		return User{}, err
+	}
 	return u, nil
+}
+
+func replacePreferences(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, tags []string) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("store: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `DELETE FROM user_preferences WHERE user_id = $1`, id); err != nil {
+		return fmt.Errorf("store: clearing preferences: %w", err)
+	}
+	for _, tag := range tags {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO user_preferences (user_id, tag) VALUES ($1, $2)`, id, tag); err != nil {
+			return fmt.Errorf("store: saving preference %q: %w", tag, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("store: commit: %w", err)
+	}
+	return nil
 }
 
 // ListRegions returns every region, alphabetically.
