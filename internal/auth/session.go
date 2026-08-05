@@ -110,6 +110,22 @@ func (s *SessionService) Refresh(ctx context.Context, refreshToken string, attem
 		return TokenPair{}, fmt.Errorf("auth: loading refresh token: %w", err)
 	}
 
+	// Suspending an account revokes its tokens, so this is usually caught by the
+	// revoked check below. It is asked anyway because the two are different
+	// invariants: that one is "the credential was withdrawn", this one is "the
+	// account may not be used", and a rotation path with three exits should not
+	// depend on the first to enforce the second.
+	var status string
+	if err := tx.QueryRow(ctx, `SELECT status FROM users WHERE id = $1`, userID).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return TokenPair{}, ErrInvalidRefresh
+		}
+		return TokenPair{}, fmt.Errorf("auth: loading the account: %w", err)
+	}
+	if status != "active" {
+		return TokenPair{}, ErrInvalidRefresh
+	}
+
 	if usedAt != nil && attemptID != uuid.Nil && usedBy != nil && *usedBy == attemptID {
 		// The same request arriving twice. Hand back exactly what the first one
 		// minted; minting anything new here would invalidate the answer the

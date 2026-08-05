@@ -126,6 +126,15 @@ func (d Deps) handleOTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Checked here as well as in the middleware, because this is the one door
+	// that issues a session rather than presenting one. Told after the code is
+	// verified, not before: somebody holding the number is entitled to know why
+	// they cannot get in, and a stranger guessing at it never gets this far.
+	if user.Status != "active" {
+		writeError(w, http.StatusForbidden, "account_suspended", "this account cannot be used")
+		return
+	}
+
 	pair, err := d.Sessions.Create(r.Context(), user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not start a session")

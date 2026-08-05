@@ -28,6 +28,7 @@ import (
 	"carpool/internal/geo"
 	"carpool/internal/invites"
 	"carpool/internal/jobs"
+	"carpool/internal/moderation"
 	"carpool/internal/outbox"
 	"carpool/internal/push"
 	"carpool/internal/standing"
@@ -154,20 +155,21 @@ func run() error {
 	sessions := auth.NewSessionService(pool, clk, issuer)
 
 	srv := api.NewServer(cfg.HTTPAddr, api.NewRouter(api.Deps{
-		Ready:    pool.Ping,
-		Pool:     pool,
-		Clock:    clk,
-		Issuer:   issuer,
-		OTP:      auth.NewOTPService(pool, clk, sms),
-		Signup:   auth.NewSignupService(pool, clk),
-		Sessions: sessions,
-		Asks:     askSvc,
-		Standing: standing.NewService(pool, clk),
-		Bookings: bookings.NewService(pool, clk),
-		Invites:  invites.NewService(pool, clk, cfg.InviteOnly),
-		DevMode:  cfg.DevMode,
-		Account:  account.NewService(pool, clk),
-		Drivers:  drivers.NewService(pool, clk),
+		Ready:      pool.Ping,
+		Pool:       pool,
+		Clock:      clk,
+		Issuer:     issuer,
+		OTP:        auth.NewOTPService(pool, clk, sms),
+		Signup:     auth.NewSignupService(pool, clk),
+		Sessions:   sessions,
+		Asks:       askSvc,
+		Standing:   standing.NewService(pool, clk),
+		Bookings:   bookings.NewService(pool, clk),
+		Invites:    invites.NewService(pool, clk, cfg.InviteOnly),
+		DevMode:    cfg.DevMode,
+		Account:    account.NewService(pool, clk),
+		Drivers:    drivers.NewService(pool, clk),
+		Moderation: moderation.NewService(pool, clk),
 		// Keyed on the JWT secret: the phone-change codes are stored as an HMAC
 		// rather than a bare hash, and this is the key that makes a leaked
 		// table useless without it.

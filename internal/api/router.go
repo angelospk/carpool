@@ -19,6 +19,7 @@ import (
 	"carpool/internal/geo"
 	"carpool/internal/invites"
 	"carpool/internal/jobs"
+	"carpool/internal/moderation"
 	"carpool/internal/standing"
 	"carpool/internal/ws"
 )
@@ -55,6 +56,9 @@ type Deps struct {
 	// Drivers records a driver's car, and works out what it drinks so that the
 	// driver does not get to say.
 	Drivers *drivers.Service
+	// Moderation files complaints, works the queue and carries out what is
+	// decided — including the cascade that a suspension is.
+	Moderation *moderation.Service
 
 	// PhoneChange moves an account to another number, which is a change of
 	// credential rather than of profile: see internal/auth/phone_change.go.
@@ -124,7 +128,7 @@ func NewRouter(deps Deps) http.Handler {
 		})
 
 		r.Group(func(r chi.Router) {
-			r.Use(requireAuth(deps.Issuer))
+			r.Use(requireAuth(deps.Issuer, deps.Pool))
 
 			r.Get("/me", deps.handleGetMe)
 			r.Patch("/me", deps.handlePatchMe)
@@ -161,6 +165,9 @@ func NewRouter(deps Deps) http.Handler {
 			r.Get("/places/points", deps.handleMeetingPoints)
 			r.Post("/places/points", deps.handleProposeMeetingPoint)
 			r.Get("/me/meeting-points", deps.handleMyMeetingPointProposals)
+			if deps.Moderation != nil {
+				r.Get("/me/reports", deps.handleMyReports)
+			}
 
 			// Moderation. The check is a database read on every request, so a
 			// revoked moderator stops being one at once rather than when their
@@ -171,6 +178,13 @@ func NewRouter(deps Deps) http.Handler {
 				r.Post("/meeting-points/{id}/approve", deps.handleDecideMeetingPoint(true))
 				r.Post("/meeting-points/{id}/reject", deps.handleDecideMeetingPoint(false))
 				r.Post("/meeting-points/edit", deps.handleModeratorEdit)
+
+				if deps.Moderation != nil {
+					r.Get("/reports", deps.handleOpenReports)
+					r.Post("/reports/{id}/dismiss", deps.handleDecideReport(false))
+					r.Post("/reports/{id}/suspend", deps.handleDecideReport(true))
+					r.Post("/users/{id}/reinstate", deps.handleReinstate)
+				}
 			})
 
 			if deps.Router != nil {
@@ -220,7 +234,9 @@ func NewRouter(deps Deps) http.Handler {
 				r.Head("/photo", deps.handleGetPhoto)
 				r.Post("/block", deps.handleBlockUser)
 				r.Delete("/block", deps.handleUnblockUser)
-				r.Post("/report", deps.handleReportUser)
+				if deps.Moderation != nil {
+					r.Post("/report", deps.handleReportUser)
+				}
 			})
 		})
 	})

@@ -9,6 +9,7 @@ import (
 
 	"carpool/internal/bookings"
 	"carpool/internal/domain"
+	"carpool/internal/moderation"
 	"carpool/internal/store"
 )
 
@@ -308,8 +309,20 @@ func (d Deps) handleReportUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := store.ReportUser(r.Context(), d.Pool, caller, targetID, body.Reason); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	// Through the moderation service rather than straight into the table, so
+	// that the report joins a queue somebody works through and counts against
+	// the daily limit that keeps that queue workable.
+	err := d.Moderation.File(r.Context(), caller, targetID, body.Reason)
+	switch {
+	case errors.Is(err, moderation.ErrTooManyReports):
+		writeError(w, http.StatusTooManyRequests, "report_rate_limited",
+			"that is a lot of reports for one day; the ones you have filed are being looked at")
+		return
+	case errors.Is(err, moderation.ErrNoAccount):
+		writeError(w, http.StatusNotFound, "not_found", "no such account")
+		return
+	case err != nil:
+		writeError(w, http.StatusBadRequest, "invalid_request", "the report was rejected")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
