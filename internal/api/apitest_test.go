@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"carpool/internal/bookings"
 	"carpool/internal/clock"
 	"carpool/internal/drivers"
+	"carpool/internal/geo"
 	"carpool/internal/invites"
 	"carpool/internal/moderation"
 	"carpool/internal/standing"
@@ -220,4 +222,54 @@ func (h *harness) mustQuery(sql string, dest ...any) {
 	if err := h.pool.QueryRow(context.Background(), sql, args...).Scan(scan...); err != nil {
 		h.t.Fatalf("query %q: %v", sql, err)
 	}
+}
+
+// OSRMEnv names the environment variable holding a routing service for the
+// handful of tests that cannot be written without one.
+const OSRMEnv = "CARPOOL_TEST_OSRM"
+
+// newRoutingHarness is the harness with a real router wired in.
+//
+// A real one rather than a fake because Deps.Router is a concrete *geo.OSRM,
+// and the alternative — turning it into an interface so a test can substitute a
+// stub — would be changing production code to suit a test. The same trade the
+// database harness already makes.
+//
+// Skipped when no service is configured, so a unit-only run stays fast.
+func newRoutingHarness(t *testing.T) *harness {
+	t.Helper()
+
+	base := os.Getenv(OSRMEnv)
+	if base == "" {
+		t.Skipf("%s is not set; skipping the routing test", OSRMEnv)
+	}
+
+	h := newHarness(t)
+	h.router = api.NewRouter(api.Deps{
+		Ready: h.pool.Ping, Pool: h.pool, Clock: h.clock,
+		Issuer:   auth.NewTokenIssuer(testSecret, h.clock),
+		OTP:      auth.NewOTPService(h.pool, h.clock, h.sms),
+		Signup:   auth.NewSignupService(h.pool, h.clock),
+		Sessions: auth.NewSessionService(h.pool, h.clock, auth.NewTokenIssuer(testSecret, h.clock)),
+		Invites:  invites.NewService(h.pool, h.clock, false),
+		Drivers:  drivers.NewService(h.pool, h.clock),
+		Router:   geo.NewOSRM(base, nil),
+	})
+	return h
+}
+
+// countRows counts every table an estimate might touch if it wrote anything,
+// which is the point: it should touch none of them.
+func (h *harness) countRows() map[string]int {
+	h.t.Helper()
+	out := map[string]int{}
+	for _, table := range []string{"ride_requests", "trip_occurrences", "asks", "bookings", "route_templates"} {
+		var n int
+		if err := h.pool.QueryRow(context.Background(),
+			`SELECT count(*) FROM `+table).Scan(&n); err != nil {
+			h.t.Fatalf("counting %s: %v", table, err)
+		}
+		out[table] = n
+	}
+	return out
 }

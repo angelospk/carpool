@@ -9,6 +9,7 @@ import { ApiError } from '../../src/api/client';
 import { Button, Card, Hint, Screen, Stepper, Title } from '../../src/components/ui';
 import { PlaceField } from '../../src/components/PlaceField';
 import { LuggagePicker } from '../../src/components/LuggagePicker';
+import { Estimate } from '../../src/components/Estimate';
 import { colors, space, type } from '../../src/design/tokens';
 import { type Pin } from '../../src/design/pin';
 
@@ -83,6 +84,8 @@ export default function SearchScreen() {
               />
             </View>
           </View>
+
+          <Estimate testID="estimate" from={from} to={to} />
 
           <LuggagePicker testID="luggage" value={luggage} onChange={setLuggage} />
 

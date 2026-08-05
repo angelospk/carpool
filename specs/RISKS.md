@@ -376,6 +376,50 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
     could have done in one tap. This is the first thing the map should fix when
     there is one.
 
+## The legal premise is thinner than the code assumes (raised 2026-08-05)
+
+Every comment in the pricing path leans on the same sentence: άρθρο 18
+ν. 1903/1990, as amended by άρθρο 36 ν. 4663/2020, fines a private driver
+carrying passengers με κόμιστρο, so the formula makes full recovery
+arithmetically impossible and the driver can say they did not come out ahead.
+
+A review of the estimate work pushed back on that, and the objection is worth
+recording rather than arguing with in a commit message:
+
+- Άρθρο 18(1) concerns transport for remuneration **assigned to another carrier
+  or person**. It is not a general cost-sharing safe harbour, and reading it as
+  one is doing more work with it than it can carry.
+- Άρθρο 1 ν.δ. 4354/1964 uses broader language — passenger fare, total hire, or
+  "any other remuneration" — and whether genuine proportional expense-sharing
+  falls outside it is not settled by reading the text.
+- Άρθρο 12 ν. 4530/2018 makes *influencing the price* relevant to how an
+  electronic intermediary is characterised. This app computes the figure both
+  sides see, which is influence by any ordinary reading, even though the
+  provision's express scheme is about public-use vehicles.
+
+So: "the driver can never recover the whole fuel cost" is good evidence of
+non-profit design and is **not** proof that the contribution is not κόμιστρο.
+The code has always said "a risk control, not a safe harbour"; the risk is
+larger than that phrasing suggests.
+
+Before any public launch, a written Greek transport-law opinion covering:
+
+1. The current force and reading of ν.δ. 4354/1964.
+2. Whether proportional fuel-only contribution is legally distinct from
+   remuneration.
+3. Whether the platform computing the number amounts to influencing the price.
+4. Insurance treatment of expense-sharing with strangers.
+5. Tax, receipt and platform-fee treatment.
+
+Until then, nothing in the pricing path should grow: no tolls beyond what is
+already there, no depreciation, no insurance component, no percentage fee. Each
+of those moves the contribution further from "what the fuel cost" and closer to
+the thing the statute is about.
+
+The planning estimate added on 2026-08-05 was written with this in mind — it
+carries a "not an offer, no driver has agreed" sentence in the UI — but that is
+mitigation, not an answer.
+
 ## Deferred tech (parked, with triggers to revisit)
 
 | Deferred | Revisit when |

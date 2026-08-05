@@ -202,6 +202,10 @@ func NewRouter(deps Deps) http.Handler {
 
 			if deps.Router != nil {
 				r.Post("/routes", deps.handleCreateRoute)
+				// A POST because it carries coordinates: a query string ends up
+				// in proxy logs, analytics and history, and a pair of
+				// coordinates is where somebody lives and where they go.
+				r.Post("/estimates", deps.handleEstimate)
 			}
 			if deps.Asks != nil {
 				r.Post("/requests", deps.handleCreateRequest)

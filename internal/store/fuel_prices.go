@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -28,6 +29,10 @@ type FuelPrice struct {
 	// back a year later as though somebody had checked the pump in Ρόδο.
 	Regional bool
 	Source   string
+	// UpdatedAt is when this figure was last moved. A contribution built on a
+	// six-month-old price is worth less than one built on last week's, and only
+	// this says which it is.
+	UpdatedAt time.Time
 }
 
 // FuelPrices is a national figure per liquid, which is how the app is seeded.
@@ -76,13 +81,13 @@ func FuelPriceAt(ctx context.Context, pool *pgxpool.Pool, lon, lat float64, fuel
 
 	out := FuelPrice{RegionID: region.ID, RegionName: region.Name}
 	err = pool.QueryRow(ctx, `
-		SELECT price_eur, region_id IS NOT NULL, source
+		SELECT price_eur, region_id IS NOT NULL, source, updated_at
 		FROM fuel_prices
 		WHERE fuel = $1 AND (region_id = $2 OR region_id IS NULL)
 		-- The specific figure wins; the national one stands in when nobody has
 		-- looked this prefecture up.
 		ORDER BY region_id IS NULL
-		LIMIT 1`, kind, region.ID).Scan(&out.PriceEUR, &out.Regional, &out.Source)
+		LIMIT 1`, kind, region.ID).Scan(&out.PriceEUR, &out.Regional, &out.Source, &out.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return FuelPrice{}, ErrNoFuelPrice
 	}

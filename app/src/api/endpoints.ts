@@ -98,6 +98,21 @@ export type PreferenceTag = (typeof PREFERENCE_TAGS)[number];
  */
 export const LUGGAGE_SIZES = ['none', 'cabin', 'suitcase', 'bulky'] as const;
 
+/** A guess made before any driver exists. Never a receipt — see the `kind`. */
+export type PlanningEstimate = {
+  kind: 'planning_estimate';
+  route_km: number;
+  route_min: number;
+  contribution_cents: number;
+  assumptions: {
+    version: string;
+    divisor: number;
+    cost_per_km_cents: number;
+    fuel_price_as_of?: string;
+    region_name?: string;
+  };
+};
+
 export type LuggageSize = (typeof LUGGAGE_SIZES)[number];
 
 /** The pairs that cannot both be true, so the picker can grey one out. */
@@ -393,6 +408,24 @@ export const api = {
       method: 'POST',
       body,
     }),
+
+  /**
+   * Roughly what a seat on a trip like this tends to cost, before any driver
+   * has seen it.
+   *
+   * A POST because it carries coordinates: a query string ends up in proxy
+   * logs, analytics and browser history, and a pair of coordinates is where
+   * somebody lives and where they go.
+   *
+   * It is not an offer. Nobody has agreed to anything and no car is known, so
+   * the screen showing it has to keep saying so.
+   */
+  estimate: (body: {
+    origin_lon: number;
+    origin_lat: number;
+    destination_lon: number;
+    destination_lat: number;
+  }) => request<PlanningEstimate>('/v1/estimates', { method: 'POST', body }),
 
   createRequest: (body: {
     origin_lon: number;
