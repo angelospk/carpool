@@ -34,6 +34,20 @@ type PricingInputs struct {
 
 	Mode PricingMode
 
+	// ContributionShare is how much of the computed cost share this driver
+	// actually asks for, between zero (exclusive) and one.
+	//
+	// The app computes the ceiling; the driver decides where under it they sit.
+	// That distinction is the point: an app that sets the figure is influencing
+	// the price, and one that caps it is preventing a profit. Our own terms
+	// already call the contribution a private arrangement between the two
+	// people — this is what makes that true.
+	//
+	// Zero is not "ask nothing", because PricingFree already says that. A zero
+	// here is a caller that forgot the field, and it is read as one: see
+	// shareOf.
+	ContributionShare float64
+
 	// ConsumptionSource names where FuelConsumptionLPer100Km came from — a
 	// dataset match, the CO2 on the car's registration document, or a floor for
 	// its class. It changes nothing about the arithmetic and everything about
@@ -121,6 +135,10 @@ type Basis struct {
 	ConsumptionLPer100Km float64 `json:"consumption_l_100km"`
 	ConsumptionSource    string  `json:"consumption_source,omitempty"`
 	FuelPriceEUR         float64 `json:"fuel_price_eur"`
+	// ContributionShare is how much of the computed share the driver asked for.
+	// One means all of it, which is what every route published before drivers
+	// could choose was implicitly asking.
+	ContributionShare float64 `json:"contribution_share,omitempty"`
 	// What the price was for and where it came from. Every one of these moves
 	// under a booking that has already happened — the driver changes car, a
 	// prefecture gets its own figure, the national number is corrected — which
@@ -161,6 +179,7 @@ func SuggestedPrice(in PricingInputs) (int, Basis) {
 		WearFactor:           in.WearFactor,
 		OfferedSeats:         in.OfferedSeats,
 		FreeBelowKm:          in.FreeBelowKm,
+		ContributionShare:    shareOf(in),
 		TollShareCents:       in.TollShareCents,
 		Mode:                 string(in.Mode),
 	}
@@ -203,10 +222,31 @@ func suggest(in PricingInputs, basis *Basis) int {
 	// Then floor to the step. Floor, not nearest: rounding 0.63 € up to 1.00 €
 	// is the same arithmetic that produced the overcharge above, in miniature,
 	// and it can only ever move money towards the driver.
+	// What the driver actually asks for, at or below the share the whole car
+	// works out to. It can only ever lower the figure, which is what keeps the
+	// no-profit arithmetic true a fortiori.
+	perPax *= shareOf(in)
+
 	cents := math.Round(perPax * 100)
 	rounded := math.Floor(cents/priceStepCents) * priceStepCents
 	if rounded < 0 {
 		rounded = 0
 	}
 	return int(rounded) + in.TollShareCents
+}
+
+// shareOf reads the driver's chosen fraction, defaulting a missing one to all
+// of it.
+//
+// All of it, rather than none, because that is what every route published
+// before drivers could choose was implicitly asking for — and because the
+// alternative default would have a forgotten field silently publish a route
+// that asks for nothing, which is the same landmine the detour budget had.
+// Anything outside (0, 1] is a caller that got it wrong, and is read the same
+// way: the figure the app would have produced on its own.
+func shareOf(in PricingInputs) float64 {
+	if in.ContributionShare <= 0 || in.ContributionShare > 1 {
+		return 1
+	}
+	return in.ContributionShare
 }

@@ -40,6 +40,16 @@
     "retry": "Try again",
     "save": "Save"
   },
+  "contribution": {
+    "label": "What do you ask for towards the fuel?",
+    "share": {
+      "100": "The whole share",
+      "75": "Three quarters",
+      "50": "Half",
+      "25": "A quarter"
+    },
+    "hint": "You decide what you ask for. The app works out what the trip burns and will not let you ask for more than your share — profit is not allowed. If you want nothing, choose “free” above."
+  },
   "estimate": {
     "about": "Estimated share of the fuel: about {{amount}}",
     "basis": "For {{km}} km, with a typical car and {{seats}} seats offered.",

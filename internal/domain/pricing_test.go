@@ -334,3 +334,94 @@ func TestAPriceCanBeRecomputedFromItsBasisAlone(t *testing.T) {
 		}
 	}
 }
+
+// The app computes a ceiling; the driver decides where under it they sit.
+//
+// That distinction is the whole point of the field. An app that sets the figure
+// is influencing the price; one that caps it is preventing a profit — and our
+// own terms already call the contribution a private arrangement between the two
+// people, which this is what makes true.
+func TestTheDriverAsksForAShareOfWhatTheAppWorksOut(t *testing.T) {
+	full := PricingInputs{
+		TripKm: 100, FuelConsumptionLPer100Km: 6.0, FuelPriceEUR: 1.80,
+		WearFactor: 1.0, OfferedSeats: 3, Mode: PricingFormula,
+		ContributionShare: 1.0,
+	}
+	half := full
+	half.ContributionShare = 0.5
+
+	atMost, _ := SuggestedPrice(full)
+	asked, _ := SuggestedPrice(half)
+
+	if atMost != 250 {
+		t.Fatalf("the ceiling is %d cents, expected 250", atMost)
+	}
+	if asked != 100 {
+		// 10,80 € over four is 2,70; half of that is 1,35, floored to 1,00.
+		t.Errorf("half the share came to %d cents, want 100", asked)
+	}
+	if asked >= atMost {
+		t.Errorf("asking for half (%d) is not below the ceiling (%d)", asked, atMost)
+	}
+}
+
+// A share can only ever lower the figure, which is what keeps the no-profit
+// arithmetic true a fortiori: if every seat at the full share comes to less
+// than the trip cost, every seat at a fraction of it does too.
+func TestAShareCanOnlyLowerWhatIsAsked(t *testing.T) {
+	base := PricingInputs{
+		TripKm: 240, FuelConsumptionLPer100Km: 7.0, FuelPriceEUR: 1.85,
+		WearFactor: 1.0, OfferedSeats: 2, Mode: PricingFormula,
+	}
+	ceiling, _ := SuggestedPrice(base)
+
+	for _, share := range []float64{0.1, 0.25, 0.5, 0.75, 0.99, 1.0} {
+		in := base
+		in.ContributionShare = share
+		got, _ := SuggestedPrice(in)
+
+		if got > ceiling {
+			t.Errorf("a share of %v asked %d, above the %d ceiling", share, got, ceiling)
+		}
+	}
+}
+
+// A forgotten field asks for the whole share, not for nothing.
+//
+// All of it is what every route published before drivers could choose was
+// implicitly asking for. The other default would have one missing line quietly
+// publish a route that charges nothing — the same landmine the detour budget
+// had, and not one worth building twice.
+func TestAMissingShareAsksForAllOfIt(t *testing.T) {
+	stated := PricingInputs{
+		TripKm: 100, FuelConsumptionLPer100Km: 6.0, FuelPriceEUR: 1.80,
+		WearFactor: 1.0, OfferedSeats: 3, Mode: PricingFormula,
+		ContributionShare: 1.0,
+	}
+	forgotten := stated
+	forgotten.ContributionShare = 0
+
+	want, _ := SuggestedPrice(stated)
+	got, basis := SuggestedPrice(forgotten)
+
+	if got != want {
+		t.Errorf("a forgotten share asked %d, want the full %d", got, want)
+	}
+	if basis.ContributionShare != 1 {
+		t.Errorf("the receipt records a share of %v", basis.ContributionShare)
+	}
+}
+
+// And the receipt says what the driver chose, because a price read back a year
+// later is otherwise inexplicable: the arithmetic would not reproduce it.
+func TestTheReceiptRecordsTheShareTheDriverChose(t *testing.T) {
+	_, basis := SuggestedPrice(PricingInputs{
+		TripKm: 100, FuelConsumptionLPer100Km: 6.0, FuelPriceEUR: 1.80,
+		WearFactor: 1.0, OfferedSeats: 3, Mode: PricingFormula,
+		ContributionShare: 0.5,
+	})
+
+	if basis.ContributionShare != 0.5 {
+		t.Errorf("the receipt records %v, want 0.5", basis.ContributionShare)
+	}
+}

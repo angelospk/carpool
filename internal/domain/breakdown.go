@@ -53,7 +53,11 @@ type Breakdown struct {
 	FuelCostCents int `json:"fuel_cost_cents"`
 	Divisor       int `json:"divisor"`
 	ShareCents    int `json:"share_cents"`
-	RoundedCents  int `json:"rounded_cents"`
+	// ContributionShare is what the driver asked for out of that, between zero
+	// and one. Below one it is the reason the rounded figure is lower than the
+	// division above it, and without it the sum on screen does not follow.
+	ContributionShare float64 `json:"contribution_share"`
+	RoundedCents      int     `json:"rounded_cents"`
 	// TollShareCents is added after the rounding and outside the waiver: a
 	// barrier is cash the driver handed over, not an estimate, and rounding an
 	// exact number would make it approximate for no reason.
@@ -84,6 +88,7 @@ func BreakdownOf(b Basis) Breakdown {
 		PriceIsRegional:      b.PriceIsRegional,
 		PriceSource:          b.PriceSource,
 		TripKm:               b.TripKm,
+		ContributionShare:    b.ContributionShare,
 		FuelCostCents:        int(math.Round(b.CostEUR * 100)),
 		Divisor:              b.OfferedSeats + 1,
 		TollShareCents:       b.TollShareCents,

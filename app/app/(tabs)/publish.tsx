@@ -18,6 +18,7 @@ import {
 } from '../../src/components/ui';
 import { VehiclePicker } from '../../src/components/VehiclePicker';
 import { LuggagePicker } from '../../src/components/LuggagePicker';
+import { ContributionChoice } from '../../src/components/ContributionChoice';
 import { colors, space, type } from '../../src/design/tokens';
 import { type Pin } from '../../src/design/pin';
 import { PlaceField } from '../../src/components/PlaceField';
@@ -59,6 +60,9 @@ export default function PublishScreen() {
   // sends and what the server would have chosen anyway.
   const [vehicleID, setVehicleID] = useState<string | null>(null);
   const [luggage, setLuggage] = useState<LuggageSize>('suitcase');
+  // All of it until the driver says otherwise, which is what every route
+  // published before they could choose was implicitly asking for.
+  const [share, setShare] = useState(1);
   const [outcome, setOutcome] = useState<string | null>(null);
 
 
@@ -83,6 +87,7 @@ export default function PublishScreen() {
         ...(detourKm !== null ? { detour_km: detourKm } : {}),
         ...(vehicleID !== null ? { vehicle_id: vehicleID } : {}),
         luggage,
+        contribution_share: share,
       }),
     onSuccess: (r) => setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`),
     onError: (e) =>
@@ -173,6 +178,8 @@ export default function PublishScreen() {
           <VehiclePicker testID="publish-vehicle" value={vehicleID} onChange={setVehicleID} />
 
           <LuggagePicker testID="publish-luggage" value={luggage} onChange={setLuggage} asDriver />
+
+          <ContributionChoice testID="publish-share" value={share} onChange={setShare} />
 
           <View style={styles.seats}>
             <Text style={styles.seatsLabel}>{t('publish.seats')}</Text>

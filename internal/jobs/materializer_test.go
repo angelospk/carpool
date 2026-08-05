@@ -768,3 +768,42 @@ func TestABookedDepartureKeepsTheAllowanceItWasBookedWith(t *testing.T) {
 		t.Errorf("a booked departure became %q; it was booked as bulky", stored)
 	}
 }
+
+// The share follows the route onto departures nobody has booked, and stops at
+// the ones somebody has — the same rule as the car and the luggage, because it
+// is the same kind of promise.
+func TestMaterializeCarriesTheContributionShare(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t, time.Monday)
+
+	if _, err := f.pool.Exec(ctx, `UPDATE route_templates SET contribution_share = 0.50`); err != nil {
+		t.Fatalf("setting the share: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	share := func() float64 {
+		t.Helper()
+		var got float64
+		if err := f.pool.QueryRow(ctx,
+			`SELECT contribution_share FROM trip_occurrences ORDER BY service_date LIMIT 1`).Scan(&got); err != nil {
+			t.Fatalf("reading the share: %v", err)
+		}
+		return got
+	}
+	if got := share(); got != 0.5 {
+		t.Errorf("the departure asks for %v, want the route's 0.5", got)
+	}
+
+	// Changed on the route, followed by an unbooked departure.
+	if _, err := f.pool.Exec(ctx, `UPDATE route_templates SET contribution_share = 0.25`); err != nil {
+		t.Fatalf("changing the share: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if got := share(); got != 0.25 {
+		t.Errorf("an unbooked departure still asks for %v after the route changed", got)
+	}
+}

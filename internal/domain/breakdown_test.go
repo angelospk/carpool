@@ -228,3 +228,25 @@ func TestTheShareIsDividedOutOfTheUnroundedCost(t *testing.T) {
 			b.ShareCents, b.FuelCostCents/b.Divisor, b.FuelCostCents)
 	}
 }
+
+// The driver asking for less than the whole share is why the figure below the
+// division is lower than the division. Without saying so, the arithmetic on
+// screen does not follow and the passenger is looking at a mistake.
+func TestTheBreakdownSaysWhenTheDriverAskedForLess(t *testing.T) {
+	in := inputs()
+	in.ContributionShare = 0.5
+	in.TollShareCents = 0
+
+	cents, basis := domain.SuggestedPrice(in)
+	b := domain.BreakdownOf(basis)
+
+	if b.ContributionShare != 0.5 {
+		t.Errorf("the breakdown records a share of %v, want 0.5", b.ContributionShare)
+	}
+	if b.RoundedCents >= b.ShareCents {
+		t.Errorf("asking for half left %d against a share of %d", b.RoundedCents, b.ShareCents)
+	}
+	if b.TotalCents != cents {
+		t.Errorf("the breakdown totals %d, the price was %d", b.TotalCents, cents)
+	}
+}

@@ -407,6 +407,14 @@ export const api = {
     vehicle_id?: string;
     /** The largest thing this route will take. Omitted means a suitcase. */
     luggage?: LuggageSize;
+    /**
+     * How much of the computed fuel share you ask for, from just above zero to
+     * one. Omitted means all of it.
+     *
+     * The app works out what the fuel comes to and caps you there; this is you
+     * deciding where under that cap you sit.
+     */
+    contribution_share?: number;
   }) => request<{ template_id: string; route_km: number; ends_at_port: boolean }>('/v1/routes', {
       method: 'POST',
       body,

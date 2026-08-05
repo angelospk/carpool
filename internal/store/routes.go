@@ -63,9 +63,13 @@ type CreateRouteTemplateParams struct {
 	// Luggage is the largest thing this route will carry. It lives on the route
 	// rather than on the car for the same reason the detour budget does: "the
 	// boot is full of my own things today" is a statement about today.
-	Luggage         domain.Luggage
-	OSRMDataVersion string
-	Schedule        domain.Schedule
+	Luggage domain.Luggage
+	// ContributionShare is how much of the computed cost share this driver asks
+	// for. The app caps; the driver chooses. Zero means they did not say, which
+	// is read as all of it.
+	ContributionShare float64
+	OSRMDataVersion   string
+	Schedule          domain.Schedule
 }
 
 // CreateRouteTemplate stores a template and its schedule in one transaction: a
@@ -82,19 +86,19 @@ func CreateRouteTemplate(ctx context.Context, pool *pgxpool.Pool, p CreateRouteT
 		INSERT INTO route_templates (
 			driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 			route_geom, route_km, route_min, seats, pricing_mode, osrm_data_version, ends_at_port,
-			allow_stops, detour_km, detour_min, luggage)
+			allow_stops, detour_km, detour_min, luggage, contribution_share)
 		VALUES ($1, $18,
 			ST_SetSRID(ST_MakePoint($2, $3), 4326),
 			ST_SetSRID(ST_MakePoint($4, $5), 4326),
 			$6, $7,
-			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13, $14, $15, $16, $17, $19::luggage_size)
+			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13, $14, $15, $16, $17, $19::luggage_size, $20)
 		RETURNING id`,
 		p.DriverID,
 		p.Origin.Lon, p.Origin.Lat,
 		p.Destination.Lon, p.Destination.Lat,
 		p.OriginLabel, p.DestinationLabel,
 		p.RouteWKT, p.RouteKm, p.RouteMin, p.Seats, string(p.PricingMode), p.OSRMDataVersion, p.EndsAtPort,
-		p.Detour.AllowStops, p.Detour.Km, p.Detour.Min, p.VehicleID, luggageOr(p.Luggage),
+		p.Detour.AllowStops, p.Detour.Km, p.Detour.Min, p.VehicleID, luggageOr(p.Luggage), shareOr(p.ContributionShare),
 	).Scan(&templateID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("store: inserting route template: %w", err)
@@ -234,4 +238,14 @@ func luggageOr(l domain.Luggage) string {
 		return string(domain.LuggageSuitcase)
 	}
 	return string(l)
+}
+
+// shareOr defaults a share nobody set to all of it, matching domain.shareOf and
+// the column's own default. A route published before drivers could choose was
+// implicitly asking for the whole share.
+func shareOr(share float64) float64 {
+	if share <= 0 || share > 1 {
+		return 1
+	}
+	return share
 }

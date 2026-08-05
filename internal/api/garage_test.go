@@ -164,3 +164,34 @@ func TestPublishingWithoutACarSaysSo(t *testing.T) {
 		t.Fatalf("publishing without a car gave %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// The app computes the ceiling; the driver decides where under it they sit.
+// Above it is the one answer the app does not accept.
+func TestARouteCannotAskForMoreThanTheWholeShare(t *testing.T) {
+	// The routing harness because /v1/routes only exists with a router wired;
+	// the share is checked before the route is ever snapped, so OSRM is never
+	// reached.
+	h := newRoutingHarness(t)
+	token, _ := h.signUp("+306901000008", "Οδηγός")
+	h.becomeDriver(token)
+
+	for _, share := range []float64{1.5, 2, -0.5} {
+		rec := h.do(http.MethodPost, "/v1/routes", map[string]any{
+			"origin_lon": 25.80, "origin_lat": 40.85,
+			"destination_lon": 26.00, "destination_lat": 40.85,
+			"origin_label": "A", "destination_label": "B",
+			"seats": 3, "kind": "oneoff",
+			"oneoff_date":     h.clock.Now().Add(48 * time.Hour).Format("2006-01-02"),
+			"depart_earliest": "07:30", "depart_latest": "08:00",
+			"contribution_share": share,
+		}, token)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("a share of %v gave %d, want 400", share, rec.Code)
+			continue
+		}
+		if code := h.errorCode(rec); code != "invalid_share" {
+			t.Errorf("a share of %v gave error %q, want invalid_share", share, code)
+		}
+	}
+}

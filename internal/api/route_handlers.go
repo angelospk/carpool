@@ -38,6 +38,13 @@ type routeBody struct {
 	// suitcase, which is what an ordinary boot takes.
 	Luggage string `json:"luggage"`
 
+	// ContributionShare is how much of the computed cost share this driver
+	// asks for, between zero (exclusive) and one. Absent means all of it, which
+	// is what every route published before drivers could choose was implicitly
+	// asking. The app computes the ceiling; this is the driver deciding where
+	// under it they sit.
+	ContributionShare float64 `json:"contribution_share"`
+
 	// VehicleID names which of the driver's cars this route goes out in.
 	// Absent means their default, which is what somebody with one car sends and
 	// what the app sends until the driver has a second.
@@ -66,6 +73,14 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 	schedule, err := body.schedule()
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	// Above the ceiling is the one answer the app does not accept. Below it is
+	// entirely theirs.
+	if body.ContributionShare < 0 || body.ContributionShare > 1 {
+		writeError(w, http.StatusBadRequest, "invalid_share",
+			"you can ask for up to the whole share of the fuel, not more")
 		return
 	}
 
@@ -152,22 +167,23 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	templateID, err := store.CreateRouteTemplate(r.Context(), d.Pool, store.CreateRouteTemplateParams{
-		DriverID:         userID,
-		VehicleID:        vehicle.ID,
-		Origin:           origin,
-		Destination:      destination,
-		OriginLabel:      body.OriginLabel,
-		DestinationLabel: body.DestinationLabel,
-		RouteWKT:         shaped.WKT(),
-		RouteKm:          shaped.DistanceMeters / 1000,
-		RouteMin:         int(shaped.Duration.Minutes()) + 1,
-		Seats:            body.Seats,
-		PricingMode:      mode,
-		OSRMDataVersion:  d.OSRMDataVersion,
-		EndsAtPort:       shaped.SeaCrossing,
-		Detour:           detour,
-		Luggage:          luggage,
-		Schedule:         schedule,
+		DriverID:          userID,
+		VehicleID:         vehicle.ID,
+		Origin:            origin,
+		Destination:       destination,
+		OriginLabel:       body.OriginLabel,
+		DestinationLabel:  body.DestinationLabel,
+		RouteWKT:          shaped.WKT(),
+		RouteKm:           shaped.DistanceMeters / 1000,
+		RouteMin:          int(shaped.Duration.Minutes()) + 1,
+		Seats:             body.Seats,
+		PricingMode:       mode,
+		OSRMDataVersion:   d.OSRMDataVersion,
+		EndsAtPort:        shaped.SeaCrossing,
+		Detour:            detour,
+		Luggage:           luggage,
+		ContributionShare: body.ContributionShare,
+		Schedule:          schedule,
 	})
 	if err != nil {
 		// The response stays vague on purpose — a rejected route must not
