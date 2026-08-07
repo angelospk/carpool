@@ -111,6 +111,26 @@ func (r *Router) handlePush(ctx context.Context, m outbox.Message) error {
 		})
 		switch {
 		case err == nil:
+			// The provider took it, so this device is real and somebody is
+			// carrying it. Recorded because the retention rule ages tokens by
+			// last use, and a use nobody writes down is a device that looks
+			// abandoned — the rule would then quietly stop notifications for
+			// people who use the app daily.
+			//
+			// GREATEST so the write is monotonic: two deliveries finishing out
+			// of order must not move the timestamp backwards.
+			//
+			// A failure here is logged and not returned. The notification was
+			// delivered; turning a bookkeeping error into a retry would send it
+			// twice, and the cost of losing one such write is that a live token
+			// looks a few hours staler than it is against a two-year cutoff.
+			if _, dbErr := r.pool.Exec(ctx,
+				`UPDATE push_tokens
+				    SET last_used_at = GREATEST($2, COALESCE(last_used_at, $2))
+				  WHERE token = $1`,
+				token, r.clock.Now()); dbErr != nil {
+				slog.Warn("recording push token use", "error", dbErr)
+			}
 		case errors.Is(err, push.ErrDeviceNotRegistered):
 			// Prune the dead token, but do not fail the message: the user's
 			// other devices may have received it.

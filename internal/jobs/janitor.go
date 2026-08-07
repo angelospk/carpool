@@ -126,6 +126,37 @@ func rules() []rule {
 		{"revoked refresh tokens", batch("refresh_tokens",
 			`t.revoked_at < $1::timestamptz - interval '30 days'`)},
 
+		// "Tokens ειδοποιήσεων — μέχρι την απενεργοποίηση, το πολύ 24 μήνες από
+		// την τελευταία χρήση".
+		//
+		// COALESCE rather than a plain comparison, because last_used_at is
+		// nullable and `null < cutoff` is unknown rather than true: a bare
+		// predicate would make every token that predates the column immortal,
+		// which is the failure mode of a retention rule that looks correct.
+		// A token nobody has ever used ages from when it was registered, which
+		// is the only other fact there is about it.
+		{"push tokens unused for two years", batch("push_tokens",
+			`COALESCE(t.last_used_at, t.created_at) < $1::timestamptz - interval '24 months'`)},
+
+		// "Αναφορές και αποκλεισμοί — 36 μήνες", from when the report was filed.
+		//
+		// Filed, not reviewed. Retention is about the event; a moderator opening
+		// a three-year-old report to close it must not thereby grant it another
+		// three years, or a queue nobody works becomes a queue that never
+		// empties.
+		{"reports filed three years ago", batch("reports",
+			`t.created_at < $1::timestamptz - interval '36 months'`)},
+
+		// "Κωδικοί προσκλήσεων — 24 μήνες από την τελευταία χρήση".
+		//
+		// Last use is the last redemption, and a code nobody redeemed ages from
+		// when it was made. The redemptions themselves go with it: they are the
+		// record of who invited whom, which is the same category and the same
+		// period, and the foreign key cascades.
+		{"invite codes unused for two years", batch("invite_codes",
+			`COALESCE((SELECT max(ir.redeemed_at) FROM invite_redemptions ir WHERE ir.code = t.code),
+			          t.created_at) < $1::timestamptz - interval '24 months'`)},
+
 		// "Μηνύματα — 12 μήνες από την ολοκλήρωση της κράτησης ή από το
 		// τελευταίο μήνυμα". Both anchors, so a thread survives until the trip
 		// itself is a year gone *and* nobody has written in a year.

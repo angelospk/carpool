@@ -11,10 +11,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/clock"
+	"carpool/internal/dispatch"
 	"carpool/internal/domain"
 	"carpool/internal/geo"
 	"carpool/internal/jobs"
 	"carpool/internal/match"
+	"carpool/internal/outbox"
+	"carpool/internal/push"
 	"carpool/internal/store"
 	"carpool/internal/store/testdb"
 )
@@ -390,3 +393,187 @@ func TestSignupTicketsGoTheDayAfterTheyDie(t *testing.T) {
 		t.Errorf("signup_tickets: kept %d rows, want the two inside a day of expiry", got)
 	}
 }
+
+// "Tokens ειδοποιήσεων — το πολύ 24 μήνες από την τελευταία χρήση". Nothing
+// recorded the last use until now, so the second half of that promise could not
+// be kept at all.
+func TestAPushTokenGoesTwoYearsAfterItsLastUse(t *testing.T) {
+	f := newJanitorFixture(t)
+	old := retentionNow.AddDate(-2, 0, -1)
+	recent := retentionNow.AddDate(-2, 0, 1)
+
+	// Created long ago, used recently: the use is what counts.
+	f.exec(`INSERT INTO push_tokens (token, user_id, platform, created_at, last_used_at)
+	        VALUES ('used-recently', $1, 'ios', $2, $3)`, f.user, old, recent)
+	// Created long ago, used long ago.
+	f.exec(`INSERT INTO push_tokens (token, user_id, platform, created_at, last_used_at)
+	        VALUES ('long-dead', $1, 'ios', $2, $2)`, f.user, old)
+	// Never used, and old. The fallback to created_at is what makes this
+	// reachable at all: a predicate on a null column is never true, and every
+	// token that predates the column would otherwise live for ever.
+	f.exec(`INSERT INTO push_tokens (token, user_id, platform, created_at)
+	        VALUES ('never-used-old', $1, 'android', $2)`, f.user, old)
+	// Never used, and new.
+	f.exec(`INSERT INTO push_tokens (token, user_id, platform, created_at)
+	        VALUES ('never-used-new', $1, 'android', $2)`, f.user, recent)
+
+	f.run()
+
+	var left []string
+	rows, err := f.pool.Query(context.Background(), `SELECT token FROM push_tokens ORDER BY token`)
+	if err != nil {
+		t.Fatalf("listing tokens: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var tok string
+		if err := rows.Scan(&tok); err != nil {
+			t.Fatalf("scanning: %v", err)
+		}
+		left = append(left, tok)
+	}
+
+	want := []string{"never-used-new", "used-recently"}
+	if fmt.Sprint(left) != fmt.Sprint(want) {
+		t.Errorf("tokens left = %v, want %v", left, want)
+	}
+}
+
+// "Αναφορές και αποκλεισμοί — 36 μήνες", measured from when the report was
+// filed. A moderator looking at it later, or deciding it, does not restart the
+// clock: the retention is about the event, not about the paperwork.
+func TestAReportGoesAfterThirtySixMonths(t *testing.T) {
+	f := newJanitorFixture(t)
+	other := f.secondUser("+306900000077")
+
+	f.exec(`INSERT INTO reports (reporter_id, reported_id, reason, created_at)
+	        VALUES ($1, $2, 'harassment: old', $3)`, f.user, other, retentionNow.AddDate(-3, 0, -1))
+	f.exec(`INSERT INTO reports (reporter_id, reported_id, reason, created_at)
+	        VALUES ($1, $2, 'harassment: recent', $3)`, f.user, other, retentionNow.AddDate(-3, 0, 1))
+	// Reviewed a moment ago, but filed three years and a day ago. Still goes:
+	// working a queue must not grant its oldest items another three years.
+	f.exec(`INSERT INTO reports (reporter_id, reported_id, reason, created_at,
+	                             status, reviewed_by, reviewed_at, resolution)
+	        VALUES ($1, $2, 'harassment: old but recently reviewed', $3,
+	                'dismissed', $1, $4, 'nothing in it')`,
+		f.user, other, retentionNow.AddDate(-3, 0, -1), retentionNow.Add(-time.Hour))
+
+	f.run()
+
+	if n := f.count("reports"); n != 1 {
+		t.Errorf("%d reports left, want 1", n)
+	}
+	var reason string
+	if err := f.pool.QueryRow(context.Background(), `SELECT reason FROM reports`).Scan(&reason); err != nil {
+		t.Fatalf("reading the survivor: %v", err)
+	}
+	if reason != "harassment: recent" {
+		t.Errorf("the wrong report survived: %q", reason)
+	}
+}
+
+// An invite code ages from its last redemption, not from when it was made. A
+// code somebody used last month is live however long ago it was printed.
+func TestAnInviteCodeGoesTwoYearsAfterItsLastUse(t *testing.T) {
+	f := newJanitorFixture(t)
+	old := retentionNow.AddDate(-2, 0, -1)
+	recent := retentionNow.AddDate(-2, 0, 1)
+
+	f.exec(`INSERT INTO invite_codes (code, created_at, max_uses) VALUES ('OLDUNUSED', $1, 1)`, old)
+	f.exec(`INSERT INTO invite_codes (code, created_at, max_uses) VALUES ('NEWUNUSED', $1, 1)`, recent)
+	f.exec(`INSERT INTO invite_codes (code, created_at, max_uses) VALUES ('OLDUSEDNEW', $1, 5)`, old)
+
+	other := f.secondUser("+306900000078")
+	f.exec(`INSERT INTO invite_redemptions (code, user_id, redeemed_at) VALUES ('OLDUSEDNEW', $1, $2)`,
+		other, recent)
+
+	f.run()
+
+	var left []string
+	rows, err := f.pool.Query(context.Background(), `SELECT code FROM invite_codes ORDER BY code`)
+	if err != nil {
+		t.Fatalf("listing codes: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			t.Fatalf("scanning: %v", err)
+		}
+		left = append(left, c)
+	}
+
+	want := []string{"NEWUNUSED", "OLDUSEDNEW"}
+	if fmt.Sprint(left) != fmt.Sprint(want) {
+		t.Errorf("codes left = %v, want %v", left, want)
+	}
+}
+
+// secondUser makes another account to be the other party in a report or a
+// redemption.
+func (f *janitorFixture) secondUser(phone string) uuid.UUID {
+	f.t.Helper()
+	var id uuid.UUID
+	err := f.pool.QueryRow(context.Background(),
+		`INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		 SELECT DATE '1990-01-01', $1, 'Άλλος', home_region_id FROM users WHERE id = $2
+		 RETURNING id`, phone, f.user).Scan(&id)
+	if err != nil {
+		f.t.Fatalf("seeding a second user: %v", err)
+	}
+	return id
+}
+
+// A rule that ages tokens by last use is only as good as the recording of it.
+// Without this, every token looks unused, and the retention rule quietly
+// becomes "delete every device after two years" — which would silently stop
+// notifications for people who use the app every day.
+func TestASuccessfulSendMarksTheTokenUsed(t *testing.T) {
+	f := newJanitorFixture(t)
+	long := retentionNow.AddDate(-2, 0, -1)
+	f.exec(`INSERT INTO push_tokens (token, user_id, platform, created_at) VALUES ('live', $1, 'ios', $2)`,
+		f.user, long)
+
+	// One notification, delivered.
+	f.deliverOneNotification("live")
+
+	var lastUsed *time.Time
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT last_used_at FROM push_tokens WHERE token = 'live'`).Scan(&lastUsed); err != nil {
+		t.Fatalf("reading last_used_at: %v", err)
+	}
+	if lastUsed == nil {
+		t.Fatal("a delivered notification did not mark the token used")
+	}
+
+	// And so the janitor leaves it alone, though it was registered two years ago.
+	f.run()
+	if n := f.count("push_tokens"); n != 1 {
+		t.Errorf("a token used moments ago was swept: %d left", n)
+	}
+}
+
+// deliverOneNotification pushes a single message through the real dispatch
+// router with a sender that accepts everything, which is the path that has to
+// record the use.
+func (f *janitorFixture) deliverOneNotification(token string) {
+	f.t.Helper()
+	router := dispatch.NewRouter(f.pool, f.clock, acceptingSender{},
+		func(context.Context, uuid.UUID) error { return nil })
+
+	// An ask arriving for this driver, which is the shape that names them as
+	// the recipient.
+	payload := fmt.Sprintf(`{"ask_id":%q,"driver_id":%q,"detour_min":5}`, uuid.New(), f.user)
+	err := router.Handle(context.Background(), outbox.Message{
+		Kind: "push", Payload: []byte(payload), IdempotencyKey: "test-1",
+	})
+	if err != nil {
+		f.t.Fatalf("delivering a notification: %v", err)
+	}
+	_ = token
+}
+
+// acceptingSender is a push provider that delivers everything.
+type acceptingSender struct{}
+
+func (acceptingSender) Send(context.Context, push.Notification) error { return nil }
