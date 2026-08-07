@@ -577,3 +577,197 @@ func (f *janitorFixture) deliverOneNotification(token string) {
 type acceptingSender struct{}
 
 func (acceptingSender) Send(context.Context, push.Notification) error { return nil }
+
+// "Διαδρομές, αιτήματα, γεωμετρία — ιστορικό 24 μήνες", anchored on the
+// departure rather than on when the route was created. A trip planned a long
+// time ago for next week is not history; a trip that ran two years ago is,
+// however recently its route was edited.
+func TestATripGoesTwoYearsAfterItRan(t *testing.T) {
+	f := newJanitorFixture(t)
+	old := f.departure(retentionNow.AddDate(-2, 0, -1))
+	recent := f.departure(retentionNow.AddDate(-2, 0, 1))
+	future := f.departure(retentionNow.AddDate(0, 1, 0))
+
+	f.run()
+
+	if f.occurrenceExists(old) {
+		t.Error("a departure from more than two years ago survived")
+	}
+	if !f.occurrenceExists(recent) {
+		t.Error("a departure from just under two years ago was swept")
+	}
+	if !f.occurrenceExists(future) {
+		t.Error("a departure that has not happened yet was swept")
+	}
+}
+
+// The reason migration 00028 exists. Ratings live as long as the account; trips
+// live 24 months. Without breaking the cascade, sweeping the trip would take
+// the rating with it and a driver's reputation would erode by age.
+func TestSweepingATripLeavesTheRatingsBehind(t *testing.T) {
+	f := newJanitorFixture(t)
+	occ := f.departure(retentionNow.AddDate(-2, 0, -1))
+	other := f.secondUser("+306900000081")
+	booking := f.booking(occ, other)
+
+	f.exec(`INSERT INTO ratings (booking_id, rater_id, ratee_id, stars, tag)
+	        VALUES ($1, $2, $3, 5, 'punctual')`, booking, other, f.user)
+
+	f.run()
+
+	if f.occurrenceExists(occ) {
+		t.Fatal("the old departure survived, so this proves nothing")
+	}
+	var stars int
+	var bookingID *uuid.UUID
+	err := f.pool.QueryRow(context.Background(),
+		`SELECT stars, booking_id FROM ratings WHERE ratee_id = $1`, f.user).Scan(&stars, &bookingID)
+	if err != nil {
+		t.Fatalf("the rating went with the trip: %v", err)
+	}
+	if stars != 5 {
+		t.Errorf("stars = %d", stars)
+	}
+	if bookingID != nil {
+		t.Error("the rating still points at a booking that was deleted")
+	}
+}
+
+// Messages have their own twelve-month clock, anchored on the last message as
+// well as on the departure. A trip is held back rather than cascading them
+// away — bounded, because the message rule will clear them and the trip
+// becomes eligible at a later run.
+func TestATripWaitsForItsMessages(t *testing.T) {
+	f := newJanitorFixture(t)
+	occ := f.departure(retentionNow.AddDate(-2, 0, -1))
+	f.exec(`INSERT INTO trip_messages (occurrence_id, sender_id, body, created_at)
+	        VALUES ($1, $2, 'άφησα το μπουφάν μου στο αυτοκίνητο', $3)`,
+		occ, f.user, retentionNow.AddDate(0, -1, 0))
+
+	f.run()
+
+	if !f.occurrenceExists(occ) {
+		t.Error("a trip with a month-old message on it was swept, taking the message")
+	}
+}
+
+// A report is kept for 36 months and a trip for 24. Holding the trip back keeps
+// the evidence attached for the whole life of the report, rather than leaving an
+// accusation with a null where the booking was.
+func TestATripWaitsForAReportAboutIt(t *testing.T) {
+	f := newJanitorFixture(t)
+	occ := f.departure(retentionNow.AddDate(-2, 0, -1))
+	other := f.secondUser("+306900000082")
+	booking := f.booking(occ, other)
+
+	f.exec(`INSERT INTO reports (reporter_id, reported_id, booking_id, reason, created_at)
+	        VALUES ($1, $2, $3, 'no_show: δεν ήρθε ποτέ', $4)`,
+		other, f.user, booking, retentionNow.AddDate(-1, 0, 0))
+
+	f.run()
+
+	if !f.occurrenceExists(occ) {
+		t.Error("the trip a live report is about was swept, leaving the report with nothing")
+	}
+}
+
+// An old request that nobody ever matched still goes, and one whose window has
+// not opened yet does not.
+func TestAnOldRideRequestGoes(t *testing.T) {
+	f := newJanitorFixture(t)
+	old := f.request(retentionNow.AddDate(-2, 0, -1))
+	recent := f.request(retentionNow.AddDate(-2, 0, 1))
+
+	f.run()
+
+	if f.requestExists(old) {
+		t.Error("a request from more than two years ago survived")
+	}
+	if !f.requestExists(recent) {
+		t.Error("a request from just under two years ago was swept")
+	}
+}
+
+// departure seeds one occurrence leaving at the given instant.
+func (f *janitorFixture) departure(at time.Time) uuid.UUID {
+	f.t.Helper()
+	return f.seedThread(at)
+}
+
+func (f *janitorFixture) occurrenceExists(id uuid.UUID) bool {
+	f.t.Helper()
+	var n int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM trip_occurrences WHERE id = $1`, id).Scan(&n); err != nil {
+		f.t.Fatalf("looking for the occurrence: %v", err)
+	}
+	return n > 0
+}
+
+// booking puts a passenger on a departure, which is what a rating or a report
+// hangs off.
+func (f *janitorFixture) booking(occurrence, passenger uuid.UUID) uuid.UUID {
+	f.t.Helper()
+	var requestID, bookingID uuid.UUID
+	err := f.pool.QueryRow(context.Background(), `
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end,
+		                           seats, kind, status)
+		VALUES ($1, ST_SetSRID(ST_MakePoint(25.82,40.85),4326), ST_SetSRID(ST_MakePoint(25.98,40.85),4326),
+		        $2::timestamptz, $2::timestamptz + interval '2 hours', 1, 'open', 'matched')
+		RETURNING id`, passenger, retentionNow.AddDate(-2, 0, -1)).Scan(&requestID)
+	if err != nil {
+		f.t.Fatalf("seeding request: %v", err)
+	}
+	// A booking has to say where it came from: an ask, or a standing
+	// arrangement, never neither.
+	var askID uuid.UUID
+	err = f.pool.QueryRow(context.Background(), `
+		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km,
+		                  pickup_point, dropoff_point, suggested_price_eur,
+		                  itinerary_version, status, expires_at)
+		VALUES ($1, $2, 5, 2,
+		        ST_SetSRID(ST_MakePoint(25.82,40.85),4326), ST_SetSRID(ST_MakePoint(25.98,40.85),4326),
+		        2.50, 0, 'accepted', $3)
+		RETURNING id`, requestID, occurrence, retentionNow.AddDate(-2, 0, -1)).Scan(&askID)
+	if err != nil {
+		f.t.Fatalf("seeding ask: %v", err)
+	}
+
+	err = f.pool.QueryRow(context.Background(), `
+		INSERT INTO bookings (occurrence_id, request_id, ask_id, passenger_id, seats, price_eur,
+		                      pickup_point, dropoff_point)
+		VALUES ($1, $2, $3, $4, 1, 2.50,
+		        ST_SetSRID(ST_MakePoint(25.82,40.85),4326), ST_SetSRID(ST_MakePoint(25.98,40.85),4326))
+		RETURNING id`, occurrence, requestID, askID, passenger).Scan(&bookingID)
+	if err != nil {
+		f.t.Fatalf("seeding booking: %v", err)
+	}
+	return bookingID
+}
+
+// request seeds a standalone ride request whose travel window is at the given
+// instant.
+func (f *janitorFixture) request(at time.Time) uuid.UUID {
+	f.t.Helper()
+	var id uuid.UUID
+	err := f.pool.QueryRow(context.Background(), `
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end,
+		                           seats, kind, status)
+		VALUES ($1, ST_SetSRID(ST_MakePoint(25.82,40.85),4326), ST_SetSRID(ST_MakePoint(25.98,40.85),4326),
+		        $2::timestamptz, $2::timestamptz + interval '2 hours', 1, 'open', 'expired')
+		RETURNING id`, f.user, at).Scan(&id)
+	if err != nil {
+		f.t.Fatalf("seeding request: %v", err)
+	}
+	return id
+}
+
+func (f *janitorFixture) requestExists(id uuid.UUID) bool {
+	f.t.Helper()
+	var n int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM ride_requests WHERE id = $1`, id).Scan(&n); err != nil {
+		f.t.Fatalf("looking for the request: %v", err)
+	}
+	return n > 0
+}

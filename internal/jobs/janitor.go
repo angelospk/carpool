@@ -126,6 +126,49 @@ func rules() []rule {
 		{"revoked refresh tokens", batch("refresh_tokens",
 			`t.revoked_at < $1::timestamptz - interval '30 days'`)},
 
+		// "Διαδρομές, αιτήματα, γεωμετρία — ιστορικό 24 μήνες".
+		//
+		// Anchored on the departure, not on when the route was created or last
+		// touched. A trip planned long ago for next week is not history, and an
+		// edit to an old route must not grant it another two years.
+		//
+		// Two things hold a departure back, both bounded, so neither turns into
+		// indefinite retention:
+		//
+		//   Messages have their own twelve-month clock, anchored on the last
+		//   message as well as on the departure. Cascading them away with the
+		//   trip would break that promise for a thread somebody wrote in last
+		//   month. Waiting instead means the message rule clears them first and
+		//   the trip goes at a later run.
+		//
+		//   A report is kept for thirty-six months, twelve longer than the trip
+		//   it is about. Holding the trip keeps the evidence attached for the
+		//   whole life of the report rather than leaving an accusation with a
+		//   null where the booking was.
+		//
+		// Ratings are NOT in that list, and must not be: they live as long as
+		// the account, so waiting for them would make popular drivers' trips
+		// immortal. Migration 00028 broke that cascade instead — the rating
+		// survives the booking and keeps everything the app reads off it.
+		{"departures from more than two years ago", batch("trip_occurrences",
+			`t.depart_earliest < $1::timestamptz - interval '24 months'
+			   AND NOT EXISTS (SELECT 1 FROM trip_messages m WHERE m.occurrence_id = t.id)
+			   AND NOT EXISTS (
+			         SELECT 1 FROM reports r
+			           JOIN bookings b ON b.id = r.booking_id
+			          WHERE b.occurrence_id = t.id)`)},
+
+		// The passenger's half of the same sentence. Anchored on the travel
+		// window rather than on creation, for the same reason: a request made in
+		// January for a trip in December is not two years old in March.
+		//
+		// A request that is still open is left alone whatever its window says —
+		// an expired window with an open status is a bug elsewhere, and deleting
+		// the evidence of it would hide it.
+		{"ride requests from more than two years ago", batch("ride_requests",
+			`t.window_end < $1::timestamptz - interval '24 months'
+			   AND t.status <> 'open'`)},
+
 		// "Tokens ειδοποιήσεων — μέχρι την απενεργοποίηση, το πολύ 24 μήνες από
 		// την τελευταία χρήση".
 		//
