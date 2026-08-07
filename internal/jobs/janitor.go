@@ -178,6 +178,16 @@ func rules() []rule {
 		// which is the failure mode of a retention rule that looks correct.
 		// A token nobody has ever used ages from when it was registered, which
 		// is the only other fact there is about it.
+		// The policy is two promises in one line, and the age rule only kept the
+		// second. A token the provider has rejected is dead the moment the
+		// dispatcher retires it: nothing reads a disabled token again, so making
+		// it wait two years keeps a row naming a device somebody threw away.
+		// Compared against the clock rather than tested for NULL, which also
+		// gives the parameter a type: every rule is handed the same instant, and
+		// one that never mentions it leaves Postgres unable to infer what $1 is.
+		{"retired push tokens", batch("push_tokens",
+			`t.disabled_at <= $1::timestamptz`)},
+
 		{"push tokens unused for two years", batch("push_tokens",
 			`COALESCE(t.last_used_at, t.created_at) < $1::timestamptz - interval '24 months'`)},
 

@@ -355,9 +355,31 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
     tags. It needs a person.
 
     Addressed 2026-08-05 rather than solved: a moderator can hide, rename or
-    add a point, and anybody can suggest one for review. What is still missing
-    is the person doing it. Nothing is curated yet, so Θεσσαλονίκη still shows
-    the ticket agencies until somebody sits down with the list.
+    add a point, and anybody can suggest one for review.
+
+    Mostly solved 2026-08-08, and the paragraph above was wrong about why. The
+    harvester did compute a careful ordering; it then threw it away when writing
+    the file, because the `rank` column held the *kind* index rather than the
+    position. Every bus station in a city therefore shared one rank and the app
+    fell back to sorting by OSM id. Θεσσαλονίκη showed "Arda Tur Bulgaria" first
+    not because ranking was impossible but because nothing kept the ranking.
+
+    Two signals turned out to be in the name after all, contrary to the claim
+    above that no automated rule could find them: whether a bus station says
+    ΚΤΕΛ, which is what everybody in Greece means by the bus station, and
+    whether it names *this* prefecture rather than another one — ΚΤΕΛ
+    Καρδίτσας-Τρικάλων has an office in Λάρισα and is still Καρδίτσα's station.
+
+    Measured: 93 settlements now lead with a different point, one changed which
+    points it has at all, and the total is unchanged at 2900. Θεσσαλονίκη leads
+    with ΚΤΕΛ Θεσσαλονίκης, Λάρισα with its own, Τρίκαλα with the station rather
+    than the ticket window, Ρόδος with Κ.Τ.Ε.Λ. rather than the urban network.
+
+    What is left genuinely needs a person, and it is a much shorter list.
+    Πάτρα leads with "ΚΤΕΛ ΚΕΦΑΛΛΗΝΙΑΣ Πατρα" — a real coach office that names
+    both Kefalonia and Πάτρα, so the rule cannot tell it from Πάτρα's own.
+    Πειραιάς leads with "ΒΟΛΓΑ", because no ΚΤΕΛ is mapped there at all. Ιωάννινα
+    and Κατερίνη have petrol stations because they have nothing better tagged.
 
     Two things about the shape of it are worth keeping in mind. Reading the
     corrections can fail, and when it does the answer is an error rather than
@@ -567,3 +589,27 @@ push tokens, invite codes, reports, trips and ride requests.
 Security logs are the eleventh item and are files rather than rows — nothing in
 the database can enforce them, and the deployment's log rotation has not been
 checked against the twelve months the policy claims.
+
+## A push token can be swept between selection and delivery (raised 2026-08-08)
+
+CodeRabbit found the window: `tokensFor` reads the live tokens, the provider
+accepts the notification, and only then is `last_used_at` written. The janitor
+can delete the row in between, so the write lands on nothing.
+
+Not fixed, on these grounds. The precondition is narrow — the token has to be
+two years unused *and* receive a successful delivery in the same moment the
+sweep runs — and the consequence is that one device stops receiving until the
+app next registers, which it does on launch. Coordinating deletion with delivery
+would mean holding a lock across a network call to Expo, which is a worse trade
+than the thing it prevents.
+
+It is worth revisiting if push registration ever stops happening on every
+launch, because the repair is what makes the loss temporary.
+
+## CodeRabbit asked for the retention decisions to be closed (2026-08-08)
+
+Not a defect, and recorded so the next reader does not read it as one. The
+review flagged the two open retention entries above and said they should be
+resolved before release. That is correct and it is what they are here for: both
+need a person to decide what the published policy should say, and neither is
+work waiting to be done.

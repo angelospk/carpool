@@ -771,3 +771,28 @@ func (f *janitorFixture) requestExists(id uuid.UUID) bool {
 	}
 	return n > 0
 }
+
+// "μέχρι την απενεργοποίηση, το πολύ 24 μήνες από την τελευταία χρήση" is two
+// promises, and the age rule only kept the second. A token the provider has
+// rejected is dead the moment it is retired; making it wait two years keeps a
+// row that can never be delivered to and that names a device somebody threw
+// away.
+func TestADisabledPushTokenGoesWithoutWaitingTwoYears(t *testing.T) {
+	f := newJanitorFixture(t)
+
+	f.exec(`INSERT INTO push_tokens (token, user_id, platform, created_at, last_used_at, disabled_at)
+	        VALUES ('retired-yesterday', $1, 'ios', $2, $2, $3)`,
+		f.user, retentionNow.AddDate(0, -1, 0), retentionNow.AddDate(0, 0, -1))
+	f.exec(`INSERT INTO push_tokens (token, user_id, platform, created_at, last_used_at)
+	        VALUES ('live', $1, 'ios', $2, $2)`, f.user, retentionNow.AddDate(0, -1, 0))
+
+	f.run()
+
+	var left string
+	if err := f.pool.QueryRow(context.Background(), `SELECT token FROM push_tokens`).Scan(&left); err != nil {
+		t.Fatalf("expected exactly one token left: %v", err)
+	}
+	if left != "live" {
+		t.Errorf("token left = %q, want the live one", left)
+	}
+}

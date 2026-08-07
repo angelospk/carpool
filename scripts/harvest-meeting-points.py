@@ -48,6 +48,7 @@ name has none of them; ΚΤΕΛ Λάρισας has four.
 Output: © OpenStreetMap contributors, ODbL.
 """
 import argparse
+import unicodedata
 import csv
 import io
 import math
@@ -119,6 +120,51 @@ VESSEL_NAME = re.compile(r"&")
 # coach station; together they separate one from a name on a pavement.
 ESTABLISHMENT_TELLS = ("phone", "website", "operator", "network", "addr:street",
                        "opening_hours", "email", "brand")
+
+# The intercity coach network. In Greece the thing everybody means by "the bus
+# station" is the ΚΤΕΛ, and a bus_station that says so is that; one that does
+# not is a private agency, an urban terminus, or a ticket window. This is in the
+# name rather than in the tags, which is why an earlier pass concluded no
+# automated rule could separate Θεσσαλονίκη's coach agencies from its ΚΤΕΛ.
+# Written ΚΤΕΛ, KTEL, or Κ.Τ.Ε.Λ. with any spacing between the dots. Ρόδος
+# spells it the third way and would otherwise not be recognised as a coach
+# station at all.
+COACH_NETWORK = re.compile(r"\b[ΚK]\.?\s?[ΤT]\.?\s?[ΕE]\.?\s?[ΛL]\b\.?", re.IGNORECASE)
+
+# A ticket window is not a place a car waits, but it is often mapped with the
+# station's own name and the network's, so it cannot simply be dropped: ΚΤΕΛ
+# Αττικής is a real station with a ticket office in it. Ranked below instead.
+TICKET_DESK = re.compile(r"ticket|εκδοτήρι|πρακτορε", re.IGNORECASE)
+
+
+def stem(word):
+    """A Greek word without its accents, its case, or its last two letters.
+
+    Greek inflects, and the settlement is Θεσσαλονίκη while its station is
+    Θεσσαλονίκης. Comparing whole words finds nothing. Two letters is enough to
+    cover the genitive endings that matter here without collapsing short names
+    into each other.
+    """
+    folded = unicodedata.normalize("NFD", word.casefold())
+    bare = "".join(c for c in folded if not unicodedata.combining(c))
+    return bare[:-2] if len(bare) > 5 else bare
+
+
+def names_this_place(name, settlement):
+    """Whether a point's name mentions the settlement it is being attached to,
+    or the prefecture it is in.
+
+    A station named after somewhere else is somewhere else's station that
+    happens to have an office here — ΚΤΕΛ Καρδίτσας-Τρικάλων sits in Λάρισα,
+    and putting it above Λάρισα's own is how a passenger ends up at the wrong
+    kerb.
+    """
+    haystack = {stem(w) for w in re.split(r"[^\w]+", name) if len(w) > 3}
+    for field in ("name", "area"):
+        for word in re.split(r"[^\w]+", settlement.get(field, "")):
+            if len(word) > 3 and stem(word) in haystack:
+                return True
+    return False
 
 
 def load_settlements() -> list[dict]:
@@ -201,14 +247,37 @@ def build(pbf: pathlib.Path, features) -> tuple[list[dict], dict]:
                 # id without its type is not an identity, because the two
                 # spaces overlap.
                 raw = str(f.get("id", ""))
-                found.setdefault(place_id, []).append((rank, 0 if established else 1, best_km, {
+                # Three signals that only mean anything for a coach station,
+                # ordered by how badly getting them wrong sends somebody to the
+                # wrong kerb. All are 0 for every other kind, so nothing else
+                # is reordered by them.
+                coach = ticket = elsewhere = 0
+                if kind == "bus_station":
+                    # Ordered by how badly getting it wrong sends somebody to
+                    # the wrong kerb. Naming another prefecture is the worst:
+                    # ΚΤΕΛ Καρδίτσας-Τρικάλων has an office in Λάρισα, and it is
+                    # still Καρδίτσα's station. Being a ΚΤΕΛ at all comes next,
+                    # then whether the thing is a ticket window.
+                    elsewhere = 0 if names_this_place(name, best) else 1
+                    coach = 0 if COACH_NETWORK.search(name) else 1
+                    ticket = 1 if TICKET_DESK.search(name) else 0
+
+                found.setdefault(place_id, []).append((rank, 0 if established else 1,
+                                                       elsewhere, coach, ticket, best_km, {
                     "place_id": place_id,
                     "osm_type": {"n": "node", "w": "way", "r": "relation"}.get(raw[:1], "node"),
                     "osm_id": raw[1:],
-                    # Carried into the file because the CSV order is not the
-                    # ranking: sorting the rows for a reproducible diff would
-                    # otherwise silently reorder them by kind, alphabetically,
-                    # and put the port after the car park.
+                    # Overwritten below with the position this point ends up
+                    # in, once the candidates for the settlement have been
+                    # sorted. It starts as the kind index because that is the
+                    # first term of the sort.
+                    #
+                    # This used to be the final value, and that was the bug
+                    # behind "Θεσσαλονίκη shows the ticket agencies": every bus
+                    # station in a city shared one rank, so the careful
+                    # ordering computed here was thrown away and the app fell
+                    # back to sorting by osm_id. The ranking was never the
+                    # problem; keeping it was.
                     "rank": str(rank),
                     "kind": kind,
                     "name": name,
@@ -220,18 +289,21 @@ def build(pbf: pathlib.Path, features) -> tuple[list[dict], dict]:
     by_kind = {s["osm_type"] + "/" + s["osm_id"]: s["kind"] for s in settlements}
     rows = []
     for place_id, candidates in found.items():
-        candidates.sort(key=lambda c: (c[0], c[1], c[2], c[3]["osm_id"]))
+        candidates.sort(key=lambda c: (c[:-1], c[-1]["osm_id"]))
         limit = PER_KIND.get(by_kind.get(place_id, "village"), 1)
 
         # One name per settlement. Ηράκλειο had two ferry terminals both called
         # "Heraklion", which is a choice between two identical answers.
         taken, seen = [], set()
         for c in candidates:
-            key = c[3]["name"].strip().casefold()
+            key = c[-1]["name"].strip().casefold()
             if key in seen:
                 continue
             seen.add(key)
-            taken.append(c[3])
+            row = c[-1]
+            # The position, so the order computed above is what the app reads.
+            row["rank"] = str(len(taken))
+            taken.append(row)
             if len(taken) == limit:
                 break
         rows.extend(taken)
