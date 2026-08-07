@@ -491,3 +491,21 @@ Two loose ends:
   somebody deliberately published and a number buried in prose where it will not
   be noticed until it is too late. That distinction is a judgement, and somebody
   may reasonably disagree with it.
+
+## The report reason is text, not a column (raised 2026-08-08)
+
+Reporting somebody now asks what happened and offers six categories. The chosen
+category leads the reason string — `no_show: με περίμενε μισή ώρα` — rather than
+being stored in its own column.
+
+That is deliberate and it is a bet. A column is the right shape the day somebody
+actually works the queue and wants to filter it, count repeat categories, or
+route harassment differently from a no-show. Until then it is a migration and an
+enum for nobody, and the reason has always been free text that a human reads.
+
+What makes the bet cheap to lose: the categories are stable identifiers rather
+than the Greek labels, and they lead the string. Promoting them to a column
+later is a backfill with a regular expression, not an archaeology exercise.
+
+What makes it a bet at all: nothing enforces the format. A future client could
+send a bare sentence, and the backfill would find nothing to promote.

@@ -290,7 +290,21 @@
     "blocked": "User blocked",
     "report": "Report",
     "reported": "Report sent",
-    "title": "Profile"
+    "title": "Profile",
+    "reportWhat": "What happened?",
+    "reportDetail": "Tell us a little more (optional)",
+    "reportDetailPlaceholder": "What happened, in your own words",
+    "reportHint": "A person reads every report. They will not be told it was you.",
+    "reportSend": "Send the report",
+    "reportRateLimited": "That is a lot of reports for one day. The ones you sent are being looked at.",
+    "reasons": {
+      "harassment": "Harassment or abusive behaviour",
+      "unsafe_driving": "Unsafe driving",
+      "no_show": "Did not show up",
+      "money": "Asked for more money",
+      "fake_profile": "Fake profile",
+      "other": "Something else"
+    }
   },
   "weekdays": {
     "1": "Monday",
