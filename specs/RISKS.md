@@ -509,3 +509,61 @@ later is a backfill with a regular expression, not an archaeology exercise.
 
 What makes it a bet at all: nothing enforces the format. A future client could
 send a bare sentence, and the backfill would find nothing to promote.
+
+## Two retention periods the code will not enforce until somebody decides (raised 2026-08-08)
+
+Eight of the ten periods in the privacy policy are now enforced by the janitor.
+Two are not, and neither is a matter of finding the time.
+
+### Blocks: the policy says 36 months, and enforcing it would unblock people
+
+"Αναφορές και αποκλεισμοί — 36 μήνες" puts blocks in the same row as reports. A
+report is a record of a past event and deleting it after three years is ordinary
+data minimisation. A block is not a record of anything: it is a live safety
+preference, and deleting it makes somebody visible again to a person who
+deliberately made them invisible — silently, three years later, with no
+notification and no way for the blocked-from party to know it happened.
+
+That is a safety regression dressed as a privacy improvement, so the code does
+not do it.
+
+The recommendation is to change the policy rather than the code: blocks should
+live as long as the account, like ratings, and the row in the table should say
+so. If the answer is instead that blocks really must expire, then it needs to be
+a deliberate product feature — telling the person, and letting them renew —
+rather than a row vanishing out of a nightly job.
+
+### Ratings: the period is anchored on something the schema does not record
+
+"Αξιολογήσεις — όσο ο λογαριασμός είναι ενεργός, και 12 μήνες μετά τη διαγραφή."
+Every other rule is age-based and can be written as one predicate. This one
+needs the deletion time of the rated account, and erasure currently anonymises
+the user row rather than leaving a durable tombstone with a timestamp on it.
+
+So the rule cannot be written correctly yet. Codex put it plainly: without a
+durable deletion timestamp there is no query that expresses this period.
+
+Two ways out, and they are not equivalent:
+
+1. Record a `deleted_at` on erasure and sweep ratings twelve months after it.
+   Straightforward, but it means the erasure path leaves a dated tombstone for
+   every deleted account — a small permanent record of the fact that somebody
+   was here and left.
+2. Delete the ratings at erasure time and drop the twelve months from the
+   policy. Simpler and holds less, but loses the reason the twelve months are
+   there in the first place: a rating somebody left about *another* person is
+   evidence about that person, and erasing your account should probably not
+   scrub your account of everything you said about everyone else.
+
+Option 2 has a sharper version worth considering: keep the ratings the deleted
+person *gave*, drop the ones they *received*. What survives is then about the
+people still here, which is closer to what the twelve months were protecting.
+
+### What is enforced today
+
+otp codes, phone-change challenges, signup tickets, refresh tokens, messages,
+push tokens, invite codes, reports, trips and ride requests.
+
+Security logs are the eleventh item and are files rather than rows — nothing in
+the database can enforce them, and the deployment's log rotation has not been
+checked against the twelve months the policy claims.

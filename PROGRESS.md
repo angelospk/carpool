@@ -352,6 +352,29 @@ so a number in one is a public number. Filtered now, with the obfuscated forms
 covered and with ordinary Greek prose as the larger test set — see RISKS.md for
 why it is a speed bump rather than a wall.
 
+## Retention, eight tenths of the way (2026-08-08)
+
+The privacy policy names ten retention periods for database rows. Four were
+enforced; ten now are minus two, and the two that are left are decisions rather
+than work — see RISKS.md.
+
+The interesting part was not writing the rules. It was that the obvious
+implementation of "delete trips after 24 months" would have destroyed three
+other categories through foreign keys nobody was looking at: ratings cascaded
+through bookings, messages cascaded off the occurrence despite having their own
+clock, and reports would have survived with a null where their evidence was.
+Codex found the third of those; the first two came out of reading the FK graph
+before writing any SQL, which is a habit worth keeping.
+
+Ratings needed the cascade broken (00028). Messages and reports did not — both
+have bounded lifetimes of their own, so the trip simply waits for them and goes
+at a later run. Waiting only works because the wait is bounded; it would have
+been the wrong answer for ratings, which never expire while the account lives.
+
+Push tokens needed a `last_used_at` that did not exist, so the policy's "24
+months from last use" had been unenforceable rather than unenforced. It is
+written on delivery now, monotonically.
+
 ## Deliberately not built
 
 Parked with a reason, not forgotten:
