@@ -51,6 +51,11 @@
    worthless without drivers. Pilot plan: seed one corridor/community (e.g. one
    town ↔ one city), invite codes, personally onboard the first 20 drivers.
 
+   **Still the biggest one, and now researched: see `specs/NEXT.md`.** Every
+   European daily-commuter service solved this with an employer or municipality
+   partnership and subsidised trips, not with product. The pilot plan above is
+   sound, but it needs an institution attached to it before more code is written.
+
 ## Legal / privacy (needs a real check before public launch)
 
 - **Cost-sharing vs commercial transport (Greek law).** The app must stay clearly

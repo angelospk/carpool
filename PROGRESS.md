@@ -462,3 +462,5 @@ real time so the two can never agree by coincidence again.
 3. `scripts/e2e.sh` against a running API to see the whole product work
 4. Read `specs/RISKS.md` "Open decisions" for every place the implementation
    knowingly diverges from the specs, and why
+5. Read `specs/NEXT.md` before starting a feature. The next constraint is a pilot
+   community rather than code, and that file says which one and why
