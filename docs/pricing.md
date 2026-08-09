@@ -203,9 +203,9 @@ with the price beside it, and looks exactly like a bug.
 Rows that predate this carry a null basis. Filling them with today's inputs
 would turn a gap into a plausible fiction, so they stay null.
 
-## Why not just ask, or search
+## Why not just ask, search, or charge by the kilometre
 
-Two options that keep coming up, and why neither is here.
+Three options that keep coming up, and why none of them is here.
 
 **Letting the driver type the number.** This is what the app did. A driver
 entering 14 instead of 7 asks for twice the money and the passenger has no way
@@ -224,6 +224,29 @@ verifiable against the paper. It is not a judgement about consumption. Note that
 it also drags in personal data — a registration certificate carries a name, an
 address and a chassis number — which is why the current design has the driver
 type the CO2 figure rather than upload the document.
+
+**A flat rate per kilometre, the way BlaBlaCar does it.** This is the tempting
+one, because it deletes everything above: no dataset, no CO2 field, no class
+floor, no vehicles table. One constant, one multiplication, and the driver never
+has to look at their own paperwork.
+
+It is also the flat 7.0 in different units. A single number standing in for a car
+nobody measured is wrong for every car that is not the average one, and nobody
+decides which way it is wrong; that falls out of whichever constant gets picked.
+The small petrol car quietly asking a quarter more than it burnt was this exact
+design, with the constant written in litres instead of euros.
+
+BlaBlaCar can run it because BlaBlaCar cannot do anything else. It has no way to
+learn which car the driver is sitting in, so it picks a per-kilometre figure low
+enough that almost nobody comes out ahead, then lets the driver move it inside a
+band. That is a good answer to their constraint. It is not our constraint: the
+registration document is in the driver's pocket, and field V.7 turns it into one
+number they can read off it.
+
+The band is the part that would cost something. Any upward range is `wear_factor`
+coming back under a friendlier name, and the €3.000 provision cares about the top
+of a range rather than its middle. Downward needs nothing built. A driver may
+already offer any figure below the computed share, including none of it.
 
 ## What is still open
 
