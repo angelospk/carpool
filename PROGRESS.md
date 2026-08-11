@@ -4,7 +4,7 @@ Running status log so any future session can resume cold. Updated every work ses
 
 ## Current state
 
-**Last updated:** 2026-08-04.
+**Last updated:** 2026-08-11.
 **All milestones complete.** Backend and app are built, reviewed and verified.
 
 Since the milestones closed, the work has been what testing the app on a real
@@ -396,6 +396,51 @@ been the wrong answer for ratings, which never expire while the account lives.
 Push tokens needed a `last_used_at` that did not exist, so the policy's "24
 months from last use" had been unenforceable rather than unenforced. It is
 written on delivery now, monotonically.
+
+## The QA pass over account status and silent success (2026-08-11)
+
+A deliberate hunt rather than a feature: a QA plan reviewed by Codex, worked
+through track by track, with each fix held by a test that fails when only that
+fix is removed. Five bugs, in rough order of how badly they would have gone.
+
+**A suspension never reached the matcher.** A suspended passenger's open request
+stayed in the queue, so the next trip published on that corridor woke it and a
+driver was given a real seat to somebody who could not open the app. Worse the
+other way round: the cascade cancels a suspended driver's departures and not the
+template behind them, so the materializer — whose job is to make what a schedule
+implies, and which quite correctly revives a cancelled departure nobody has
+booked — put every one of them back. Measured at nine departures in a single
+pass. Fixed at four distances: the cascade withdraws the live work, the
+materializer skips a template whose driver is not active, both filters read the
+account, and the two paths that create work hold both people's rows FOR SHARE
+first so a suspension mid-transaction is decided rather than raced.
+
+**Cancelling a ride request always said yes.** One UPDATE whose row count was
+discarded, so somebody else's request, a nonexistent one and one a driver had
+just accepted all answered 204. The screen it is called from is the one somebody
+sits on *while* drivers are being asked, so the third is the ordinary case; the
+app read 204 as done and went home, telling them they were not going while a
+seat was held in their name.
+
+**Nothing ever expired a request.** Two filters read the window rather than the
+status and each explained, in a comment, that a sweeper would come along. There
+was none, and `expired` was a status the schema allowed and no code could reach.
+
+**Erasure did not reach the garage.** `driver_profiles` was scrubbed and
+`vehicles` was not, so a registration plate survived a deletion — the sharpest
+identifier here, since a plate is on the outside of the car. The export had the
+mirror gap: no car, no driver settings, no blocks, no complaints filed.
+
+**And one I introduced, caught by CodeRabbit:** withdrawing a pending ask left
+the *other* passenger's request at 'asking' with nothing left to answer it, and
+nothing looks at a request in that state again.
+
+Two things worth keeping from how it went. The first set of suspension tests
+stayed green with both matching filters deleted, because the cheaper checks
+above them caught it first — the mutation run is what found that, and the tests
+moved down to the layer they were actually about. And the ownership sweep in
+`internal/api/ownership_test.go` is meant to be walked next to `router.go`: a
+path parameter with no line in that table is a gap.
 
 ## Deliberately not built
 
