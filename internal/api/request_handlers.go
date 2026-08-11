@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"carpool/internal/asks"
 	"carpool/internal/domain"
@@ -154,22 +155,58 @@ func (d Deps) handleCancelRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cancelling also kills any live ask, so a driver cannot accept a ride the
-	// passenger has already withdrawn.
-	tag, err := d.Pool.Exec(r.Context(), `
-		WITH cancelled AS (
-			UPDATE ride_requests SET status = 'cancelled', updated_at = now()
-			WHERE id = $1 AND passenger_id = $2 AND status IN ('open','asking')
-			RETURNING id
-		)
-		UPDATE asks SET status = 'cancelled', responded_at = now()
-		WHERE request_id IN (SELECT id FROM cancelled) AND status = 'pending'`,
-		requestID, userID)
+	// What state it is in decides the answer, so it is read before anything is
+	// written. This used to be one statement whose row count was discarded, and
+	// every call answered 204: a request that had just been matched, one
+	// belonging to somebody else, and one that never existed all came back as
+	// "cancelled". The app takes 204 as done and navigates home, so a passenger
+	// whose driver accepted a moment earlier was sent away believing they were
+	// not going, while a seat was held in their name and a driver was on the way
+	// to a meeting point.
+	var status string
+	err = d.Pool.QueryRow(r.Context(),
+		`SELECT status FROM ride_requests WHERE id = $1 AND passenger_id = $2`,
+		requestID, userID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Somebody else's request and one that does not exist get the same
+		// answer, so this cannot be used to find out what other people are
+		// asking for.
+		writeError(w, http.StatusNotFound, "not_found", "no such request")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not cancel the request")
 		return
 	}
-	_ = tag
+
+	switch status {
+	case "open", "asking":
+		// Cancelling also kills any live ask, so a driver cannot accept a ride
+		// the passenger has already withdrawn.
+		if _, err := d.Pool.Exec(r.Context(), `
+			WITH cancelled AS (
+				UPDATE ride_requests SET status = 'cancelled', updated_at = now()
+				WHERE id = $1 AND passenger_id = $2 AND status IN ('open','asking')
+				RETURNING id
+			)
+			UPDATE asks SET status = 'cancelled', responded_at = now()
+			WHERE request_id IN (SELECT id FROM cancelled) AND status = 'pending'`,
+			requestID, userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not cancel the request")
+			return
+		}
+	case "matched":
+		// There is a booking now, and cancelling that is a different act with a
+		// different consequence: a driver is expecting them. The app sends them
+		// to the trip rather than pretending this worked.
+		writeError(w, http.StatusConflict, "already_matched",
+			"a driver has taken this ride; cancel the booking instead")
+		return
+	default:
+		// Already cancelled, or expired. The second press of a button and a
+		// retry after a dropped response both arrive here, and both mean what
+		// they asked for is true.
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
