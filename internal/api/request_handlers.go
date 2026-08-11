@@ -125,7 +125,8 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Approach the first driver straight away. A failure here is not fatal: the
-	// request stays open and is retried when the next occurrence appears.
+	// request stays open, and a trip appearing on its corridor wakes it —
+	// published, materialized, or a seat handed back.
 	askID, err := d.Asks.AskNext(r.Context(), requestID)
 	matched := err == nil
 	if err != nil && !errors.Is(err, asks.ErrNoCandidates) {

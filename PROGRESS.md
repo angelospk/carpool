@@ -19,6 +19,9 @@ device turned up. In order:
 | Towns are typed by name, in either script | Pickup points were typed as coordinates |
 | Profile: name, photo, social handles, phone number | None of it could be changed |
 | A driver can list and retire routes, and call off a departure | No endpoint could do any of it |
+| Declaring a car makes somebody a driver | The garage wrote `vehicles`, publishing checked `driver_profiles`, and no screen wrote the second: a driver added their car and was told to add their car details |
+| The device registers for the notifications the server sends | `api.registerPushToken` existed and was called from nowhere |
+| A trip appearing looks for who was waiting for it | The matcher only ran from the passenger's side, so a request that found nobody was never reconsidered |
 
 Definition of Done, as measured on this machine:
 
@@ -28,13 +31,22 @@ Definition of Done, as measured on this machine:
 | Concurrency packages under `-race` | green |
 | App `tsc --noEmit` + `jest` | clean, 96 tests |
 | Android bundle exports | 2.9 MB Hermes |
-| e2e scenario from a fresh database | passes (12 steps) |
+| e2e scenario from a fresh database | passes (14 steps) |
 | Backup + restore drill | passes |
 | RAM measured | ≈ 330 MiB whole stack |
 
 The e2e covers the whole DoD path: publish a recurring route (snapped by real
 OSRM) → passenger request → driver ask → accept → trip visible to both sides
-with the plate revealed → chat → both confirm → mutual ratings.
+with the plate revealed → chat → both confirm → mutual ratings. Steps 12 and 13
+then cover the reverse direction: somebody asks for a journey nobody drives and
+is told nothing, the driver publishes that route, and she is offered it without
+anything touching her request.
+
+Step 2 was seeding `driver_profiles` with an INSERT and had gone stale against
+the garage work — publishing now refuses without a car, so the script had been
+failing at step 3 since vehicles landed. It declares the car through the real
+endpoint instead, which is also what makes the suggested contribution real
+rather than a fixed consumption figure.
 
 ## How to run things
 

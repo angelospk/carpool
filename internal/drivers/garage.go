@@ -107,6 +107,32 @@ func (s *Service) AddVehicle(ctx context.Context, ownerID uuid.UUID, car Car) (V
 		return Vehicle{}, fmt.Errorf("drivers: saving the car: %w", err)
 	}
 
+	// Telling us what you drive is what makes you a driver.
+	//
+	// Publishing a route checks driver_profiles; the garage wrote only to
+	// vehicles; and the app has no screen that writes the first. So somebody
+	// added their car, pressed publish, and was told to add their car details —
+	// which is what they had just done, with nowhere left to go. The older
+	// PUT /me/driver would have satisfied it and the app stopped calling it when
+	// the garage arrived.
+	//
+	// DO NOTHING rather than an update, so a second car is a second car and not
+	// a correction to the first, and so a driver's chosen detour budget and
+	// notify radius survive buying a van. The figures that price a trip are read
+	// from the vehicle the trip named, not from here.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO driver_profiles (
+			user_id, car_model, car_color, car_plate,
+			vehicle_make, vehicle_model, vehicle_fuel, engine_cc, co2_g_km,
+			fuel_consumption_l_100km, consumption_source, assessed_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		ON CONFLICT (user_id) DO NOTHING`,
+		ownerID, car.Model, car.Colour, car.Plate,
+		car.Make, car.Model, string(fuel), nullableCC(car.EngineCC), nullableCO2(car.CO2GramsPerKm),
+		capped, string(assessed.Source), s.clock.Now()); err != nil {
+		return Vehicle{}, fmt.Errorf("drivers: making them a driver: %w", err)
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return Vehicle{}, fmt.Errorf("drivers: commit: %w", err)
 	}

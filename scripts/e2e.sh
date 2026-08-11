@@ -49,10 +49,18 @@ DRIVER=$(signup "+306900000021" "Οδηγός")
 PASSENGER=$(signup "+306900000022" "Επιβάτης")
 [ -n "$DRIVER" ] && [ -n "$PASSENGER" ] && echo "   both authenticated"
 
-step "2. give the driver a car profile"
-psql "$DSN" -q -c "INSERT INTO driver_profiles (user_id, car_model, car_plate, detour_budget_min)
-                   SELECT id,'Toyota Yaris','ABC-1234',20 FROM users WHERE phone='+306900000021'
-                   ON CONFLICT (user_id) DO UPDATE SET detour_budget_min = 20"
+step "2. the driver says what they drive"
+# Through the real endpoint rather than an INSERT, because a route cannot be
+# published without a car and the consumption behind every suggested
+# contribution is derived from these fields rather than typed.
+curl -s -X POST "$API/me/vehicles" -H "Authorization: Bearer $DRIVER" -H 'Content-Type: application/json' -d '{
+  "make":"Toyota","model":"Yaris","fuel":"petrol","engine_cc":1330,
+  "colour":"ασημί","plate":"ABC-1234","label":"το αμάξι"}' | j "'   ' + d.make + ' ' + d.model + ', ' + d.consumption_l_100km + ' l/100km (' + d.consumption_source + ')'"
+# Declaring the car is the whole of becoming a driver. Nothing here reaches past
+# the API to arrange that, which is the point: it used to, and that is how the
+# app came to have no way of doing it at all.
+psql "$DSN" -q -c "UPDATE driver_profiles SET detour_budget_min = 20
+                   WHERE user_id = (SELECT id FROM users WHERE phone='+306900000021')"
 
 step "3. publish a recurring route, snapped by real OSRM"
 # Everything here is anchored to one Athens calendar date. The schedule is
@@ -133,7 +141,44 @@ curl -s -o /dev/null -w '   driver rates passenger: %{http_code}\n' \
   -H 'Content-Type: application/json' -d "{\"stars\":5,\"ratee_id\":\"$PAX\"}"
 psql "$DSN" -tAc "SELECT '   ' || count(*) || ' ratings stored' FROM ratings"
 
-step "12. a lost refresh response does not sign anyone out"
+step "12. somebody wants a journey nobody drives yet"
+# The return leg. The published route runs Αλεξανδρούπολη → Φέρες, so a request
+# going the other way along the same road is rejected on direction, which is
+# what makes this a corridor with no driver rather than a near miss.
+WAITER=$(signup "+306900000023" "Δεύτερη επιβάτις")
+REQ2=$(curl -s -X POST "$API/requests" -H "Authorization: Bearer $WAITER" -H 'Content-Type: application/json' -d "{
+  \"origin_lon\":26.1400,\"origin_lat\":40.8900,
+  \"destination_lon\":25.9200,\"destination_lat\":40.8600,
+  \"origin_label\":\"Φέρες\",\"destination_label\":\"Άνθεια\",
+  \"window_start\":\"$WS\",\"window_end\":\"$WE\",\"seats\":1}")
+REQ2_ID=$(echo "$REQ2" | j "d.request_id")
+[ -z "$(echo "$REQ2" | j "d.ask_id || ''")" ] || { echo "   somebody was asked, so this proves nothing"; exit 1; }
+echo "   request $REQ2_ID is open and nobody was asked"
+
+step "13. the driver publishes that route; she is offered it without asking again"
+# Nothing below touches the request. Publishing materializes the departure,
+# which queues the question \"who has been waiting for this?\", and the outbox
+# dispatcher carries it the rest of the way on its own five-second timer.
+curl -s -X POST "$API/routes" -H "Authorization: Bearer $DRIVER" -H 'Content-Type: application/json' -d "{
+  \"origin_lon\":26.1720,\"origin_lat\":40.8960,
+  \"destination_lon\":25.8743,\"destination_lat\":40.8476,
+  \"origin_label\":\"Φέρες\",\"destination_label\":\"Αλεξανδρούπολη\",
+  \"seats\":3,\"kind\":\"recurring\",\"weekdays\":[$DOW],
+  \"depart_earliest\":\"07:30\",\"depart_latest\":\"08:30\"}" | j "'   return route published, route_km=' + d.route_km"
+
+for _ in $(seq 30); do
+  OFFERED=$(psql "$DSN" -tAc "SELECT count(*) FROM asks WHERE request_id='$REQ2_ID'")
+  [ "$OFFERED" != "0" ] && break
+  sleep 1
+done
+[ "$OFFERED" != "0" ] || { echo "   she was never offered the trip"; exit 1; }
+psql "$DSN" -tAc "
+  SELECT '   offered ' || a.detour_min || ' min detour at ' || a.suggested_price_eur || ' EUR'
+      || ', request is now ' || r.status
+  FROM asks a JOIN ride_requests r ON r.id = a.request_id
+  WHERE a.request_id='$REQ2_ID'"
+
+step "14. a lost refresh response does not sign anyone out"
 # The app persists a rotated token only after the response arrives. Retrying with
 # the attempt id that spent the old token must return that same successor rather
 # than looking like a replay and ending the session.
