@@ -128,6 +128,36 @@ func TestAWakeForACancelledTripQuietlyDoesNothing(t *testing.T) {
 	}
 }
 
+// Declining frees the seat that offer was holding, and the next person waiting
+// gets it.
+//
+// The seat cap makes this necessary rather than merely nice. With only one
+// offer allowed on a one-seat trip, everybody behind the first is turned away,
+// and if nothing wakes them when that offer ends the queue never moves: the
+// trip has a free seat, several people want it, and none of them is ever asked.
+func TestDecliningAnOfferPassesTheSeatToTheNextInLine(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	mustExec(t, f, `DELETE FROM asks`)
+	mustExec(t, f, `UPDATE trip_occurrences SET seats_free = 1`)
+	mustExec(t, f, `UPDATE ride_requests SET status = 'open'`)
+	second := f.otherPassenger("+306900000003", 1)
+
+	askID, err := f.matcher().AskNext(ctx, f.requestID)
+	must(t, err, "first AskNext")
+	if n := f.asksFor(second); n != 0 {
+		t.Fatalf("%d asks for the second passenger while the seat was spoken for, want none", n)
+	}
+
+	must(t, f.matcher().Decline(ctx, askID, f.driverID), "Decline")
+	f.drain(t)
+
+	if n := f.asksFor(second); n != 1 {
+		t.Fatalf("%d asks for the next in line after the seat was given up, want 1", n)
+	}
+}
+
 // Cancelling a booking gives the seat back, and the trip is offered to whoever
 // was told there was no room on it.
 func TestReturningASeatOffersTheTripToSomebodyWaiting(t *testing.T) {

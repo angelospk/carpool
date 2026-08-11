@@ -348,7 +348,7 @@ func (s *Service) Decline(ctx context.Context, askID, driverID uuid.UUID) error 
 		askID, s.clock.Now()); err != nil {
 		return fmt.Errorf("asks: marking ask declined: %w", err)
 	}
-	if err := s.requeue(ctx, tx, requestID, "declined"); err != nil {
+	if err := s.requeue(ctx, tx, requestID, occurrenceID, "declined"); err != nil {
 		return err
 	}
 
@@ -409,18 +409,20 @@ func (s *Service) expireOne(ctx context.Context, askID, requestID uuid.UUID, now
 		return false, fmt.Errorf("asks: locking request: %w", err)
 	}
 
-	tag, err := tx.Exec(ctx, `
+	var occurrenceID uuid.UUID
+	err = tx.QueryRow(ctx, `
 		UPDATE asks SET status = 'expired', responded_at = $2
-		WHERE id = $1 AND status = 'pending' AND expires_at <= $2`, askID, now)
-	if err != nil {
-		return false, fmt.Errorf("asks: expiring ask: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
+		WHERE id = $1 AND status = 'pending' AND expires_at <= $2
+		RETURNING occurrence_id`, askID, now).Scan(&occurrenceID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		// An accept or decline won the race; nothing to do.
 		return false, nil
 	}
+	if err != nil {
+		return false, fmt.Errorf("asks: expiring ask: %w", err)
+	}
 
-	if err := s.requeue(ctx, tx, requestID, "expired"); err != nil {
+	if err := s.requeue(ctx, tx, requestID, occurrenceID, "expired"); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -431,7 +433,21 @@ func (s *Service) expireOne(ctx context.Context, askID, requestID uuid.UUID, now
 
 // requeue puts a request back in the matching queue via the outbox, so the next
 // candidate is approached by the same at-least-once path as everything else.
-func (s *Service) requeue(ctx context.Context, tx pgx.Tx, requestID uuid.UUID, reason string) error {
+func (s *Service) requeue(
+	ctx context.Context, tx pgx.Tx, requestID, occurrenceID uuid.UUID, reason string,
+) error {
+	// The offer that just ended was holding a seat against the cap, so the trip
+	// has room it did not have a moment ago. Waking it matters most on a
+	// one-seat trip, where everybody behind the first offer was turned away:
+	// without this the queue never moves, and a trip with a free seat and
+	// several people wanting it asks none of them.
+	//
+	// Queued before the early return below, because the seat comes back whether
+	// or not this particular request is still looking.
+	if err := outbox.Wake(ctx, tx, occurrenceID, "offer_"+reason, s.clock.Now()); err != nil {
+		return err
+	}
+
 	tag, err := tx.Exec(ctx,
 		`UPDATE ride_requests SET status = 'open', updated_at = now()
 		 WHERE id = $1 AND status IN ('open','asking')`, requestID)
