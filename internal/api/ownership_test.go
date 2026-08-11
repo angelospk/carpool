@@ -22,6 +22,13 @@ import (
 // checks ownership after it acts looks identical to one that checks before
 // until you count the rows.
 
+// Two routes with a path parameter are deliberately absent from the table.
+// `/v1/users/{id}/block` and `/report` take somebody else's id by design —
+// blocking a person you have never met is the point of them. And
+// `/v1/trips/{id}/socket` is only registered when a Hub is wired, which this
+// harness does not do; it shares tripParams with every other trip route, so the
+// membership check it depends on is the one exercised above.
+
 // stranger is a fully signed-up account with nothing to do with the fixture.
 type ownedWorld struct {
 	*harness
