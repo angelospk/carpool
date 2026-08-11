@@ -15,6 +15,7 @@ import (
 
 	"carpool/internal/clock"
 	"carpool/internal/domain"
+	"carpool/internal/outbox"
 	"carpool/internal/store"
 )
 
@@ -187,7 +188,8 @@ func (m *Materializer) upsert(
 	tmpl templateSnapshot, planned []domain.PlannedOccurrence, now time.Time,
 ) error {
 	for _, p := range planned {
-		_, err := tx.Exec(ctx, `
+		var occurrenceID uuid.UUID
+		err := tx.QueryRow(ctx, `
 			INSERT INTO trip_occurrences (
 				template_id, service_date, depart_earliest, depart_latest,
 				seats_total, seats_free, template_revision,
@@ -218,12 +220,28 @@ func (m *Materializer) upsert(
 			    luggage_capacity  = EXCLUDED.luggage_capacity,
 			    contribution_share = EXCLUDED.contribution_share,
 			    updated_at        = now()
-			WHERE `+mutablePredicate("$11"),
+			WHERE `+mutablePredicate("$11")+`
+			RETURNING id`,
 			templateID, p.ServiceDate.String(), p.DepartEarliest, p.DepartLatest,
 			tmpl.seats, tmpl.revision, tmpl.routeWKT, tmpl.routeKm, tmpl.routeMin, tmpl.pricingMode,
-			now, tmpl.endsAtPort, tmpl.allowStops, tmpl.detourKm, tmpl.detourMin, tmpl.vehicleID, tmpl.luggage, tmpl.luggageCapacity, tmpl.share)
+			now, tmpl.endsAtPort, tmpl.allowStops, tmpl.detourKm, tmpl.detourMin, tmpl.vehicleID, tmpl.luggage, tmpl.luggageCapacity, tmpl.share).
+			Scan(&occurrenceID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The conflict clause declined to touch it: somebody has booked it,
+			// a driver is being asked about it, or it has already left. Nothing
+			// became available, so there is nobody to wake.
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("jobs: upserting occurrence %s: %w", p.ServiceDate, err)
+		}
+
+		// A trip nobody knew about a moment ago, or one whose shape just
+		// changed. Either way there may be somebody on this corridor whose
+		// request found no driver when they made it, and this is the only
+		// moment anything looks.
+		if err := outbox.Wake(ctx, tx, occurrenceID, "materialised", now); err != nil {
+			return err
 		}
 	}
 	return nil

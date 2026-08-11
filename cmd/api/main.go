@@ -144,8 +144,11 @@ func run() error {
 		func(ctx context.Context, requestID uuid.UUID) error {
 			_, err := askSvc.AskNext(ctx, requestID)
 			if errors.Is(err, asks.ErrNoCandidates) {
-				// Nobody left to ask. The request stays open and is retried when
-				// a new occurrence is materialized.
+				// Nobody to ask right now. The request stays open, and a trip
+				// becoming available on its corridor wakes it: publishing,
+				// materializing and giving a seat back all queue a wake_waiting
+				// that puts it back through here. Until that existed this was a
+				// dead end, and the request expired next to a car with room.
 				return nil
 			}
 			return err

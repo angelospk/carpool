@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/clock"
+	"carpool/internal/match"
 	"carpool/internal/outbox"
 	"carpool/internal/push"
 )
@@ -51,6 +52,8 @@ func (r *Router) Handle(ctx context.Context, m outbox.Message) error {
 		return r.handlePush(ctx, m)
 	case "ask_next":
 		return r.handleAskNext(ctx, m)
+	case "wake_waiting":
+		return r.handleWake(ctx, m)
 	default:
 		// An unknown kind will never become known by retrying.
 		return fmt.Errorf("%w: unknown outbox kind %q", outbox.ErrPermanent, m.Kind)
@@ -206,4 +209,77 @@ func (r *Router) handleAskNext(ctx context.Context, m outbox.Message) error {
 		return fmt.Errorf("%w: ask_next payload names no request", outbox.ErrPermanent)
 	}
 	return r.askNext(ctx, p.RequestID)
+}
+
+// WakeShortlist bounds how many waiting requests one trip wakes at a time.
+//
+// The rest are not lost: they keep their place in the queue, which is ordered
+// by how long each has waited, and the next thing that happens to this trip
+// wakes them. A driver declining or letting an offer lapse is such a thing, so
+// the queue drains on its own as the conversation moves.
+const WakeShortlist = 10
+
+// handleWake asks a trip who has been waiting for it, and puts each of them
+// back through the ordinary ask machinery.
+//
+// A trip that has been cancelled, filled or deleted since the wake was queued
+// simply wakes nobody: the query returns no rows and the message is done. That
+// is the right answer rather than a failure, because retrying cannot bring a
+// cancelled trip back and dead-lettering it would say something went wrong when
+// nothing did.
+func (r *Router) handleWake(ctx context.Context, m outbox.Message) error {
+	var p struct {
+		OccurrenceID uuid.UUID `json:"occurrence_id"`
+	}
+	if err := json.Unmarshal(m.Payload, &p); err != nil {
+		return fmt.Errorf("%w: undecodable wake_waiting payload: %v", outbox.ErrPermanent, err)
+	}
+	if p.OccurrenceID == uuid.Nil {
+		return fmt.Errorf("%w: wake_waiting payload names no occurrence", outbox.ErrPermanent)
+	}
+
+	waiting, err := match.Waiting(ctx, r.pool, match.WaitingQuery{
+		OccurrenceID: p.OccurrenceID,
+		Now:          r.clock.Now(),
+		Limit:        WakeShortlist,
+	})
+	if err != nil {
+		return err
+	}
+	if len(waiting) == WakeShortlist {
+		// Said out loud rather than left to be inferred. A cap that silently
+		// truncates reads afterwards as "everyone was reached".
+		slog.Info("waking a shortlist of the requests waiting for a trip",
+			"occurrence", p.OccurrenceID, "woken", len(waiting),
+			"note", "more may be waiting; they keep their place and the next change to this trip wakes them")
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("dispatch: begin wake: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	for _, requestID := range waiting {
+		payload, err := json.Marshal(map[string]any{"request_id": requestID})
+		if err != nil {
+			return fmt.Errorf("dispatch: encoding ask_next for %s: %w", requestID, err)
+		}
+		// Keyed off this wake rather than the clock. The handler is retried
+		// whole, so a crash after the seventh of ten children has to produce
+		// the same ten keys on the way back through, or the first six arrive
+		// twice and the same driver is asked twice about the same trip.
+		if err := outbox.Enqueue(ctx, tx, outbox.Message{
+			Kind:           "ask_next",
+			IdempotencyKey: "ask_next:wake:" + m.IdempotencyKey + ":" + requestID.String(),
+			Payload:        payload,
+		}, r.clock.Now()); err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("dispatch: commit wake: %w", err)
+	}
+	return nil
 }

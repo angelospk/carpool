@@ -246,24 +246,39 @@ func (s *Service) giveBackTheirSeats(ctx context.Context, tx pgx.Tx, userID uuid
 			  FROM released r WHERE o.id = r.occurrence_id
 			RETURNING o.id
 		)
-		SELECT r.id, t.driver_id
+		SELECT r.id, t.driver_id, r.occurrence_id
 		  FROM released r
 		  JOIN trip_occurrences o ON o.id = r.occurrence_id
 		  JOIN route_templates t  ON t.id = o.template_id`, userID, now)
 	if err != nil {
 		return nil, fmt.Errorf("moderation: giving back their seats: %w", err)
 	}
-	defer rows.Close()
 
-	var out []told
+	var (
+		out   []told
+		freed []uuid.UUID
+	)
 	for rows.Next() {
 		var n told
-		if err := rows.Scan(&n.booking, &n.recipient); err != nil {
+		var occurrenceID uuid.UUID
+		if err := rows.Scan(&n.booking, &n.recipient, &occurrenceID); err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("moderation: reading the released seats: %w", err)
 		}
 		out = append(out, n)
+		freed = append(freed, occurrenceID)
 	}
-	return out, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// The suspended passenger's seats are free again, and the trips they were
+	// holding may be what somebody else has been waiting for.
+	if err := outbox.WakeAll(ctx, tx, freed, "seat_returned", now); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Service) record(ctx context.Context, tx pgx.Tx, userID, actorID uuid.UUID, action, reason string) error {

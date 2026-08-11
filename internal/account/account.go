@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/clock"
+	"carpool/internal/outbox"
 )
 
 // ErrNotFound means there is no such account.
@@ -70,7 +71,7 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 	// Seats first, while the account can still be identified. A deleted person
 	// holding next Tuesday's seat is a seat nobody can use and a driver who
 	// stops for nobody.
-	if _, err := tx.Exec(ctx, `
+	rows, err := tx.Query(ctx, `
 		WITH released AS (
 			UPDATE bookings b
 			SET status = 'cancelled_by_passenger', updated_at = now()
@@ -83,8 +84,29 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 		)
 		UPDATE trip_occurrences o
 		SET seats_free = o.seats_free + r.seats, updated_at = now()
-		FROM released r WHERE o.id = r.occurrence_id`, userID, now); err != nil {
+		FROM released r WHERE o.id = r.occurrence_id
+		RETURNING o.id`, userID, now)
+	if err != nil {
 		return fmt.Errorf("account: releasing seats: %w", err)
+	}
+	var freed []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("account: reading a released seat: %w", err)
+		}
+		freed = append(freed, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("account: releasing seats: %w", err)
+	}
+
+	// Somebody leaving gives their seats back, and those trips may be exactly
+	// what another passenger has been waiting on.
+	if err := outbox.WakeAll(ctx, tx, freed, "seat_returned", now); err != nil {
+		return err
 	}
 
 	// Stop offering rides that nobody will now turn up to drive, and withdraw

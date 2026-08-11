@@ -415,7 +415,7 @@ func (s *Service) releaseFutureWeeks(
 	}
 	// The seat is returned from the same statement that spends the booking's
 	// confirmed status, so a repeat can never give it back twice.
-	_, err := tx.Exec(ctx, `
+	rows, err := tx.Query(ctx, `
 		WITH released AS (
 			UPDATE bookings b
 			SET status = $2, updated_at = now()
@@ -428,11 +428,28 @@ func (s *Service) releaseFutureWeeks(
 		)
 		UPDATE trip_occurrences o
 		SET seats_free = o.seats_free + r.seats, updated_at = now()
-		FROM released r WHERE o.id = r.occurrence_id`, arrangementID, status, now)
+		FROM released r WHERE o.id = r.occurrence_id
+		RETURNING o.id`, arrangementID, status, now)
 	if err != nil {
 		return fmt.Errorf("standing: releasing the weeks ahead: %w", err)
 	}
-	return nil
+
+	var freed []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("standing: reading a released week: %w", err)
+		}
+		freed = append(freed, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("standing: releasing the weeks ahead: %w", err)
+	}
+
+	// Every week this gave back is a trip with room on it again.
+	return outbox.WakeAll(ctx, tx, freed, "seat_returned", now)
 }
 
 // Arrangement is the view both sides need to render the switch honestly: what

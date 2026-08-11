@@ -115,7 +115,8 @@ func (s *Service) Cancel(ctx context.Context, bookingID, userID uuid.UUID) error
 
 	// The seat is returned by the same statement that spends the booking's
 	// confirmed status. Two statements would let a repeat give it back twice.
-	if _, err := tx.Exec(ctx, `
+	var freed []uuid.UUID
+	rows, err := tx.Query(ctx, `
 		WITH released AS (
 			UPDATE bookings SET status = $2, updated_at = now()
 			WHERE id = $1 AND status = 'confirmed'
@@ -123,8 +124,28 @@ func (s *Service) Cancel(ctx context.Context, bookingID, userID uuid.UUID) error
 		)
 		UPDATE trip_occurrences o
 		SET seats_free = o.seats_free + r.seats, updated_at = now()
-		FROM released r WHERE o.id = r.occurrence_id`, bookingID, to); err != nil {
+		FROM released r WHERE o.id = r.occurrence_id
+		RETURNING o.id`, bookingID, to)
+	if err != nil {
 		return fmt.Errorf("bookings: cancelling: %w", err)
+	}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("bookings: reading the freed seat: %w", err)
+		}
+		freed = append(freed, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("bookings: cancelling: %w", err)
+	}
+
+	// A seat coming back is a trip becoming available again, and somebody on
+	// this corridor may have been told there was no room on it.
+	if err := outbox.WakeAll(ctx, tx, freed, "seat_returned", now); err != nil {
+		return err
 	}
 
 	// Whoever did not act is the one who needs telling, and they need telling
