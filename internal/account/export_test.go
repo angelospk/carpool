@@ -1,0 +1,137 @@
+package account_test
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+// A subject access request is answered by what is in the file, not by what the
+// person happens to remember asking for.
+//
+// The export covered the journeys and the conversations and stopped there. Four
+// things it held about somebody were left out, and the registration plate is
+// the one that makes the point: it is copied off the άδεια κυκλοφορίας, it is
+// stored against their name, and the only way they could see it was to open the
+// app and read the garage screen — which is not what "a copy of your data"
+// means.
+func TestTheExportHoldsTheCarAndTheChoicesMadeAboutOtherPeople(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	// Somebody they would rather not be matched with, and a complaint they
+	// filed. Both are things they did, and both are held against their name.
+	if _, err := w.pool.Exec(ctx,
+		`INSERT INTO blocks (blocker_id, blocked_id) VALUES ($1, $2)`,
+		w.driverID, w.passengerID); err != nil {
+		t.Fatalf("seeding the block: %v", err)
+	}
+	if _, err := w.pool.Exec(ctx,
+		`INSERT INTO reports (reporter_id, reported_id, reason) VALUES ($1, $2, 'οδηγούσε επικίνδυνα')`,
+		w.driverID, w.passengerID); err != nil {
+		t.Fatalf("seeding the report: %v", err)
+	}
+
+	body, err := w.svc.Export(ctx, w.driverID)
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("the export is not readable JSON: %v", err)
+	}
+
+	for _, section := range []string{"vehicles", "driver_settings", "people_blocked", "reports_made"} {
+		items, ok := out[section].([]any)
+		if !ok || len(items) == 0 {
+			t.Errorf("%s is missing from the export", section)
+		}
+	}
+
+	cars, _ := out["vehicles"].([]any)
+	if len(cars) > 0 {
+		car, _ := cars[0].(map[string]any)
+		if car["plate"] == nil || car["plate"] == "" {
+			t.Errorf("the export lists a car without its plate: %v", car)
+		}
+	}
+}
+
+// A report names somebody else. What the person filed is theirs to have; who
+// they filed it about is a second person's business, and a report filed against
+// them is not theirs at all — it would tell them who complained.
+func TestTheExportDoesNotHandOverTheOtherPersonInAComplaint(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	if _, err := w.pool.Exec(ctx,
+		`INSERT INTO reports (reporter_id, reported_id, reason) VALUES ($1, $2, 'με απείλησε')`,
+		w.driverID, w.passengerID); err != nil {
+		t.Fatalf("seeding the report: %v", err)
+	}
+
+	body, err := w.svc.Export(ctx, w.passengerID)
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("the export is not readable JSON: %v", err)
+	}
+	if items, _ := out["reports_made"].([]any); len(items) != 0 {
+		t.Fatalf("somebody's export lists a complaint made about them: %v", items)
+	}
+	if strings.Contains(string(body), w.driverID.String()) {
+		t.Fatal("the export carries another person's id")
+	}
+}
+
+
+// Erasure has to reach the garage.
+//
+// The driver_profiles row is scrubbed, and there is a careful comment saying
+// why the row survives the scrubbing. The vehicles table arrived later and was
+// never added: a registration plate, a make, a model and a colour stayed
+// readable against an account whose owner had asked to be erased. A plate is
+// how somebody is found — it is the one identifier here that a stranger can
+// look up while standing next to the car.
+func TestErasureReachesTheGarage(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	if err := w.svc.Delete(ctx, w.driverID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	rows, err := w.pool.Query(ctx,
+		`SELECT plate, make, model, colour FROM vehicles WHERE owner_id = $1`, w.driverID)
+	if err != nil {
+		t.Fatalf("reading the garage: %v", err)
+	}
+	defer rows.Close()
+
+	var seen int
+	for rows.Next() {
+		var plate, make_ string
+		var model string
+		var colour *string
+		if err := rows.Scan(&plate, &make_, &model, &colour); err != nil {
+			t.Fatalf("scanning: %v", err)
+		}
+		seen++
+		if plate != "—" {
+			t.Errorf("the plate %q survives erasure", plate)
+		}
+		if colour != nil {
+			t.Errorf("the colour %q survives erasure", *colour)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("reading the garage: %v", err)
+	}
+	if seen == 0 {
+		t.Fatal("the fixture has no car, so this test proves nothing")
+	}
+}

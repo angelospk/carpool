@@ -178,6 +178,26 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 		return fmt.Errorf("account: clearing the vehicle: %w", err)
 	}
 
+	// And the garage, which is where the car has actually lived since a driver
+	// could have more than one of them. The scrubbing above was written when
+	// driver_profiles held the only copy, and the plate stayed readable here.
+	//
+	// It is the sharpest identifier in the database. A phone number needs
+	// somebody to already have it; a plate is on the outside of the car, and
+	// anybody standing next to it can look the owner up.
+	//
+	// Rows kept for the same reason as the profile: trip_occurrences names the
+	// vehicle each departure ran with, and route_templates points at the pair.
+	// The consumption figures stay too — they are what a past trip's suggested
+	// contribution was worked out from, and a receipt that no longer adds up is
+	// a worse thing to leave behind than an anonymous engine size.
+	if _, err := tx.Exec(ctx, `
+		UPDATE vehicles
+		SET make = '—', model = '—', plate = '—', colour = NULL, label = NULL, updated_at = now()
+		WHERE owner_id = $1`, userID); err != nil {
+		return fmt.Errorf("account: clearing the garage: %w", err)
+	}
+
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO data_requests (user_id, kind, handled_at)
 		VALUES ($1, 'erasure', $2)`, userID, now); err != nil {
@@ -260,6 +280,33 @@ func (s *Service) Export(ctx context.Context, userID uuid.UUID) ([]byte, error) 
 		{"invite_codes", `
 			SELECT code, max_uses, used_count, created_at
 			FROM invite_codes WHERE created_by = $1 ORDER BY created_at`},
+		// The car and the settings behind it. Copied off the άδεια κυκλοφορίας
+		// and held against their name, and until now the only way to see it was
+		// to open the garage screen — which is not what a copy of your data
+		// means. The plate above all: it identifies a vehicle and, through it, a
+		// person, on a document they handed us.
+		{"vehicles", `
+			SELECT make, model, label, plate, fuel, engine_cc, co2_g_km,
+			       consumption_l_100km, consumption_source, is_default, retired_at, created_at
+			FROM vehicles WHERE owner_id = $1 ORDER BY created_at`},
+		{"driver_settings", `
+			SELECT detour_budget_min, notify_radius_km, notifications_muted,
+			       wear_factor, free_below_km, created_at
+			FROM driver_profiles WHERE user_id = $1`},
+		// Choices they made about other people. Theirs to have a copy of, and
+		// deliberately without the other person: somebody is entitled to know
+		// they blocked two people, not to be handed the pair of identifiers.
+		{"people_blocked", `
+			SELECT created_at FROM blocks WHERE blocker_id = $1 ORDER BY created_at`},
+		// What they reported, never what was reported about them. The second
+		// would name whoever complained, and telling somebody who reported them
+		// is how a report becomes a reason not to make one.
+		{"reports_made", `
+			SELECT reason, status, created_at FROM reports
+			WHERE reporter_id = $1 ORDER BY created_at`},
+		{"meeting_points_proposed", `
+			SELECT place_id, name, kind, action, status, created_at
+			FROM meeting_point_requests WHERE proposed_by = $1 ORDER BY created_at`},
 	}
 	for _, section := range sections {
 		rows, err := s.pool.Query(ctx, section.sql, userID)
