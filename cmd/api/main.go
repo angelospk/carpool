@@ -165,6 +165,16 @@ func run() error {
 	materializer := jobs.NewMaterializer(pool, clk, athens)
 	start(ctx, &workers, "occurrence materializer", materializeInterval, materializer.Run)
 	start(ctx, &workers, "retention janitor", retentionInterval, jobs.NewJanitor(pool, clk).Run)
+	// The safety net under the wakes. Publishing a trip, materializing one,
+	// giving a seat back and ending an offer all wake the requests waiting on
+	// that corridor within seconds. This catches what has no event: a driver
+	// turning notifications back on, widening their radius, coming off a
+	// suspension — and whatever the wake's shortlist left behind.
+	reconciler := jobs.NewReconciler(pool, clk)
+	start(ctx, &workers, "match reconciler", jobs.ReconcileInterval, func(ctx context.Context) error {
+		_, err := reconciler.Run(ctx)
+		return err
+	})
 
 	sessions := auth.NewSessionService(pool, clk, issuer)
 
