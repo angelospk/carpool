@@ -61,7 +61,7 @@ export default function RequestScreen() {
       {matched ? (
         <Button
           testID="request-go-to-trips"
-          label={t('request.seeTheTrip')}
+          label={t('request.seeMyTrips')}
           onPress={() => router.replace('/(tabs)')}
         />
       ) : (

@@ -125,12 +125,18 @@ func (m *Materializer) reconcile(ctx context.Context, templateID uuid.UUID) erro
 	// this a single run could commit a horizon spanning two revisions.
 	var tmpl templateSnapshot
 	err = tx.QueryRow(ctx, `
-		SELECT revision, seats, route_km, route_min, pricing_mode, ends_at_port,
-		       allow_stops, detour_km, detour_min, ST_AsText(route_geom), vehicle_id, luggage, luggage_capacity, contribution_share
-		FROM route_templates
-		WHERE id = $1 AND active
-		  AND EXISTS (SELECT 1 FROM users u WHERE u.id = driver_id AND u.status = 'active')
-		FOR UPDATE`, templateID).Scan(
+		SELECT t.revision, t.seats, t.route_km, t.route_min, t.pricing_mode, t.ends_at_port,
+		       t.allow_stops, t.detour_km, t.detour_min, ST_AsText(t.route_geom), t.vehicle_id,
+		       t.luggage, t.luggage_capacity, t.contribution_share
+		FROM route_templates t
+		JOIN users u ON u.id = t.driver_id AND u.status = 'active'
+		WHERE t.id = $1 AND t.active
+		-- The driver's row is held too, for the same reason the ask paths hold
+		-- it: suspension takes it FOR UPDATE, so sharing it here means one of
+		-- the two waits and sees what the other did, rather than this run
+		-- planning a fortnight of departures against a status that changed
+		-- while it was reading the schedule.
+		FOR UPDATE OF t FOR SHARE OF u`, templateID).Scan(
 		&tmpl.revision, &tmpl.seats, &tmpl.routeKm, &tmpl.routeMin, &tmpl.pricingMode, &tmpl.endsAtPort,
 		&tmpl.allowStops, &tmpl.detourKm, &tmpl.detourMin, &tmpl.routeWKT, &tmpl.vehicleID,
 		&tmpl.luggage, &tmpl.luggageCapacity, &tmpl.share)

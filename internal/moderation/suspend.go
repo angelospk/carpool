@@ -304,7 +304,7 @@ func (s *Service) withdrawTheirMatching(ctx context.Context, tx pgx.Tx, userID u
 	// back twice.
 	rows, err := tx.Query(ctx, `
 		WITH mine AS (
-			SELECT a.id, a.occurrence_id
+			SELECT a.id, a.occurrence_id, a.request_id
 			  FROM asks a
 			  JOIN ride_requests   rr ON rr.id = a.request_id
 			  JOIN trip_occurrences o ON o.id = a.occurrence_id
@@ -315,26 +315,32 @@ func (s *Service) withdrawTheirMatching(ctx context.Context, tx pgx.Tx, userID u
 		cancelled AS (
 			UPDATE asks SET status = 'cancelled', responded_at = $2
 			 WHERE id IN (SELECT id FROM mine) AND status = 'pending'
-			RETURNING occurrence_id
+			RETURNING occurrence_id, request_id
 		)
-		-- Only the trips that are still running: a seat coming back on a
-		-- departure this same suspension has just called off is not news to
-		-- anybody, and waking it would offer a suspended driver's trip around.
-		SELECT DISTINCT c.occurrence_id
+		SELECT c.occurrence_id, c.request_id, o.status
 		  FROM cancelled c
-		  JOIN trip_occurrences o ON o.id = c.occurrence_id
-		 WHERE o.status = 'scheduled'`, userID, now)
+		  JOIN trip_occurrences o ON o.id = c.occurrence_id`, userID, now)
 	if err != nil {
 		return fmt.Errorf("moderation: withdrawing their offers: %w", err)
 	}
-	var freed []uuid.UUID
+	var (
+		freed    []uuid.UUID
+		stranded []uuid.UUID
+	)
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var occurrenceID, requestID uuid.UUID
+		var occurrenceState string
+		if err := rows.Scan(&occurrenceID, &requestID, &occurrenceState); err != nil {
 			rows.Close()
 			return fmt.Errorf("moderation: reading the withdrawn offers: %w", err)
 		}
-		freed = append(freed, id)
+		// Only the trips still running. A seat coming back on a departure this
+		// same suspension has just called off is not news to anybody, and waking
+		// it would hand a suspended driver's trip around.
+		if occurrenceState == "scheduled" {
+			freed = append(freed, occurrenceID)
+		}
+		stranded = append(stranded, requestID)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -344,6 +350,20 @@ func (s *Service) withdrawTheirMatching(ctx context.Context, tx pgx.Tx, userID u
 	// That offer was holding a seat against the admission count, so the trip has
 	// room it did not have a moment ago, and somebody was told there was none.
 	if err := outbox.WakeAll(ctx, tx, freed, "seat_returned", now); err != nil {
+		return err
+	}
+
+	// And the person on the other end of a withdrawn offer, who is not the one
+	// being suspended and has done nothing.
+	//
+	// Their request sits at 'asking', waiting on the one answer that has just
+	// been taken away. Nothing looks at a request in that state — not the
+	// matcher, which wants 'open', and not the reconciler that exists to catch
+	// what everything else missed. Without this they wait on the searching
+	// screen for ever. Their own status is checked because the same statement
+	// covers the case where the suspended person is the passenger, and putting
+	// their request back would undo the withdrawal two lines below.
+	if err := s.requeueStranded(ctx, tx, stranded, userID, now); err != nil {
 		return err
 	}
 
@@ -372,6 +392,65 @@ func (s *Service) withdrawTheirMatching(ctx context.Context, tx pgx.Tx, userID u
 		return fmt.Errorf("moderation: ending their standing arrangements: %w", err)
 	}
 
+	return nil
+}
+
+// requeueStranded puts the other party's request back in the queue and asks the
+// next driver, for every offer this suspension withdrew.
+//
+// The request goes back to 'open' only when its passenger is somebody else and
+// nothing else is now offering it a seat: the same person can hold offers on two
+// trips at once, and reopening on the first would let the second be answered
+// against a request the app had already put back out to tender.
+func (s *Service) requeueStranded(
+	ctx context.Context, tx pgx.Tx, requestIDs []uuid.UUID, suspended uuid.UUID, now time.Time,
+) error {
+	if len(requestIDs) == 0 {
+		return nil
+	}
+
+	rows, err := tx.Query(ctx, `
+		UPDATE ride_requests rr SET status = 'open', updated_at = now()
+		 WHERE rr.id = ANY($1)
+		   AND rr.status = 'asking'
+		   AND rr.passenger_id <> $2
+		   AND NOT EXISTS (
+		         SELECT 1 FROM asks a
+		          WHERE a.request_id = rr.id AND a.status = 'pending')
+		RETURNING rr.id`, requestIDs, suspended)
+	if err != nil {
+		return fmt.Errorf("moderation: putting the other passengers back in the queue: %w", err)
+	}
+	var reopened []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("moderation: reading the reopened requests: %w", err)
+		}
+		reopened = append(reopened, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("moderation: putting the other passengers back in the queue: %w", err)
+	}
+
+	// Asked again through the outbox like every other continuation, rather than
+	// left for the hourly reconciler. Somebody whose driver was suspended should
+	// not wait up to an hour to find out somebody else can take them.
+	for _, id := range reopened {
+		payload, err := json.Marshal(map[string]any{"request_id": id})
+		if err != nil {
+			return fmt.Errorf("moderation: encoding the next ask: %w", err)
+		}
+		if err := outbox.Enqueue(ctx, tx, outbox.Message{
+			Kind:           "ask_next",
+			IdempotencyKey: "ask_next:withdrawn:" + suspended.String() + ":" + id.String(),
+			Payload:        payload,
+		}, now); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

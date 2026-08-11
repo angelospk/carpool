@@ -136,6 +136,23 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 		  WHERE rr.id = a.request_id AND o.id = a.occurrence_id AND t.id = o.template_id
 		    AND a.status = 'pending'
 		    AND (rr.passenger_id = $1 OR t.driver_id = $1)`,
+		// And whoever was waiting on one of those offers, who is not the person
+		// leaving. Their request sits at 'asking' waiting on an answer that has
+		// just been withdrawn, and nothing looks at a request in that state
+		// again — not the matcher, which wants 'open', and not the reconciler
+		// that exists to catch what the events miss. The matcher is what asks
+		// the next driver: a wake on the occurrence would not do, because the
+		// departures of the person leaving have just been cancelled too.
+		`UPDATE ride_requests rr SET status = 'open', updated_at = now()
+		  WHERE rr.status = 'asking'
+		    AND rr.passenger_id <> $1
+		    AND $2::timestamptz IS NOT NULL
+		    AND EXISTS (
+		          SELECT 1 FROM asks a
+		           WHERE a.request_id = rr.id AND a.status = 'cancelled' AND a.responded_at = $2)
+		    AND NOT EXISTS (
+		          SELECT 1 FROM asks a
+		           WHERE a.request_id = rr.id AND a.status = 'pending')`,
 		// Credentials and reachability go outright: they identify a living
 		// person and serve no purpose once the account is closed.
 		`DELETE FROM push_tokens WHERE user_id = $1 AND $2::timestamptz IS NOT NULL`,

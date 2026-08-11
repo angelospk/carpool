@@ -242,7 +242,7 @@
   },
   "request": {
     "alreadyMatched": "A driver took your ride, so the request was not cancelled. If you can no longer go, cancel the booking from the trip.",
-    "seeTheTrip": "See the trip",
+    "seeMyTrips": "See your trips",
     "title": "Your request"
   },
   "search": {

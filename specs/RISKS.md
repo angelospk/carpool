@@ -704,3 +704,72 @@ Codex's related suggestion of a per-driver ceiling is *not* built. A driver with
 ten upcoming departures being asked about each is ten separate journeys, not
 spam. Revisit if the recurring-schedule work makes a driver materialise many
 occurrences at once and the asks arrive together.
+
+## A suspension that the matcher never heard about (found 2026-08-11)
+
+Found by a QA pass over the account-status boundary, with a Codex review of the
+fix.
+
+Suspending somebody stopped them using the app and never stopped the app using
+them. Their open request stayed in the queue, so the next trip published on that
+corridor woke it and a driver was offered a real seat to somebody who could not
+open the app to agree a meeting point or say they were not coming. An offer
+already on a driver's phone was still a tap away from the same booking. From the
+driver's side there is nothing to see: an ordinary passenger who never replies.
+
+Worse on the driver's side of it. The cascade cancels the departures and not the
+template behind them, and the materializer's job is to make what a schedule
+implies — including reviving a cancelled departure, which is right when a driver
+lifts an exception they had set. It looks for departures with no confirmed
+booking and no live offer, which the cascade has just arranged, and puts them
+back. Measured: one pass, nine departures, a suspended driver back in the pool.
+
+Four guards at four distances, because one of them being enough is what got us
+here:
+
+- the cascade withdraws the live offers, requests and weekly arrangements
+- the materializer skips a template whose driver is not active
+- both matching filters read the account, `= 'active'` and never
+  `<> 'suspended'`, which would let a closed account back in
+- accept and ask creation hold both people's rows `FOR SHARE` first, because a
+  status read is a filter and not a gate: suspension can commit between the read
+  and the insert, after the cascade has swept past.
+
+The materializer checks the driver rather than mirroring a flag onto the
+template, so reinstatement needs no bookkeeping about which routes a moderator
+switched off and which the driver had retired themselves.
+
+Two things deliberately not done. Reinstating within the horizon will let the
+materializer plan the mornings that were called off; the bookings stay cancelled
+and the departure simply becomes available again, which is what a reinstated
+driver's schedule means. And a push queued before the cascade can still be
+delivered for an ask that is now cancelled — the ask screen already handles a
+stale tap and says why, so revalidating every notification at delivery time buys
+a quieter phone at the cost of a database read per push and a new way for
+delivery to fail.
+
+## What the QA pass found that was not about suspension (2026-08-11)
+
+- `DELETE /v1/requests/{id}` discarded its row count, so every call answered 204:
+  somebody else's request, one that never existed, and one a driver had just
+  accepted. The screen it is called from is the one somebody sits on *while*
+  drivers are being asked, so the third case is ordinary rather than rare, and
+  the app read 204 as done and navigated home. They were told they were not
+  going while a seat was held in their name.
+- Nothing ever expired a ride request. Two filters read the window rather than
+  the status and each said in a comment that a sweeper would come along; there
+  was no sweeper, and `expired` was a status the schema allowed and no code path
+  could produce.
+- Erasure scrubbed `driver_profiles` and never touched `vehicles`, so the
+  registration plate survived a deletion. The export had the mirror gap: no car,
+  no driver settings, no blocks, no complaints filed.
+
+Left alone, with the reasoning:
+
+- The self-scoped lists (`/me/routes`, `/me/vehicles`, `/arrangements`,
+  `/me/reports`) have no pagination. Each is somebody's own data and bounded by
+  their own use of the app. Paginating five endpoints and five screens is
+  disproportionate before a pilot; revisit if publishing ever becomes automated.
+- A request whose window is in the past is accepted at creation. It matches
+  nothing and the sweeper now finishes it, so refusing it would only be a
+  friendlier error, not a fix.

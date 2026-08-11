@@ -183,15 +183,30 @@ func (d Deps) handleCancelRequest(w http.ResponseWriter, r *http.Request) {
 	case "open", "asking":
 		// Cancelling also kills any live ask, so a driver cannot accept a ride
 		// the passenger has already withdrawn.
-		if _, err := d.Pool.Exec(r.Context(), `
+		//
+		// The write is the authority, not the read above it. A driver accepting
+		// in the moment between the two is the same race this whole handler is
+		// about, only narrower: the statement would match nothing and answering
+		// 204 for it would be the original bug with a smaller window. So the
+		// affected row is returned, and when there is none the status is read
+		// again to say what actually happened.
+		var cancelled uuid.UUID
+		err := d.Pool.QueryRow(r.Context(), `
 			WITH cancelled AS (
 				UPDATE ride_requests SET status = 'cancelled', updated_at = now()
 				WHERE id = $1 AND passenger_id = $2 AND status IN ('open','asking')
 				RETURNING id
+			), killed AS (
+				UPDATE asks SET status = 'cancelled', responded_at = now()
+				WHERE request_id IN (SELECT id FROM cancelled) AND status = 'pending'
+				RETURNING request_id
 			)
-			UPDATE asks SET status = 'cancelled', responded_at = now()
-			WHERE request_id IN (SELECT id FROM cancelled) AND status = 'pending'`,
-			requestID, userID); err != nil {
+			SELECT id FROM cancelled`, requestID, userID).Scan(&cancelled)
+		if errors.Is(err, pgx.ErrNoRows) {
+			d.reportCancelRace(w, r, requestID, userID)
+			return
+		}
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal", "could not cancel the request")
 			return
 		}
@@ -208,6 +223,36 @@ func (d Deps) handleCancelRequest(w http.ResponseWriter, r *http.Request) {
 		// they asked for is true.
 	}
 
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// reportCancelRace answers when the cancelling statement matched nothing.
+//
+// Reached only when the request moved between the status read and the write,
+// which in practice means a driver accepted while the passenger was pressing
+// cancel. Re-reading is what keeps the answer honest for the one case that
+// matters: they must not be told the ride is off while somebody is driving to
+// meet them.
+func (d Deps) reportCancelRace(w http.ResponseWriter, r *http.Request, requestID, userID uuid.UUID) {
+	var status string
+	err := d.Pool.QueryRow(r.Context(),
+		`SELECT status FROM ride_requests WHERE id = $1 AND passenger_id = $2`,
+		requestID, userID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "not_found", "no such request")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not cancel the request")
+		return
+	}
+	if status == "matched" {
+		writeError(w, http.StatusConflict, "already_matched",
+			"a driver has taken this ride; cancel the booking instead")
+		return
+	}
+	// Cancelled or expired by something else in the meantime, which is what they
+	// were asking for.
 	w.WriteHeader(http.StatusNoContent)
 }
 

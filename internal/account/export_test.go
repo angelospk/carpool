@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // A subject access request is answered by what is in the file, not by what the
@@ -88,7 +90,6 @@ func TestTheExportDoesNotHandOverTheOtherPersonInAComplaint(t *testing.T) {
 	}
 }
 
-
 // Erasure has to reach the garage.
 //
 // The driver_profiles row is scrubbed, and there is a careful comment saying
@@ -133,5 +134,46 @@ func TestErasureReachesTheGarage(t *testing.T) {
 	}
 	if seen == 0 {
 		t.Fatal("the fixture has no car, so this test proves nothing")
+	}
+}
+
+// Closing an account withdraws the offers sitting with the person, and the
+// passenger on the other end of one must not be left waiting on an answer that
+// will never come. Same reasoning as the suspension cascade: a request at
+// 'asking' with no live offer is a request nothing looks at again.
+func TestClosingAnAccountPutsItsWaitingPassengersBack(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	var requestID uuid.UUID
+	if err := w.pool.QueryRow(ctx, `
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end,
+		                           seats, kind, status)
+		VALUES ($1, ST_SetSRID(ST_MakePoint(25.82,40.85),4326), ST_SetSRID(ST_MakePoint(25.98,40.85),4326),
+		        now(), now() + interval '2 hours', 1, 'open', 'asking')
+		RETURNING id`, w.passengerID).Scan(&requestID); err != nil {
+		t.Fatalf("seeding the request: %v", err)
+	}
+	if _, err := w.pool.Exec(ctx, `
+		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
+		                  suggested_price_eur, itinerary_version, status, expires_at)
+		SELECT $1, o.id, 5, 2, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+		       ST_SetSRID(ST_MakePoint(25.98,40.85),4326), 2.50, 0, 'pending', now() + interval '1 hour'
+		  FROM trip_occurrences o LIMIT 1`, requestID); err != nil {
+		t.Fatalf("seeding the ask: %v", err)
+	}
+
+	// The driver leaves, so the offer they were holding goes with them.
+	if err := w.svc.Delete(ctx, w.driverID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	var status string
+	if err := w.pool.QueryRow(ctx,
+		`SELECT status FROM ride_requests WHERE id = $1`, requestID).Scan(&status); err != nil {
+		t.Fatalf("reading the request: %v", err)
+	}
+	if status != "open" {
+		t.Fatalf("the waiting passenger's request is %q; nothing looks at one in that state again", status)
 	}
 }

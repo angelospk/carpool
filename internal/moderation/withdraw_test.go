@@ -182,3 +182,65 @@ func TestSuspendingADriverEndsTheArrangementsTheirPassengersHold(t *testing.T) {
 		t.Fatalf("%d weekly arrangements survive a suspended driver, want none", live)
 	}
 }
+
+// Withdrawing an offer must not strand the person on the other end of it.
+//
+// A request being put to a driver sits at 'asking' and is waiting on exactly one
+// answer. Cancelling that offer because the driver was suspended removes the
+// only thing that was ever going to answer it, and nothing else looks at a
+// request in that state: the matcher wants 'open', and so does the reconciler
+// that exists to catch what everything else missed. The passenger is left on the
+// searching screen for ever, with no driver being asked and no way to find out.
+func TestWithdrawingAnOfferPutsItsPassengerBackInTheQueue(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	askID := w.liveAsk(t)
+	var requestID uuid.UUID
+	if err := w.pool.QueryRow(ctx,
+		`SELECT request_id FROM asks WHERE id = $1`, askID).Scan(&requestID); err != nil {
+		t.Fatalf("finding the request: %v", err)
+	}
+
+	w.suspend() // the driver, so the passenger is untouched
+
+	var status string
+	if err := w.pool.QueryRow(ctx,
+		`SELECT status FROM ride_requests WHERE id = $1`, requestID).Scan(&status); err != nil {
+		t.Fatalf("reading the request: %v", err)
+	}
+	if status != "open" {
+		t.Fatalf("the passenger's request is %q; nothing looks at one in that state again", status)
+	}
+
+	var queued int
+	if err := w.pool.QueryRow(ctx,
+		`SELECT count(*) FROM outbox WHERE kind = 'ask_next'`).Scan(&queued); err != nil {
+		t.Fatalf("counting: %v", err)
+	}
+	if queued == 0 {
+		t.Fatal("no next driver is queued: the passenger waits for the hourly sweep at best")
+	}
+}
+
+// The suspended person's own requests stay withdrawn. Reopening those is the
+// bug this cascade exists to prevent.
+func TestReopeningDoesNotResurrectTheSuspendedPersonsOwnRequest(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	w.liveAsk(t)
+
+	if err := w.svc.Suspend(ctx, w.passenger, w.moderator, "harassment"); err != nil {
+		t.Fatalf("Suspend: %v", err)
+	}
+
+	var live int
+	if err := w.pool.QueryRow(ctx, `
+		SELECT count(*) FROM ride_requests
+		WHERE passenger_id = $1 AND status IN ('open','asking')`, w.passenger).Scan(&live); err != nil {
+		t.Fatalf("counting: %v", err)
+	}
+	if live != 0 {
+		t.Fatalf("%d of a suspended person's requests are back in the queue", live)
+	}
+}
