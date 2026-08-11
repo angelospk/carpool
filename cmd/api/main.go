@@ -162,6 +162,15 @@ func run() error {
 		_, err := askSvc.SweepExpired(ctx)
 		return err
 	})
+	// The other end of the same idea, and it was missing: an offer expired, a
+	// request never did. Both filters read the window rather than the status
+	// precisely because of that, and both said in a comment that a sweeper
+	// would come along. This is it.
+	requestSweeper := jobs.NewRequestSweeper(pool, clk)
+	start(ctx, &workers, "request sweeper", sweepInterval, func(ctx context.Context) error {
+		_, err := requestSweeper.Run(ctx)
+		return err
+	})
 	materializer := jobs.NewMaterializer(pool, clk, athens)
 	start(ctx, &workers, "occurrence materializer", materializeInterval, materializer.Run)
 	start(ctx, &workers, "retention janitor", retentionInterval, jobs.NewJanitor(pool, clk).Run)
