@@ -38,6 +38,11 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 		// Already matched, cancelled, or an ask is live: nothing to do.
 		return uuid.Nil, ErrNoCandidates
 	}
+	// Refused here as well as in the filter, because this is the cheaper of the
+	// two places to find out and it saves an OSRM round trip per candidate.
+	if req.PassengerStatus != "active" {
+		return uuid.Nil, ErrNoCandidates
+	}
 
 	candidates, err := match.Gross(ctx, s.pool, match.GrossQuery{
 		Origin:       match.Point{Lon: req.Origin.Lon, Lat: req.Origin.Lat},
@@ -115,6 +120,10 @@ type request struct {
 	WindowEnd   time.Time
 	Seats       int
 	Status      string
+	// PassengerStatus is the account's, not the request's. Somebody suspended
+	// between asking and being answered must not have drivers approached on
+	// their behalf.
+	PassengerStatus string
 	// Luggage is what this passenger is bringing, which decides which drivers
 	// are worth asking at all.
 	Luggage domain.Luggage
@@ -130,16 +139,18 @@ type request struct {
 func (s *Service) loadRequest(ctx context.Context, id uuid.UUID) (request, error) {
 	var r request
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, passenger_id,
-		       ST_X(origin), ST_Y(origin), ST_X(destination), ST_Y(destination),
-		       window_start, window_end, seats, status, target_occurrence_id,
-		       ST_Distance(origin::geography, destination::geography) / 1000,
-		       luggage, luggage_count
-		FROM ride_requests WHERE id = $1`, id).Scan(
+		SELECT rr.id, rr.passenger_id,
+		       ST_X(rr.origin), ST_Y(rr.origin), ST_X(rr.destination), ST_Y(rr.destination),
+		       rr.window_start, rr.window_end, rr.seats, rr.status, rr.target_occurrence_id,
+		       ST_Distance(rr.origin::geography, rr.destination::geography) / 1000,
+		       rr.luggage, rr.luggage_count, u.status
+		FROM ride_requests rr
+		JOIN users u ON u.id = rr.passenger_id
+		WHERE rr.id = $1`, id).Scan(
 		&r.ID, &r.PassengerID,
 		&r.Origin.Lon, &r.Origin.Lat, &r.Destination.Lon, &r.Destination.Lat,
 		&r.WindowStart, &r.WindowEnd, &r.Seats, &r.Status, &r.Target, &r.RequestKm,
-		&r.Luggage, &r.LuggageCount)
+		&r.Luggage, &r.LuggageCount, &r.PassengerStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return request{}, ErrNoCandidates
 	}
@@ -383,6 +394,19 @@ func (s *Service) createAsk(
 		return uuid.Nil, fmt.Errorf("asks: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Both people, before anything else they own. A status read on its own is a
+	// filter and not a gate: suspension can commit between the read and this
+	// insert, and the cascade that withdraws somebody's live work has already
+	// been past by then, so the ask it did not see survives it. Suspension takes
+	// the user row FOR UPDATE first, so sharing it here is what makes the two
+	// orders agree and the outcome decided rather than raced.
+	if err := lockParticipants(ctx, tx, c.DriverID, req.PassengerID); err != nil {
+		if errors.Is(err, errNotActive) {
+			return uuid.Nil, errNoRoomToAsk
+		}
+		return uuid.Nil, err
+	}
 
 	// Lock the occurrence before the request. Accepting an ask takes the
 	// occurrence first and touches the request after it, so this is the order

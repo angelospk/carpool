@@ -328,7 +328,12 @@ func TestGrossMatchUsesTheGeographyGISTIndex(t *testing.T) {
 		f.addOccurrence(t, wktLine(lon, lat, lon+0.2, lat))
 	}
 	f.addOccurrence(t, corridorWKT)
-	if _, err := f.pool.Exec(ctx, `ANALYZE route_templates; ANALYZE trip_occurrences; ANALYZE driver_profiles`); err != nil {
+	// Every table the query touches, users included. A table with no statistics
+	// is guessed at, and one bad guess is enough to move the join order off the
+	// spatial index and turn this test into a mystery about the planner rather
+	// than a statement about the query.
+	if _, err := f.pool.Exec(ctx,
+		`ANALYZE route_templates; ANALYZE trip_occurrences; ANALYZE driver_profiles; ANALYZE users`); err != nil {
 		t.Fatalf("ANALYZE: %v", err)
 	}
 

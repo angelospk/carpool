@@ -47,9 +47,27 @@ func NewMaterializer(pool *pgxpool.Pool, c clock.Clock, loc *time.Location) *Mat
 }
 
 // Run reconciles every active template's occurrences with its schedule.
+//
+// A template belonging to somebody who is not an active account is skipped, and
+// that is load-bearing rather than tidy. Suspending a driver calls off every
+// departure of theirs that has not left; it does not touch the template behind
+// them, because the template is not the thing that was wrong. This job then
+// finds occurrences with no confirmed booking and no live offer — the cascade
+// having just cancelled the bookings itself — which is precisely its definition
+// of one it may rewrite, and sets them back to 'scheduled'. A suspended driver
+// was in the matching pool again within one tick, and planning fresh departures
+// for every week ahead.
+//
+// It is checked here rather than mirrored onto the template's own `active` flag
+// so that reinstatement needs no bookkeeping: the driver becomes active and
+// their schedule starts planning again, with nothing to remember about which
+// routes a moderator switched off and which the driver had retired themselves.
 func (m *Materializer) Run(ctx context.Context) error {
-	rows, err := m.pool.Query(ctx,
-		`SELECT id FROM route_templates WHERE active ORDER BY id`)
+	rows, err := m.pool.Query(ctx, `
+		SELECT t.id FROM route_templates t
+		JOIN users u ON u.id = t.driver_id
+		WHERE t.active AND u.status = 'active'
+		ORDER BY t.id`)
 	if err != nil {
 		return fmt.Errorf("jobs: listing templates: %w", err)
 	}
@@ -109,13 +127,15 @@ func (m *Materializer) reconcile(ctx context.Context, templateID uuid.UUID) erro
 	err = tx.QueryRow(ctx, `
 		SELECT revision, seats, route_km, route_min, pricing_mode, ends_at_port,
 		       allow_stops, detour_km, detour_min, ST_AsText(route_geom), vehicle_id, luggage, luggage_capacity, contribution_share
-		FROM route_templates WHERE id = $1 AND active
+		FROM route_templates
+		WHERE id = $1 AND active
+		  AND EXISTS (SELECT 1 FROM users u WHERE u.id = driver_id AND u.status = 'active')
 		FOR UPDATE`, templateID).Scan(
 		&tmpl.revision, &tmpl.seats, &tmpl.routeKm, &tmpl.routeMin, &tmpl.pricingMode, &tmpl.endsAtPort,
 		&tmpl.allowStops, &tmpl.detourKm, &tmpl.detourMin, &tmpl.routeWKT, &tmpl.vehicleID,
 		&tmpl.luggage, &tmpl.luggageCapacity, &tmpl.share)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil // deactivated between listing and locking
+		return nil // deactivated, or its driver suspended, between listing and locking
 	}
 	if err != nil {
 		return fmt.Errorf("jobs: loading template: %w", err)

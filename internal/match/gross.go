@@ -155,6 +155,14 @@ WITH cand AS (
 	FROM trip_occurrences o
 	JOIN route_templates  t ON t.id = o.template_id
 	JOIN driver_profiles  d ON d.user_id = t.driver_id
+	-- Somebody who is suspended or gone is not a driver anybody can be sent to.
+	-- The suspension cascade already calls off their departures, so in an
+	-- unbroken system this changes nothing; it is here because the cascade is a
+	-- list of the things somebody thought of, and a matcher that reads the
+	-- occurrence's status but never the person's has no way of noticing when
+	-- that list is short. 'active' rather than <> 'suspended', so a state added
+	-- later is excluded until somebody decides otherwise.
+	JOIN users du ON du.id = t.driver_id AND du.status = 'active'
 	WHERE o.status = 'scheduled'
 	  AND o.seats_free - ` + SeatsSpokenFor("o.id", "$13") + ` >= $5
 	  -- Excluded rather than ranked down. An ask a driver will certainly

@@ -105,13 +105,15 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		preState      string
 		preExpiresAt  time.Time
 		preDriver     uuid.UUID
+		prePassenger  uuid.UUID
 	)
 	err := s.pool.QueryRow(ctx, `
-		SELECT a.itinerary_version, a.status, a.expires_at, t.driver_id
+		SELECT a.itinerary_version, a.status, a.expires_at, t.driver_id, rr.passenger_id
 		FROM asks a
 		JOIN trip_occurrences o ON o.id = a.occurrence_id
 		JOIN route_templates  t ON t.id = o.template_id
-		WHERE a.id = $1`, askID).Scan(&quotedVersion, &preState, &preExpiresAt, &preDriver)
+		JOIN ride_requests   rr ON rr.id = a.request_id
+		WHERE a.id = $1`, askID).Scan(&quotedVersion, &preState, &preExpiresAt, &preDriver, &prePassenger)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, ErrAskNotPending
 	}
@@ -158,7 +160,18 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		return uuid.Nil, fmt.Errorf("asks: loading ask keys: %w", err)
 	}
 
-	// 1. occurrence
+	// 1. both people. Before their rows, so that a suspension landing while this
+	// runs is decided rather than raced: see lockParticipants. An offer already
+	// sitting on a driver's phone is exactly how a suspended passenger ends up
+	// with a seat held in their name.
+	if err := lockParticipants(ctx, tx, driverID, prePassenger); err != nil {
+		if errors.Is(err, errNotActive) {
+			return uuid.Nil, ErrAskNotPending
+		}
+		return uuid.Nil, err
+	}
+
+	// 2. occurrence
 	var (
 		seatsFree       int
 		occurrenceState string
@@ -186,7 +199,7 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		return uuid.Nil, fmt.Errorf("asks: locking occurrence: %w", err)
 	}
 
-	// 2. request
+	// 3. request
 	var requestState string
 	var passengerID uuid.UUID
 	var seats int
@@ -198,7 +211,7 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		return uuid.Nil, fmt.Errorf("asks: locking request: %w", err)
 	}
 
-	// 3. ask
+	// 4. ask
 	var (
 		askState  string
 		expiresAt time.Time

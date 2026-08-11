@@ -341,9 +341,9 @@ func (f *fixture) addSecondDriver(t *testing.T) uuid.UUID {
 	return occurrenceID
 }
 
-func mustExec(t *testing.T, f *fixture, sql string) {
+func mustExec(t *testing.T, f *fixture, sql string, args ...any) {
 	t.Helper()
-	if _, err := f.pool.Exec(context.Background(), sql); err != nil {
+	if _, err := f.pool.Exec(context.Background(), sql, args...); err != nil {
 		t.Fatalf("exec %q: %v", sql, err)
 	}
 }

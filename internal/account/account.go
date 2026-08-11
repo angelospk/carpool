@@ -126,6 +126,16 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 		 WHERE passenger_id = $1 AND status IN ('open','asking') AND $2::timestamptz IS NOT NULL`,
 		`UPDATE standing_arrangements SET status = 'cancelled', updated_at = now()
 		 WHERE passenger_id = $1 AND status IN ('pending','active') AND $2::timestamptz IS NOT NULL`,
+		// Offers still sitting with a driver, and offers sitting with this
+		// person about somebody else. Cancelling the request above is not enough
+		// on its own: an ask is what a driver's phone is showing, it holds a seat
+		// against the trip's admission count until its half hour is up, and a
+		// tap on it is how a seat gets given to somebody who has left.
+		`UPDATE asks a SET status = 'cancelled', responded_at = $2
+		   FROM ride_requests rr, trip_occurrences o, route_templates t
+		  WHERE rr.id = a.request_id AND o.id = a.occurrence_id AND t.id = o.template_id
+		    AND a.status = 'pending'
+		    AND (rr.passenger_id = $1 OR t.driver_id = $1)`,
 		// Credentials and reachability go outright: they identify a living
 		// person and serve no purpose once the account is closed.
 		`DELETE FROM push_tokens WHERE user_id = $1 AND $2::timestamptz IS NOT NULL`,

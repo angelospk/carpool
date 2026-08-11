@@ -46,12 +46,20 @@ WITH trip AS (
 	FROM trip_occurrences o
 	JOIN route_templates t ON t.id = o.template_id
 	JOIN driver_profiles d ON d.user_id = t.driver_id
+	-- Checked once here rather than per candidate: there is one driver.
+	JOIN users du ON du.id = t.driver_id AND du.status = 'active'
 	WHERE o.id = $1
 	  AND o.status = 'scheduled'
 	  AND NOT d.notifications_muted
 )
 SELECT rr.id
-FROM ride_requests rr, trip
+FROM ride_requests rr
+JOIN trip ON true
+-- The mirror of the driver check above. A suspended passenger's request stays
+-- in the table until the cascade withdraws it, and a wake that arrives first
+-- would otherwise hand a driver a real seat for somebody who cannot open the
+-- app to agree a meeting point, answer a message, or say they are not coming.
+JOIN users pu ON pu.id = rr.passenger_id AND pu.status = 'active'
 WHERE rr.status = 'open'
   -- Read from the window rather than the status. A request whose time has
   -- passed is only marked expired when the sweeper next runs, and waking it in

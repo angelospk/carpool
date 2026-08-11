@@ -118,6 +118,10 @@ func (s *Service) suspendTx(ctx context.Context, tx pgx.Tx, userID, actorID uuid
 	}
 	told = append(told, asPassenger...)
 
+	if err := s.withdrawTheirMatching(ctx, tx, userID, now); err != nil {
+		return err
+	}
+
 	for _, n := range told {
 		payload, err := json.Marshal(map[string]any{
 			"event": "booking_cancelled", "recipient_id": n.recipient, "booking_id": n.booking,
@@ -279,6 +283,96 @@ func (s *Service) giveBackTheirSeats(ctx context.Context, tx pgx.Tx, userID uuid
 		return nil, err
 	}
 	return out, nil
+}
+
+// withdrawTheirMatching takes them out of the queue: the offers waiting on an
+// answer, and the requests still looking for one.
+//
+// Bookings are somebody else's plan and are handled above, with a push each.
+// This is the half nobody was ever told about, because nobody had been promised
+// anything yet — and it is the half that kept working. An ask already delivered
+// to a driver's phone is a tap away from a real seat, and an open request is
+// picked up by the next trip published on that corridor.
+//
+// Both directions, because a suspension is about a person and not about which
+// side of the arrangement they happened to be on: their own requests, and the
+// offers sitting with drivers about them, but also the offers sitting with them
+// about somebody else.
+func (s *Service) withdrawTheirMatching(ctx context.Context, tx pgx.Tx, userID uuid.UUID, now time.Time) error {
+	// Only pending rows move, and only their occurrences are woken. A sweeper
+	// expiring the same ask at the same moment would otherwise hand the seat
+	// back twice.
+	rows, err := tx.Query(ctx, `
+		WITH mine AS (
+			SELECT a.id, a.occurrence_id
+			  FROM asks a
+			  JOIN ride_requests   rr ON rr.id = a.request_id
+			  JOIN trip_occurrences o ON o.id = a.occurrence_id
+			  JOIN route_templates  t ON t.id = o.template_id
+			 WHERE a.status = 'pending'
+			   AND (rr.passenger_id = $1 OR t.driver_id = $1)
+		),
+		cancelled AS (
+			UPDATE asks SET status = 'cancelled', responded_at = $2
+			 WHERE id IN (SELECT id FROM mine) AND status = 'pending'
+			RETURNING occurrence_id
+		)
+		-- Only the trips that are still running: a seat coming back on a
+		-- departure this same suspension has just called off is not news to
+		-- anybody, and waking it would offer a suspended driver's trip around.
+		SELECT DISTINCT c.occurrence_id
+		  FROM cancelled c
+		  JOIN trip_occurrences o ON o.id = c.occurrence_id
+		 WHERE o.status = 'scheduled'`, userID, now)
+	if err != nil {
+		return fmt.Errorf("moderation: withdrawing their offers: %w", err)
+	}
+	var freed []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("moderation: reading the withdrawn offers: %w", err)
+		}
+		freed = append(freed, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("moderation: withdrawing their offers: %w", err)
+	}
+
+	// That offer was holding a seat against the admission count, so the trip has
+	// room it did not have a moment ago, and somebody was told there was none.
+	if err := outbox.WakeAll(ctx, tx, freed, "seat_returned", now); err != nil {
+		return err
+	}
+
+	// Cancelled rather than parked. A request names a window, and a window that
+	// has to be revalidated against blocks, mutes and the calendar before it can
+	// be revived is not a saving — reinstatement would either re-offer a journey
+	// somebody has long since made, or need every one of those checks written
+	// twice. Asking again is one screen.
+	if _, err := tx.Exec(ctx, `
+		UPDATE ride_requests SET status = 'cancelled', updated_at = now()
+		 WHERE passenger_id = $1 AND status IN ('open','asking')`, userID); err != nil {
+		return fmt.Errorf("moderation: withdrawing their requests: %w", err)
+	}
+
+	// A standing arrangement is a weekly agreement with somebody, and it books
+	// seats week after week without anybody pressing anything. Either side being
+	// suspended ends it, in both directions, for the same reason the pending
+	// ones do: the other person should not keep a seat held for a stranger who
+	// never appears.
+	if _, err := tx.Exec(ctx, `
+		UPDATE standing_arrangements sa SET status = 'cancelled', updated_at = now()
+		  FROM route_templates t
+		 WHERE t.id = sa.template_id
+		   AND sa.status IN ('pending','active')
+		   AND (sa.passenger_id = $1 OR t.driver_id = $1)`, userID); err != nil {
+		return fmt.Errorf("moderation: ending their standing arrangements: %w", err)
+	}
+
+	return nil
 }
 
 func (s *Service) record(ctx context.Context, tx pgx.Tx, userID, actorID uuid.UUID, action, reason string) error {
