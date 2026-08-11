@@ -13,8 +13,14 @@ compute **incremental detour against the driver's current itinerary**.
 
 Matching triggers:
 1. New request created → match against existing occurrences.
-2. New occurrence materialized → match against open requests (via outbox event).
+2. A trip becoming available → match against open requests (via outbox event).
 3. Ask expired/declined → advance to next candidate.
+
+Trigger 2 was specified here from the beginning and was **not implemented until
+2026-08-11**: the ask flow had three entry points and all three were on the
+passenger's side, so an open request that found nobody was never reconsidered.
+See "Reverse direction" below for what it means in practice, since "a trip
+becoming available" turned out to be six events rather than one.
 
 ## Stage 1 — gross filter (pure SQL, index-backed)
 
@@ -59,6 +65,56 @@ Notes:
 
 Output: candidate list with pickup/dropoff snap points, capped at top ~20 by
 straight-line quality score.
+
+## Reverse direction — who is waiting for this trip
+
+`match.Waiting` takes one occurrence and returns the open requests it could
+answer, longest wait first. It exists so trigger 2 has something to run.
+
+It is **not** a mirror of stage 1. The contract is containment: everything the
+gross filter matches, `Waiting` must return, and `Waiting` may return more. The
+reverse query being *stricter* fails silently and is indistinguishable from
+having no trigger at all, while being looser costs one indexed query. So it
+carries the cheap indexable narrowing — status, windows, seats, luggage size,
+proximity, direction along the road, prior asks, blocks, self-match — and leaves
+the shared-distance floor to stage 1, which stays the authority on whether a
+pair really matches.
+
+A wake produces a shortlist of request ids; each goes back through `AskNext`,
+which re-runs stage 1 and stage 2. There is one matching engine with two
+triggers, not two engines.
+
+"A trip becoming available" is six events, all enqueuing `wake_waiting` inside
+the transaction that caused them:
+
+| Event | Where |
+| --- | --- |
+| Materialized or retimed | `jobs.Materializer.upsert` |
+| Booking cancelled | `bookings` |
+| Standing arrangement ended | `standing` |
+| Passenger suspended | `moderation` |
+| Account closed | `account` |
+| Offer declined or lapsed | `asks.requeue` |
+
+The last is a consequence of the ask cap below rather than of a seat physically
+returning, and it is what keeps the queue moving on a one-seat trip.
+
+An hourly reconciler (`jobs.Reconciler`) re-queues open, in-window requests
+regardless. It is the safety net for the ways an occurrence becomes eligible
+that have no event at all — a driver unmuting notifications, widening their
+notify radius, coming off a suspension — and for whatever the wake's shortlist
+cap left behind.
+
+### Ask admission
+
+A trip is never offered more seats than it has left: the sum of party sizes
+across live offers must not exceed `seats_free`. Enforced twice — subtracted in
+the gross filter so a saturated trip never reaches OSRM, and rechecked under the
+occurrence lock, which is what decides a race.
+
+A pending ask deliberately holds no seat in `seats_free` itself; a driver who
+never answers must not strand the trip. The cap is what stops the same seat
+being promised to everybody waiting on the corridor.
 
 ## Stage 2 — fine filter (OSRM, per candidate)
 

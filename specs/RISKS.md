@@ -455,7 +455,7 @@ mitigation, not an answer.
 | Materialized candidate views | per-event matching > ~1 s p95 |
 | NATS / broker, multi-node API | single VPS saturated |
 | MapLibre + self-hosted tiles | Google Maps key/cost pain |
-| Driving detection (bluetooth/activity) | post-MVP, product pull exists |
+| Driving detection (bluetooth/activity) | rejected, not deferred — see "Driving detection cannot work" below |
 | Live location sharing | post-MVP milestone 2 |
 | Device-bound refresh tokens (DPoP) | refresh-token theft is observed, or the pilot handles anything worth stealing |
 | Rust rewrite of hot paths | never, unless profiling proves need |
@@ -618,3 +618,82 @@ review flagged the two open retention entries above and said they should be
 resolved before release. That is correct and it is what they are here for: both
 need a person to decide what the published policy should say, and neither is
 work waiting to be done.
+
+## Driving detection cannot work, and the reason is not privacy (raised 2026-08-11)
+
+It was parked as post-MVP with a note that product pull exists. Designed
+properly with Codex, it turns out to be parked for a better reason than
+sequencing: there is no signal that tells a private car from a coach or a train.
+
+The exit from home precedes every mode. An intercity KTEL coach holds the same
+speed as a car on the same national road. The railway runs parallel to it, so
+OSRM would snap a train onto the road and report driving. The operating
+system's own `automotive` activity means "in a vehicle" and includes bus and
+train. Having a car on the profile changes the prior, not the classification.
+
+Three things that were not in the original note:
+
+- Checking the road class means sending the fixes to our own OSRM, which is
+  precisely the passive tracking the privacy policy says we do not do, and it
+  would land in access logs as well.
+- Google Play requires background location to be *core functionality*, with a
+  demonstration video and a declaration. The app works without it, so review
+  would likely call it convenience — putting the whole listing at risk for a
+  feature that does not work.
+- Android geofence transitions arrive two to three minutes late, up to six after
+  a long stationary period. The prompt therefore arrives while the person is
+  already driving, which is the worst possible moment to ask somebody to pick up
+  a phone.
+
+The only signal that means *car* rather than *vehicle* is the Bluetooth device
+the user picks themselves ("choose your car stereo"). There is no first-party
+Expo API for observing an arbitrary classic Bluetooth connection in the
+background; it needs a native module, and on iOS it is largely closed outside
+CarPlay entitlements.
+
+**Decision: not deferred pending sequencing, rejected pending a signal.** Revisit
+only if a user-chosen Bluetooth device becomes reachable from Expo without a
+custom native module. What the feature was for — a driver not having to think
+about publishing, a passenger not having to search — is what M3b and the
+recurring-schedule reminder do instead, from data drivers declare themselves.
+
+## Where the two matching directions are allowed to disagree (raised 2026-08-11)
+
+`match.Waiting` is deliberately *not* a mirror of `grossSQL`. Codex argued for
+this and it is right: the two are separate queries, and the dangerous direction
+is the reverse one being stricter. A pair it misses fails silently — the driver
+publishes, nobody is woken, the request expires beside a car with room — which
+is indistinguishable from the bug the whole exercise fixed. A pair it admits
+that the forward filter then rejects costs one indexed query.
+
+So the contract is containment, not equality: everything `Gross` matches,
+`Waiting` must return. `Waiting` may return more.
+
+That property is tested rather than asserted by reading the two side by side.
+Worth recording how weak the first version of that test was: mutating the
+reverse query to trim twenty minutes off either window edge, or to demand
+strictly more luggage room, passed — because no fixture sat on a boundary. The
+fixtures now include both window edges and a request whose luggage exactly fills
+what the trip allows, and all three mutations fail.
+
+The seat cap is shared as a SQL fragment (`match.SeatsSpokenFor`) rather than
+written twice, because drift there is not a false negative in one direction but
+either a notification storm or a trip nobody can be asked about.
+
+## Departing from Codex on the ask cap (raised 2026-08-11)
+
+Codex recommended one live ask per occurrence, conservatively, and that is not
+what was built.
+
+An offer stands for thirty minutes. One at a time means a three-seat car leaving
+in two hours takes ninety minutes of serialised answer windows to fill, and the
+third passenger is asked after the driver has left. The bound implemented is the
+seats themselves: the sum of party sizes across live offers never exceeds the
+free seats. It gives the same protection on the case that matters — exactly one
+offer on a one-seat trip, which is where the "you have it / you have lost it"
+whiplash comes from — without penalising a full car.
+
+Codex's related suggestion of a per-driver ceiling is *not* built. A driver with
+ten upcoming departures being asked about each is ten separate journeys, not
+spam. Revisit if the recurring-schedule work makes a driver materialise many
+occurrences at once and the asks arrive together.

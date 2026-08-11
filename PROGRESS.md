@@ -95,6 +95,16 @@ scripts/build-osrm.sh osrm-data/evros-buffered.osm.pbf
       block-aware) with an EXPLAIN index assertion and the full geometry table;
       stage-2 OSRM insertion detour with the 2-party cap; ranking with a total
       tie-break; suggested-contribution formula.
+- [x] **M3b Matching in both directions** — `match.Waiting` asks a trip who has
+      been waiting for it, and a `wake_waiting` outbox message runs it whenever
+      a trip becomes available: published, materialized, a seat returned by a
+      cancellation, suspension or account closure, or an offer declined or
+      lapsed. Each woken request goes back through `AskNext`, so there is one
+      matching engine with two triggers rather than two engines. An hourly
+      reconciler covers the changes that have no event (a driver unmuting,
+      widening their radius, coming off a suspension) and whatever the wake's
+      shortlist left behind. A trip is never offered more seats than it has
+      left, enforced in the filter and again under the occurrence lock.
 - [x] **M4 Ask/booking lifecycle** — outbox with leased dispatcher, per-claim
       fencing, backoff, dead-lettering; sequential asks with TTL + sweeper;
       transactional accept with optimistic itinerary re-verification; Expo push
@@ -454,6 +464,20 @@ real time so the two can never agree by coincidence again.
 - The party cap counts parties per occurrence rather than concurrently aboard.
   Stricter than MATCHING.md's wording; it can only refuse rides a
   concurrency-aware cap would allow, never admit ones it would not.
+- `match.Waiting` is a superset of `Gross` rather than its mirror: it carries
+  the cheap indexable narrowing and leaves the shared-distance floor to the
+  forward filter. So a wake can shortlist a request the forward filter then
+  rejects, costing one indexed query. The containment property — everything
+  `Gross` matches, `Waiting` returns — is tested rather than assumed, because
+  the opposite error is silent and looks exactly like the bug this fixed.
+- A wake wakes at most ten requests. The rest keep their place (the order is by
+  how long each has waited) and are reached by the next change to that trip or
+  by the hourly reconciler, so a very busy corridor answers some people a wake
+  later than it could.
+- The reverse query cannot use `ride_requests`' GIST indexes: those are on plain
+  geometry and the proximity test casts to geography. It is bounded by the open,
+  in-window requests instead, which is a small hot set today. Worth an
+  `EXPLAIN (ANALYZE, BUFFERS)` on realistic volume before it is not.
 
 ## If you are picking this up cold
 
