@@ -474,10 +474,13 @@ real time so the two can never agree by coincidence again.
   how long each has waited) and are reached by the next change to that trip or
   by the hourly reconciler, so a very busy corridor answers some people a wake
   later than it could.
-- The reverse query cannot use `ride_requests`' GIST indexes: those are on plain
-  geometry and the proximity test casts to geography. It is bounded by the open,
-  in-window requests instead, which is a small hot set today. Worth an
-  `EXPLAIN (ANALYZE, BUFFERS)` on realistic volume before it is not.
+- The reverse query could not use `ride_requests`' GIST indexes, because those
+  are on plain geometry and the proximity test casts to geography. Measured at
+  5,000 open requests: 11.5 ms, sequential scan, 4,984 rows discarded. Migration
+  00030 adds the expression indexes on the cast, partial on `status = 'open'`;
+  the same query is 5.6 ms and discards none. A plan test asserts the index is
+  still reached, because the failure is a latency graph nobody can explain
+  rather than a broken test.
 
 ## If you are picking this up cold
 

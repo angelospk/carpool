@@ -125,3 +125,6 @@ func Waiting(ctx context.Context, pool *pgxpool.Pool, q WaitingQuery) ([]uuid.UU
 	}
 	return out, rows.Err()
 }
+
+// ExportedWaitingSQL is the query text, for plan assertions in tests.
+func ExportedWaitingSQL() string { return waitingSQL }

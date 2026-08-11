@@ -42,6 +42,12 @@ func withRequestEnds(originLon, destLon float64) func(*requestOpts) {
 		o.origin.Lon, o.destination.Lon = originLon, destLon
 	}
 }
+func withRequestEndsAt(oLon, oLat, dLon, dLat float64) func(*requestOpts) {
+	return func(o *requestOpts) {
+		o.origin = match.Point{Lon: oLon, Lat: oLat}
+		o.destination = match.Point{Lon: dLon, Lat: dLat}
+	}
+}
 func withRequestWindow(start, end time.Time) func(*requestOpts) {
 	return func(o *requestOpts) { o.windowStart, o.windowEnd = start, end }
 }
