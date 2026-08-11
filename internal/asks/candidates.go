@@ -49,12 +49,12 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 		LuggageCount: req.LuggageCount,
 		RequestKm:    req.RequestKm,
 		PassengerID:  req.PassengerID,
+		// Both of these used to be applied to the results of this call. The
+		// gross stage limits its candidates in SQL, so filtering afterwards
+		// discards rows that had already displaced the ones being looked for.
+		RequestID: requestID,
+		Target:    req.Target,
 	})
-	if err != nil {
-		return uuid.Nil, err
-	}
-
-	already, err := s.alreadyAsked(ctx, requestID)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -62,15 +62,6 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 	scored := make([]match.Scored, 0, len(candidates))
 	byID := make(map[string]match.Candidate, len(candidates))
 	for _, c := range candidates {
-		if _, seen := already[c.OccurrenceID]; seen {
-			continue
-		}
-		// A targeted request names the trip it wants. Everything else the
-		// matcher found is a different driver, and offering one of those would
-		// answer a question the passenger did not ask.
-		if req.Target != nil && c.OccurrenceID != *req.Target {
-			continue
-		}
 		byID[c.OccurrenceID.String()] = c
 		scored = append(scored, match.Scored{
 			ID: c.OccurrenceID.String(),
@@ -155,26 +146,9 @@ func (s *Service) loadRequest(ctx context.Context, id uuid.UUID) (request, error
 	return r, nil
 }
 
-// alreadyAsked returns the occurrences this request has already been offered
-// to, in any state. A declined driver is never re-asked about the same request.
-func (s *Service) alreadyAsked(ctx context.Context, requestID uuid.UUID) (map[uuid.UUID]struct{}, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT occurrence_id FROM asks WHERE request_id = $1`, requestID)
-	if err != nil {
-		return nil, fmt.Errorf("asks: loading ask history: %w", err)
-	}
-	defer rows.Close()
-
-	out := map[uuid.UUID]struct{}{}
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("asks: scanning ask history: %w", err)
-		}
-		out[id] = struct{}{}
-	}
-	return out, rows.Err()
-}
+// The rule this used to implement — a declined driver is never re-asked about
+// the same request — now lives in the gross filter's SQL, because it has to be
+// applied before the candidate limit rather than to what survives it.
 
 // evaluate runs the fine stage for one candidate: snap the stops, find the best
 // insertion, and price it.

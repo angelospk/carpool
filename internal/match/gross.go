@@ -43,8 +43,25 @@ type GrossQuery struct {
 	// floor.
 	RequestKm float64
 	// PassengerID, when set, excludes occurrences whose driver has blocked the
-	// passenger or is blocked by them.
+	// passenger or is blocked by them, and the passenger's own trips: a driver
+	// who also posted a request is not a candidate to carry themselves.
 	PassengerID uuid.UUID
+	// RequestID, when set, excludes occurrences this request has already been
+	// offered to.
+	//
+	// It belongs here rather than in the caller because the exclusion has to
+	// happen before the candidate limit. Filtering afterwards lets a full page
+	// of spent occurrences hide every fresh one behind it, and the passenger is
+	// told nobody can take them while a driver who was never approached sits one
+	// row below the cut.
+	RequestID uuid.UUID
+	// Target, when set, restricts the search to one occurrence. A repeat names
+	// the trip it wants, and offering anything else answers a question the
+	// passenger did not ask.
+	//
+	// Same reason as RequestID for being in the query: applied afterwards, a
+	// targeted request whose occurrence ranks twenty-first finds nothing.
+	Target *uuid.UUID
 }
 
 // Candidate is an occurrence that survived the gross filter.
@@ -123,10 +140,18 @@ WITH cand AS (
 	  AND NOT d.notifications_muted
 	  AND ST_DWithin(o.route_geom::geography, $1::geography, d.notify_radius_km * 1000)
 	  AND ST_DWithin(o.route_geom::geography, $2::geography, d.notify_radius_km * 1000)
+	  AND ($7::uuid IS NULL OR t.driver_id <> $7::uuid)
 	  AND ($7::uuid IS NULL OR NOT EXISTS (
 	        SELECT 1 FROM blocks b
 	        WHERE (b.blocker_id = t.driver_id AND b.blocked_id = $7::uuid)
 	           OR (b.blocker_id = $7::uuid    AND b.blocked_id = t.driver_id)))
+	  -- Both of these are inside the filter rather than applied to its results,
+	  -- so that a spent or unwanted occurrence never occupies a place under the
+	  -- LIMIT that a reachable one needed.
+	  AND ($11::uuid IS NULL OR NOT EXISTS (
+	        SELECT 1 FROM asks a
+	        WHERE a.request_id = $11::uuid AND a.occurrence_id = o.id))
+	  AND ($12::uuid IS NULL OR o.id = $12::uuid)
 ), located AS (
 	SELECT occurrence_id, driver_id, route_km, route_min, seats_free, itinerary_version,
 	       allow_stops, detour_km, detour_min,
@@ -191,6 +216,10 @@ func grossArgs(q GrossQuery) []any {
 	if q.PassengerID != uuid.Nil {
 		passenger = &q.PassengerID
 	}
+	var request *uuid.UUID
+	if q.RequestID != uuid.Nil {
+		request = &q.RequestID
+	}
 	return []any{
 		pointWKT(q.Origin),       // $1
 		pointWKT(q.Destination),  // $2
@@ -202,6 +231,8 @@ func grossArgs(q GrossQuery) []any {
 		maxCandidates,            // $8
 		luggageOrNone(q.Luggage), // $9
 		q.LuggageCount,           // $10
+		request,                  // $11
+		q.Target,                 // $12
 	}
 }
 
