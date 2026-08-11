@@ -159,7 +159,10 @@ func TestClosingAnAccountPutsItsWaitingPassengersBack(t *testing.T) {
 		                  suggested_price_eur, itinerary_version, status, expires_at)
 		SELECT $1, o.id, 5, 2, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
 		       ST_SetSRID(ST_MakePoint(25.98,40.85),4326), 2.50, 0, 'pending', now() + interval '1 hour'
-		  FROM trip_occurrences o LIMIT 1`, requestID); err != nil {
+		  FROM trip_occurrences o
+		  JOIN route_templates t ON t.id = o.template_id
+		 WHERE t.driver_id = $2
+		 LIMIT 1`, requestID, w.driverID); err != nil {
 		t.Fatalf("seeding the ask: %v", err)
 	}
 
@@ -175,5 +178,47 @@ func TestClosingAnAccountPutsItsWaitingPassengersBack(t *testing.T) {
 	}
 	if status != "open" {
 		t.Fatalf("the waiting passenger's request is %q; nothing looks at one in that state again", status)
+	}
+}
+
+// And they are asked again straight away rather than waiting for the hourly
+// reconciler. A passenger whose driver closed their account should not spend up
+// to an hour on the searching screen to be told somebody else can take them.
+func TestClosingAnAccountAsksTheNextDriverForThosePassengers(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	var requestID uuid.UUID
+	if err := w.pool.QueryRow(ctx, `
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end,
+		                           seats, kind, status)
+		VALUES ($1, ST_SetSRID(ST_MakePoint(25.82,40.85),4326), ST_SetSRID(ST_MakePoint(25.98,40.85),4326),
+		        now(), now() + interval '2 hours', 1, 'open', 'asking')
+		RETURNING id`, w.passengerID).Scan(&requestID); err != nil {
+		t.Fatalf("seeding the request: %v", err)
+	}
+	if _, err := w.pool.Exec(ctx, `
+		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
+		                  suggested_price_eur, itinerary_version, status, expires_at)
+		SELECT $1, o.id, 5, 2, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+		       ST_SetSRID(ST_MakePoint(25.98,40.85),4326), 2.50, 0, 'pending', now() + interval '1 hour'
+		  FROM trip_occurrences o
+		  JOIN route_templates t ON t.id = o.template_id
+		 WHERE t.driver_id = $2
+		 LIMIT 1`, requestID, w.driverID); err != nil {
+		t.Fatalf("seeding the ask: %v", err)
+	}
+
+	if err := w.svc.Delete(ctx, w.driverID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	var queued int
+	if err := w.pool.QueryRow(ctx,
+		`SELECT count(*) FROM outbox WHERE kind = 'ask_next'`).Scan(&queued); err != nil {
+		t.Fatalf("counting: %v", err)
+	}
+	if queued == 0 {
+		t.Fatal("no next driver is queued: the passenger waits for the hourly sweep at best")
 	}
 }

@@ -136,23 +136,6 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 		  WHERE rr.id = a.request_id AND o.id = a.occurrence_id AND t.id = o.template_id
 		    AND a.status = 'pending'
 		    AND (rr.passenger_id = $1 OR t.driver_id = $1)`,
-		// And whoever was waiting on one of those offers, who is not the person
-		// leaving. Their request sits at 'asking' waiting on an answer that has
-		// just been withdrawn, and nothing looks at a request in that state
-		// again — not the matcher, which wants 'open', and not the reconciler
-		// that exists to catch what the events miss. The matcher is what asks
-		// the next driver: a wake on the occurrence would not do, because the
-		// departures of the person leaving have just been cancelled too.
-		`UPDATE ride_requests rr SET status = 'open', updated_at = now()
-		  WHERE rr.status = 'asking'
-		    AND rr.passenger_id <> $1
-		    AND $2::timestamptz IS NOT NULL
-		    AND EXISTS (
-		          SELECT 1 FROM asks a
-		           WHERE a.request_id = rr.id AND a.status = 'cancelled' AND a.responded_at = $2)
-		    AND NOT EXISTS (
-		          SELECT 1 FROM asks a
-		           WHERE a.request_id = rr.id AND a.status = 'pending')`,
 		// Credentials and reachability go outright: they identify a living
 		// person and serve no purpose once the account is closed.
 		`DELETE FROM push_tokens WHERE user_id = $1 AND $2::timestamptz IS NOT NULL`,
@@ -162,6 +145,56 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 	for _, stmt := range windDown {
 		if _, err := tx.Exec(ctx, stmt, userID, now); err != nil {
 			return fmt.Errorf("account: winding down: %w", err)
+		}
+	}
+
+	// Whoever was waiting on one of the offers just withdrawn, who is not the
+	// person leaving. Their request sits at 'asking' waiting on an answer that
+	// has gone, and nothing looks at a request in that state again — not the
+	// matcher, which wants 'open', and not the reconciler that exists to catch
+	// what the events miss.
+	//
+	// Asked again through the outbox rather than left for that hourly sweep,
+	// and a wake on the occurrence would not do it: the departures of the person
+	// leaving have just been cancelled, so there is nothing there to wake.
+	rows, err = tx.Query(ctx, `
+		UPDATE ride_requests rr SET status = 'open', updated_at = now()
+		 WHERE rr.status = 'asking'
+		   AND rr.passenger_id <> $1
+		   AND EXISTS (
+		         SELECT 1 FROM asks a
+		          WHERE a.request_id = rr.id AND a.status = 'cancelled' AND a.responded_at = $2)
+		   AND NOT EXISTS (
+		         SELECT 1 FROM asks a
+		          WHERE a.request_id = rr.id AND a.status = 'pending')
+		RETURNING rr.id`, userID, now)
+	if err != nil {
+		return fmt.Errorf("account: putting the other passengers back in the queue: %w", err)
+	}
+	var stranded []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("account: reading the reopened requests: %w", err)
+		}
+		stranded = append(stranded, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("account: putting the other passengers back in the queue: %w", err)
+	}
+	for _, id := range stranded {
+		payload, err := json.Marshal(map[string]any{"request_id": id})
+		if err != nil {
+			return fmt.Errorf("account: encoding the next ask: %w", err)
+		}
+		if err := outbox.Enqueue(ctx, tx, outbox.Message{
+			Kind:           "ask_next",
+			IdempotencyKey: "ask_next:closed:" + userID.String() + ":" + id.String(),
+			Payload:        payload,
+		}, now); err != nil {
+			return err
 		}
 	}
 
