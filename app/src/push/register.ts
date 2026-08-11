@@ -10,7 +10,7 @@
 
 /** Outcome of one attempt, for logging and for tests to assert on. */
 export type Registration =
-  | { done: false; why: 'not-a-device' | 'signed-out' | 'permission-denied' }
+  | { done: false; why: 'not-a-device' | 'signed-out' | 'permission-denied' | 'not-configured' }
   | { done: false; why: 'failed'; error: unknown }
   | { done: true; token: string };
 
@@ -21,9 +21,20 @@ export interface PushDeps {
   isDevice: boolean;
   platform: string;
   signedIn: boolean;
+  /**
+   * The EAS project a token is issued against, from app.json's
+   * extra.eas.projectId.
+   *
+   * Resolved by the caller and checked here rather than left to the library's
+   * own lookup, which throws a coded error when it finds nothing. A missing
+   * project id is not a failure, it is a piece of configuration nobody has
+   * supplied yet, and the two want telling apart: one is worth a line in a log
+   * that names the file to edit, the other is worth a retry next launch.
+   */
+  projectId: string | undefined;
   getPermissions: () => Promise<{ granted: boolean; canAskAgain: boolean }>;
   requestPermissions: () => Promise<{ granted: boolean }>;
-  getToken: () => Promise<{ data: string }>;
+  getToken: (projectId: string) => Promise<{ data: string }>;
   send: (token: string, platform: Platform) => Promise<void>;
 }
 
@@ -52,6 +63,9 @@ export async function register(deps: PushDeps): Promise<Registration> {
   if (!deps.isDevice || (deps.platform !== 'ios' && deps.platform !== 'android')) {
     return { done: false, why: 'not-a-device' };
   }
+  // Checked before the permission prompt, so nobody is asked to allow
+  // notifications that could not have been delivered anyway.
+  if (!deps.projectId) return { done: false, why: 'not-configured' };
 
   try {
     let { granted, canAskAgain } = await deps.getPermissions();
@@ -64,7 +78,7 @@ export async function register(deps: PushDeps): Promise<Registration> {
     // muted rather than being read.
     if (!granted) return { done: false, why: 'permission-denied' };
 
-    const token = await deps.getToken();
+    const token = await deps.getToken(deps.projectId);
     await deps.send(token.data, deps.platform);
     return { done: true, token: token.data };
   } catch (error) {

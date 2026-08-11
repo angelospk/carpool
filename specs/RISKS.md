@@ -611,6 +611,13 @@ than the thing it prevents.
 It is worth revisiting if push registration ever stops happening on every
 launch, because the repair is what makes the loss temporary.
 
+**Correction, 2026-08-11.** That repair did not exist when this was written.
+`api.registerPushToken` was defined and called from nowhere, so nothing
+re-registered on launch and the loss would have been permanent. The reasoning
+above was sound and the fact it rested on was not. The app now registers on
+every launch while signed in, which makes the argument true rather than merely
+plausible.
+
 ## CodeRabbit asked for the retention decisions to be closed (2026-08-08)
 
 Not a defect, and recorded so the next reader does not read it as one. The

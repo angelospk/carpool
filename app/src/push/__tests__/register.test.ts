@@ -5,6 +5,7 @@ function deps(over: Partial<PushDeps> = {}): PushDeps {
     isDevice: true,
     platform: 'android',
     signedIn: true,
+    projectId: 'proj-123',
     getPermissions: jest.fn().mockResolvedValue({ granted: true, canAskAgain: true }),
     requestPermissions: jest.fn().mockResolvedValue({ granted: true }),
     getToken: jest.fn().mockResolvedValue({ data: 'ExponentPushToken[abc]' }),
@@ -69,6 +70,23 @@ it.each([
 
   expect(await register(d)).toEqual({ done: false, why: 'not-a-device' });
   expect(d.getPermissions).not.toHaveBeenCalled();
+});
+
+// Not a failure, a missing piece of configuration. Checked before the prompt so
+// nobody is asked to allow notifications that could not have been delivered.
+it('does not ask for permission it could not act on', async () => {
+  const d = deps({ projectId: undefined });
+
+  expect(await register(d)).toEqual({ done: false, why: 'not-configured' });
+  expect(d.getPermissions).not.toHaveBeenCalled();
+});
+
+it('issues the token against the configured project', async () => {
+  const d = deps();
+
+  await register(d);
+
+  expect(d.getToken).toHaveBeenCalledWith('proj-123');
 });
 
 it('does nothing for somebody who is not signed in', async () => {
