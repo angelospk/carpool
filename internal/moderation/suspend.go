@@ -208,21 +208,93 @@ func (s *Service) callOffTheirDriving(ctx context.Context, tx pgx.Tx, userID uui
 		)
 		UPDATE bookings b SET status = 'cancelled_by_driver', updated_at = now()
 		 WHERE b.occurrence_id IN (SELECT id FROM doomed) AND b.status = 'confirmed'
-		RETURNING b.passenger_id, b.id`, userID, now)
+		RETURNING b.passenger_id, b.id, b.request_id`, userID, now)
 	if err != nil {
 		return nil, fmt.Errorf("moderation: calling off their departures: %w", err)
 	}
-	defer rows.Close()
 
-	var out []told
+	var (
+		out      []told
+		stranded []uuid.UUID
+	)
 	for rows.Next() {
 		var n told
-		if err := rows.Scan(&n.recipient, &n.booking); err != nil {
+		// Null for a seat that came from a standing arrangement, which carries
+		// its own standing permission and is cancelled in its own right.
+		var requestID *uuid.UUID
+		if err := rows.Scan(&n.recipient, &n.booking, &requestID); err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("moderation: reading the cancelled bookings: %w", err)
 		}
 		out = append(out, n)
+		if requestID != nil {
+			stranded = append(stranded, *requestID)
+		}
 	}
-	return out, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Their passengers had a seat a moment ago. Telling them it is gone is half
+	// the job: the request that found this driver is still exactly what they
+	// want, and nothing reads 'matched' looking for somebody to ask next.
+	if err := s.lookAgainFor(ctx, tx, stranded, now); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// lookAgainFor reopens the requests behind cancelled bookings and asks the next
+// driver for each.
+//
+// A ride_request is standing permission to be matched inside its window: it is
+// how the first driver was found, and a moderator acting on that driver does
+// not withdraw it. The window is re-read because a journey whose time has
+// passed has no ride left to find, and the request sweeper is about to mark it
+// expired.
+func (s *Service) lookAgainFor(
+	ctx context.Context, tx pgx.Tx, requestIDs []uuid.UUID, now time.Time,
+) error {
+	if len(requestIDs) == 0 {
+		return nil
+	}
+
+	rows, err := tx.Query(ctx, `
+		UPDATE ride_requests SET status = 'open', updated_at = now()
+		 WHERE id = ANY($1) AND status = 'matched' AND window_end > $2
+		RETURNING id`, requestIDs, now)
+	if err != nil {
+		return fmt.Errorf("moderation: reopening the stranded requests: %w", err)
+	}
+	var reopened []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("moderation: reading the reopened requests: %w", err)
+		}
+		reopened = append(reopened, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("moderation: reopening the stranded requests: %w", err)
+	}
+
+	for _, id := range reopened {
+		payload, err := json.Marshal(map[string]any{"request_id": id, "reason": "driver_suspended"})
+		if err != nil {
+			return fmt.Errorf("moderation: encoding the next ask: %w", err)
+		}
+		if err := outbox.Enqueue(ctx, tx, outbox.Message{
+			Kind:           "ask_next",
+			IdempotencyKey: "ask_next:driver_suspended:" + id.String(),
+			Payload:        payload,
+		}, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // giveBackTheirSeats cancels every seat they are holding in a trip that has not

@@ -148,6 +148,21 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 		}
 	}
 
+	// The people holding a seat in one of the departures just called off.
+	//
+	// Cancelling the departure is not what tells them: their booking went on
+	// saying 'confirmed', so the app went on showing a trip with a meeting point
+	// and a time for a driver who no longer exists, and the first they would
+	// have known is standing at the kerb. Suspension does all three of these —
+	// cancel the booking, send the push, put the request back in the queue —
+	// because from the passenger's side the two are the same event.
+	//
+	// The seats are not given back: the departure is gone, so there is nothing
+	// left to take a seat in.
+	if err := s.tellThePassengers(ctx, tx, userID, now); err != nil {
+		return err
+	}
+
 	// Whoever was waiting on one of the offers just withdrawn, who is not the
 	// person leaving. Their request sits at 'asking' waiting on an answer that
 	// has gone, and nothing looks at a request in that state again — not the
@@ -410,4 +425,89 @@ func collect(rows pgx.Rows) ([]map[string]any, error) {
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+// tellThePassengers cancels the seats booked in the departures a closing
+// account has just called off, tells each passenger, and puts the request
+// behind each one back in the matching queue.
+//
+// It runs after the wind-down has cancelled the occurrences, and finds its work
+// through them: a confirmed booking in a cancelled departure of this driver's
+// that has not left is a person expecting a lift that is not coming.
+func (s *Service) tellThePassengers(
+	ctx context.Context, tx pgx.Tx, userID uuid.UUID, now time.Time,
+) error {
+	rows, err := tx.Query(ctx, `
+		UPDATE bookings b SET status = 'cancelled_by_driver', updated_at = now()
+		  FROM trip_occurrences o, route_templates t
+		 WHERE o.id = b.occurrence_id AND t.id = o.template_id
+		   AND t.driver_id = $1
+		   AND o.status = 'cancelled'
+		   AND o.depart_earliest > $2
+		   AND b.status = 'confirmed'
+		RETURNING b.id, b.passenger_id, b.request_id`, userID, now)
+	if err != nil {
+		return fmt.Errorf("account: cancelling the seats in their departures: %w", err)
+	}
+	type stranded struct {
+		booking, passenger uuid.UUID
+		// Null for a seat that came from a standing arrangement, which is
+		// cancelled in its own right and carries its own standing permission.
+		request *uuid.UUID
+	}
+	var affected []stranded
+	for rows.Next() {
+		var a stranded
+		if err := rows.Scan(&a.booking, &a.passenger, &a.request); err != nil {
+			rows.Close()
+			return fmt.Errorf("account: reading the cancelled seats: %w", err)
+		}
+		affected = append(affected, a)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("account: cancelling the seats in their departures: %w", err)
+	}
+
+	for _, a := range affected {
+		payload, err := json.Marshal(map[string]any{
+			"event": "booking_cancelled", "recipient_id": a.passenger, "booking_id": a.booking,
+		})
+		if err != nil {
+			return fmt.Errorf("account: encoding the notification: %w", err)
+		}
+		if err := outbox.Enqueue(ctx, tx, outbox.Message{
+			Kind:           "push",
+			Payload:        payload,
+			IdempotencyKey: "booking_cancelled:" + a.booking.String(),
+		}, now); err != nil {
+			return err
+		}
+		if a.request == nil {
+			continue
+		}
+		// The window is re-read because a journey whose time has passed has no
+		// ride left to find.
+		tag, err := tx.Exec(ctx, `
+			UPDATE ride_requests SET status = 'open', updated_at = now()
+			 WHERE id = $1 AND status = 'matched' AND window_end > $2`, *a.request, now)
+		if err != nil {
+			return fmt.Errorf("account: reopening the stranded request: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			continue
+		}
+		next, err := json.Marshal(map[string]any{"request_id": *a.request, "reason": "driver_left"})
+		if err != nil {
+			return fmt.Errorf("account: encoding the next ask: %w", err)
+		}
+		if err := outbox.Enqueue(ctx, tx, outbox.Message{
+			Kind:           "ask_next",
+			IdempotencyKey: "ask_next:driver_left:" + a.request.String(),
+			Payload:        next,
+		}, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }

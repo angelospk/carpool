@@ -227,17 +227,22 @@ func (s *Service) CancelOccurrence(ctx context.Context, occurrenceID, userID uui
 		WITH released AS (
 			UPDATE bookings SET status = 'cancelled_by_driver', updated_at = now()
 			 WHERE occurrence_id = $1 AND status = 'confirmed'
-			RETURNING id, passenger_id
+			RETURNING id, passenger_id, request_id
 		)
-		SELECT id, passenger_id FROM released`, occurrenceID)
+		SELECT id, passenger_id, request_id FROM released`, occurrenceID)
 	if err != nil {
 		return fmt.Errorf("bookings: cancelling the bookings: %w", err)
 	}
-	type cancelled struct{ booking, passenger uuid.UUID }
+	type cancelled struct {
+		booking, passenger uuid.UUID
+		// request is nil for a seat that came from a standing arrangement,
+		// which is its own standing permission and needs no requeueing.
+		request *uuid.UUID
+	}
 	var affected []cancelled
 	for rows.Next() {
 		var c cancelled
-		if err := rows.Scan(&c.booking, &c.passenger); err != nil {
+		if err := rows.Scan(&c.booking, &c.passenger, &c.request); err != nil {
 			rows.Close()
 			return fmt.Errorf("bookings: reading the cancelled bookings: %w", err)
 		}
@@ -271,10 +276,59 @@ func (s *Service) CancelOccurrence(ctx context.Context, occurrenceID, userID uui
 		}, now); err != nil {
 			return err
 		}
+		if c.request == nil {
+			continue
+		}
+		if err := s.lookAgainFor(ctx, tx, *c.request, occurrenceID, now); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("bookings: commit: %w", err)
 	}
 	return nil
+}
+
+// lookAgainFor puts a passenger whose ride was called off back in the matching
+// queue and asks the next driver.
+//
+// A ride_request is standing permission to be matched inside its window: it is
+// how the first driver was found, and nothing about the driver cancelling
+// withdraws it. Without this the request sits at 'matched' for ever — no sweep
+// reads that state looking for work — so the app tells somebody their ride is
+// off and then never looks again, while a driver publishing on the same
+// corridor an hour later is never asked about them.
+//
+// Enqueued rather than left to the hourly reconciler, for the same reason as
+// every other continuation: somebody whose driver has just cancelled should not
+// wait an hour to hear that a different one can take them.
+func (s *Service) lookAgainFor(
+	ctx context.Context, tx pgx.Tx, requestID, occurrenceID uuid.UUID, now time.Time,
+) error {
+	// The window is the one condition worth re-reading. A journey whose time has
+	// passed has no ride left to find, and the request sweeper is about to mark
+	// it expired; putting it back in the queue would spend a driver's attention
+	// on a lift nobody can give.
+	tag, err := tx.Exec(ctx, `
+		UPDATE ride_requests SET status = 'open', updated_at = now()
+		 WHERE id = $1 AND status = 'matched' AND window_end > $2`, requestID, now)
+	if err != nil {
+		return fmt.Errorf("bookings: reopening the request: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil
+	}
+
+	payload, err := json.Marshal(map[string]any{"request_id": requestID, "reason": "trip_cancelled"})
+	if err != nil {
+		return fmt.Errorf("bookings: encoding the next ask: %w", err)
+	}
+	return outbox.Enqueue(ctx, tx, outbox.Message{
+		Kind: "ask_next",
+		// Keyed on the departure that was called off, so the one cancellation
+		// asks once however many times it is retried.
+		IdempotencyKey: "ask_next:trip_cancelled:" + occurrenceID.String() + ":" + requestID.String(),
+		Payload:        payload,
+	}, now)
 }
