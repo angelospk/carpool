@@ -179,6 +179,15 @@ WITH cand AS (
 	      ), 0) >= $10
 	  AND o.depart_earliest < $4
 	  AND o.depart_latest   > $3
+	  -- And it has not gone yet. The two lines above compare the departure
+	  -- against the *request's* window, which is written once and never moves:
+	  -- one driver is asked at a time with half an hour to answer, so a request
+	  -- naming a morning is still being matched well into that morning, and
+	  -- every departure inside its window that had already left stayed a
+	  -- candidate. depart_earliest is what the rest of the app already means by
+	  -- departed — the moment a pair may confirm the ride, and the moment the
+	  -- driver may no longer call it off — so it is what is used here.
+	  AND o.depart_earliest > $13
 	  AND NOT d.notifications_muted
 	  AND ST_DWithin(o.route_geom::geography, $1::geography, d.notify_radius_km * 1000)
 	  AND ST_DWithin(o.route_geom::geography, $2::geography, d.notify_radius_km * 1000)

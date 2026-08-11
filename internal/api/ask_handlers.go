@@ -21,6 +21,10 @@ func askErrorStatus(err error) (int, string, string) {
 		return http.StatusConflict, "ask_closed", "this request has already been answered"
 	case errors.Is(err, asks.ErrNoSeats):
 		return http.StatusConflict, "no_seats", "the trip has no free seats left"
+	case errors.Is(err, asks.ErrNoLuggageRoom):
+		return http.StatusConflict, "no_luggage_room", "the trip has no room left for that much luggage"
+	case errors.Is(err, asks.ErrTripDeparted):
+		return http.StatusConflict, "trip_departed", "this trip has already set off"
 	case errors.Is(err, asks.ErrStaleItinerary):
 		return http.StatusConflict, "itinerary_changed", "your route changed; please reopen the request"
 	default:

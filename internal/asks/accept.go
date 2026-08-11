@@ -42,6 +42,11 @@ var (
 	ErrStaleItinerary = errors.New("asks: the itinerary changed during verification")
 	// ErrNotYours means the caller is not the driver being asked.
 	ErrNotYours = errors.New("asks: the ask belongs to another driver")
+	// ErrTripDeparted means the departure the ask was for is due to leave, so
+	// there is no longer a seat to take. Distinct from ErrAskExpired because
+	// what ran out is not the driver's half hour but the trip itself, and the
+	// passenger has to be told to look for another ride rather than to wait.
+	ErrTripDeparted = errors.New("asks: the trip has already left")
 )
 
 // Verifier re-checks that a detour still fits the driver's budget, given the
@@ -185,8 +190,9 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	// racing for the last place in the boot serialise on this row exactly as they
 	// already do for the last seat.
 	var luggageFree int
+	var departs time.Time
 	err = tx.QueryRow(ctx, `
-		SELECT o.seats_free, o.status, o.itinerary_version, t.driver_id,
+		SELECT o.seats_free, o.status, o.itinerary_version, t.driver_id, o.depart_earliest,
 		       o.luggage_capacity - COALESCE((
 		           SELECT sum(b.luggage_count) FROM bookings b
 		           WHERE b.occurrence_id = o.id AND b.status IN ('confirmed', 'completed')
@@ -194,7 +200,7 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		FROM trip_occurrences o
 		JOIN route_templates t ON t.id = o.template_id
 		WHERE o.id = $1
-		FOR UPDATE OF o`, occurrenceID).Scan(&seatsFree, &occurrenceState, &version, &templateDriver, &luggageFree)
+		FOR UPDATE OF o`, occurrenceID).Scan(&seatsFree, &occurrenceState, &version, &templateDriver, &departs, &luggageFree)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("asks: locking occurrence: %w", err)
 	}
@@ -237,6 +243,18 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	}
 	if occurrenceState != "scheduled" {
 		return uuid.Nil, ErrAskNotPending
+	}
+	// A departure that has left is not one somebody can be put into, and its
+	// status never says so: 'scheduled' is where an occurrence stays for ever
+	// after the car has gone, and departed is computed from the clock wherever
+	// it is asked. Read after the occurrence is locked, so a departure crossing
+	// while this waited on the row is seen rather than missed.
+	//
+	// Offers now carry deadlines that end at the departure, so the ordinary path
+	// cannot produce a pending ask that reaches this line. It is here for the one
+	// that does anyway.
+	if !now.Before(departs) {
+		return uuid.Nil, ErrTripDeparted
 	}
 	if requestState != "open" && requestState != "asking" {
 		return uuid.Nil, ErrAskNotPending

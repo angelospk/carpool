@@ -50,6 +50,11 @@ WITH trip AS (
 	JOIN users du ON du.id = t.driver_id AND du.status = 'active'
 	WHERE o.id = $1
 	  AND o.status = 'scheduled'
+	  -- The mirror of the same clause in the forward filter. A seat comes back
+	  -- whenever a booking is cancelled, including ten minutes after the car
+	  -- left, and that wake offered the seat to everybody still waiting on the
+	  -- corridor.
+	  AND o.depart_earliest > $2
 	  AND NOT d.notifications_muted
 )
 SELECT rr.id

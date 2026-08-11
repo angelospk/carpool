@@ -418,10 +418,11 @@ func (s *Service) createAsk(
 	// requests for the same newly published trip both pass it and only this
 	// recount, under the lock, stops them both writing an offer.
 	var seatsFree int
+	var departs time.Time
 	if err := tx.QueryRow(ctx, `
-		SELECT seats_free FROM trip_occurrences
+		SELECT seats_free, depart_earliest FROM trip_occurrences
 		WHERE id = $1 AND status = 'scheduled'
-		FOR UPDATE`, c.OccurrenceID).Scan(&seatsFree); err != nil {
+		FOR UPDATE`, c.OccurrenceID).Scan(&seatsFree, &departs); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Cancelled or gone between the filter and here. Not this request's
 			// problem, and not something retrying fixes.
@@ -463,6 +464,18 @@ func (s *Service) createAsk(
 	// the itinerary as it stands then.
 	pickup, dropoff := req.Origin, req.Destination
 
+	// An offer cannot outlive the car it is for. The half hour is how long a
+	// driver is given to answer, not a promise that the answer still means
+	// something: a trip leaving in ten minutes would otherwise sit on their
+	// phone as a live offer for twenty minutes after it left, and hold the
+	// passenger's request against a candidate that could only ever have said no.
+	// Ending it at the departure hands them back to the sweeper, which reopens
+	// the request and looks for somebody who has not gone yet.
+	expiresAt := s.clock.Now().Add(DefaultTTL)
+	if departs.Before(expiresAt) {
+		expiresAt = departs
+	}
+
 	var askID uuid.UUID
 	err = tx.QueryRow(ctx, `
 		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km,
@@ -475,7 +488,7 @@ func (s *Service) createAsk(
 		RETURNING id`,
 		req.ID, c.OccurrenceID, insertion.DetourMin, insertion.DetourKm,
 		pickup.Lon, pickup.Lat, dropoff.Lon, dropoff.Lat,
-		float64(priceCents)/100, encoded, c.ItineraryVersion, s.clock.Now().Add(DefaultTTL)).Scan(&askID)
+		float64(priceCents)/100, encoded, c.ItineraryVersion, expiresAt).Scan(&askID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return uuid.Nil, errAskExists

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -63,11 +64,16 @@ func newOwnedWorld(t *testing.T) *ownedWorld {
 	var otherPassenger uuid.UUID
 	h.signUp("+306900000098", "Δεύτερη")
 	h.mustQuery(`SELECT id FROM users WHERE phone = '+306900000098'`, &otherPassenger)
+	// Times come off the harness clock rather than being written out, so the
+	// fixture stays in the future as the real calendar moves past it. A window
+	// in the past is a different fixture: the sweeper expires it, and these
+	// assertions would then be passing for the wrong reason.
 	if err := h.pool.QueryRow(ctx, `
 		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end, kind, status)
 		VALUES ($1, ST_SetSRID(ST_MakePoint(25.83,40.85),4326), ST_SetSRID(ST_MakePoint(25.97,40.85),4326),
-		        '2026-07-30T04:00:00Z','2026-07-30T06:00:00Z','open','asking')
-		RETURNING id`, otherPassenger).Scan(&w.openRequest); err != nil {
+		        $2, $3, 'open','asking')
+		RETURNING id`, otherPassenger,
+		h.clock.Now().Add(16*time.Hour), h.clock.Now().Add(18*time.Hour)).Scan(&w.openRequest); err != nil {
 		t.Fatalf("seeding the open request: %v", err)
 	}
 	if err := h.pool.QueryRow(ctx, `
@@ -84,8 +90,9 @@ func newOwnedWorld(t *testing.T) *ownedWorld {
 		        pickup_point, dropoff_point, price_eur, until_date)
 		VALUES ($1, $2, 4, 1,
 		        ST_SetSRID(ST_MakePoint(25.82,40.85),4326), ST_SetSRID(ST_MakePoint(25.98,40.85),4326),
-		        2.50, '2026-12-31')
-		RETURNING id`, w.template, w.passengerID).Scan(&w.arrangement); err != nil {
+		        2.50, $3)
+		RETURNING id`, w.template, w.passengerID,
+		h.clock.Now().Add(120*24*time.Hour).Format("2006-01-02")).Scan(&w.arrangement); err != nil {
 		t.Fatalf("seeding the arrangement: %v", err)
 	}
 
@@ -134,6 +141,7 @@ func (w *ownedWorld) fingerprint(t *testing.T) map[string]string {
 
 func TestAStrangerCannotTouchAnythingTheyDoNotOwn(t *testing.T) {
 	w := newOwnedWorld(t)
+	until := w.clock.Now().Add(120 * 24 * time.Hour).Format("2006-01-02")
 
 	cases := []struct {
 		name   string
@@ -149,7 +157,7 @@ func TestAStrangerCannotTouchAnythingTheyDoNotOwn(t *testing.T) {
 		{"decline an ask", http.MethodPost, "/v1/asks/" + w.pendingAsk.String() + "/decline", nil},
 		{"cancel a booking", http.MethodDelete, "/v1/bookings/" + w.booking.String(), nil},
 		{"repeat a booking", http.MethodPost, "/v1/bookings/" + w.booking.String() + "/repeat",
-			map[string]any{"weekday": 4, "until_date": "2026-12-31"}},
+			map[string]any{"weekday": 4, "until_date": until}},
 		{"ride again", http.MethodPost, "/v1/bookings/" + w.booking.String() + "/again", nil},
 		{"approve an arrangement", http.MethodPost, "/v1/arrangements/" + w.arrangement.String() + "/approve", nil},
 		{"decline an arrangement", http.MethodPost, "/v1/arrangements/" + w.arrangement.String() + "/decline", nil},
