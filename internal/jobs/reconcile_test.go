@@ -68,6 +68,39 @@ func TestReconcilerQueuesAnotherLookAtWaitingRequests(t *testing.T) {
 	}
 }
 
+// Nobody is left permanently at the back of the queue.
+//
+// One batch does not cover everybody once there are more open requests than it
+// holds, and the order is by how long each has waited. Taking only the first
+// batch and stopping would mean the oldest requests — the ones nothing can
+// match, which is why they are still here — occupy every pass for ever, and the
+// requests behind them are never looked at again. That matters more here than
+// anywhere else: this is the last resort, so there is no later event to reach
+// them.
+func TestReconcilerReachesPastTheFirstBatch(t *testing.T) {
+	f := newFixture(t)
+	now := time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)
+	c := clock.NewFake(now)
+
+	const total = jobs.ReconcileBatch + 5
+	for i := range total {
+		// Staggered so the order is total rather than arbitrary, and the last
+		// ones created are genuinely behind the first batch.
+		openRequest(t, f, "open", now.Add(24*time.Hour).Add(time.Duration(i)*time.Second))
+	}
+
+	n, err := jobs.NewReconciler(f.pool, c).Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if n != total {
+		t.Fatalf("looked at %d of %d waiting requests, want all of them", n, total)
+	}
+	if got := queuedAsks(t, f); got != total {
+		t.Fatalf("%d ask_next messages, want %d", got, total)
+	}
+}
+
 // Somebody already in conversation with a driver is left alone, and so is
 // somebody whose journey has been and gone.
 func TestReconcilerLeavesSettledAndLapsedRequestsAlone(t *testing.T) {
