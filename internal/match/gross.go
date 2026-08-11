@@ -62,6 +62,10 @@ type GrossQuery struct {
 	// Same reason as RequestID for being in the query: applied afterwards, a
 	// targeted request whose occurrence ranks twenty-first finds nothing.
 	Target *uuid.UUID
+	// Now decides which offers still stand. It comes from the caller's clock
+	// rather than the database's so that the filter and the code that acts on it
+	// agree about the time, which is also what lets a test move it.
+	Now time.Time
 }
 
 // Candidate is an occurrence that survived the gross filter.
@@ -82,6 +86,36 @@ type Candidate struct {
 	// ItineraryVersion is the occurrence's plan version at the time of the
 	// query. An ask records it so the accept path can detect that the plan moved.
 	ItineraryVersion int
+}
+
+// SeatsSpokenFor is the SQL expression for how many seats on an occurrence are
+// already promised to somebody: the party sizes behind every live ask.
+//
+// A pending ask is not a booking and holds no seat in the occurrence's own
+// count, which is right — a driver who never answers should not strand the
+// trip. But it is an offer, and offering the same seat to four people means
+// three of them are told it is theirs and then told it went.
+//
+// The seats are read through ride_requests because that is where a party size
+// lives; asks record the offer, not its size.
+//
+// Expiry is read rather than trusted to the status. Nothing runs at the instant
+// an offer lapses, so an occurrence whose sweeper has not come round yet would
+// otherwise stay unaskable for as long as the sweep interval.
+//
+// It takes its parameters as strings so that the same expression serves the
+// candidate filter, which scans many occurrences, and the admission check,
+// which locks one. Two hand-written copies of this rule would be free to drift,
+// and drift here means either a silent storm or a trip nobody can be asked
+// about.
+func SeatsSpokenFor(occurrence, now string) string {
+	return `COALESCE((
+		SELECT sum(rr.seats)
+		FROM asks a
+		JOIN ride_requests rr ON rr.id = a.request_id
+		WHERE a.occurrence_id = ` + occurrence + `
+		  AND a.status = 'pending'
+		  AND a.expires_at > ` + now + `), 0)`
 }
 
 // grossSQL is the stage-1 filter from MATCHING.md.
@@ -105,7 +139,7 @@ type Candidate struct {
 // reverse and crossing routes, while removing either alone does not. The
 // explicit ordering predicate stays because it states the intent directly and
 // survives any future reformulation of the floor.
-const grossSQL = `
+var grossSQL = `
 WITH cand AS (
 	SELECT o.id                AS occurrence_id,
 	       t.driver_id         AS driver_id,
@@ -122,7 +156,7 @@ WITH cand AS (
 	JOIN route_templates  t ON t.id = o.template_id
 	JOIN driver_profiles  d ON d.user_id = t.driver_id
 	WHERE o.status = 'scheduled'
-	  AND o.seats_free >= $5
+	  AND o.seats_free - ` + SeatsSpokenFor("o.id", "$13") + ` >= $5
 	  -- Excluded rather than ranked down. An ask a driver will certainly
 	  -- refuse costs them a notification and the passenger a wait, and the
 	  -- enum's own order is what "will certainly refuse" means.
@@ -233,6 +267,7 @@ func grossArgs(q GrossQuery) []any {
 		q.LuggageCount,           // $10
 		request,                  // $11
 		q.Target,                 // $12
+		q.Now,                    // $13
 	}
 }
 

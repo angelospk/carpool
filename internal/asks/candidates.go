@@ -54,6 +54,7 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 		// discards rows that had already displaced the ones being looked for.
 		RequestID: requestID,
 		Target:    req.Target,
+		Now:       s.clock.Now(),
 	})
 	if err != nil {
 		return uuid.Nil, err
@@ -90,8 +91,10 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 		}
 
 		askID, err := s.createAsk(ctx, req, c, insertion, price, basis)
-		if errors.Is(err, errAskExists) {
-			continue // raced with another worker; move on
+		if errors.Is(err, errAskExists) || errors.Is(err, errNoRoomToAsk) {
+			// Raced with another worker, or the seats were spoken for between
+			// the filter and the lock. Either way, try the next occurrence.
+			continue
 		}
 		if err != nil {
 			return uuid.Nil, err
@@ -359,6 +362,10 @@ func (s *Service) ridersAboard(
 // errAskExists signals that a pending ask already existed for this request.
 var errAskExists = errors.New("asks: an ask already exists")
 
+// errNoRoomToAsk signals that every remaining seat on this occurrence is
+// already promised to somebody, so the next candidate should be tried instead.
+var errNoRoomToAsk = errors.New("asks: no unspoken-for seat on this occurrence")
+
 // createAsk writes the ask and queues the driver's push, in one transaction.
 func (s *Service) createAsk(
 	ctx context.Context, req request, c match.Candidate,
@@ -376,6 +383,46 @@ func (s *Service) createAsk(
 		return uuid.Nil, fmt.Errorf("asks: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Lock the occurrence before the request. Accepting an ask takes the
+	// occurrence first and touches the request after it, so this is the order
+	// that already exists; taking the two the other way round here would let an
+	// accept and an ask deadlock against each other.
+	//
+	// The filter that produced this candidate made the same seat check, but it
+	// made it without a lock and possibly seconds ago. Two workers waking two
+	// requests for the same newly published trip both pass it and only this
+	// recount, under the lock, stops them both writing an offer.
+	var seatsFree int
+	if err := tx.QueryRow(ctx, `
+		SELECT seats_free FROM trip_occurrences
+		WHERE id = $1 AND status = 'scheduled'
+		FOR UPDATE`, c.OccurrenceID).Scan(&seatsFree); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Cancelled or gone between the filter and here. Not this request's
+			// problem, and not something retrying fixes.
+			return uuid.Nil, errNoRoomToAsk
+		}
+		return uuid.Nil, fmt.Errorf("asks: locking occurrence: %w", err)
+	}
+
+	// Counted in its own statement, after the lock is held, and this separation
+	// is load-bearing rather than tidiness. Under READ COMMITTED a SELECT ...
+	// FOR UPDATE that waits for another transaction rechecks only the locked
+	// row's own conditions when it wakes; a subquery in the same statement keeps
+	// the snapshot it started with. Folding the count into the locking query
+	// therefore counts the asks as they were before the wait, and two workers
+	// racing for the last seat both find it free. Measured, not reasoned about:
+	// the concurrency test fails exactly that way when the two are one query.
+	var spokenFor int
+	if err := tx.QueryRow(ctx,
+		`SELECT `+match.SeatsSpokenFor("$1", "$2"), c.OccurrenceID, s.clock.Now()).
+		Scan(&spokenFor); err != nil {
+		return uuid.Nil, fmt.Errorf("asks: counting offers on the occurrence: %w", err)
+	}
+	if seatsFree-spokenFor < req.Seats {
+		return uuid.Nil, errNoRoomToAsk
+	}
 
 	// Lock the request so two workers cannot both create the "next" ask.
 	var status string
