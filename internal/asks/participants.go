@@ -17,6 +17,11 @@ import (
 // being matched does not need to hear it either.
 var errNotActive = errors.New("asks: one of the participants is not an active account")
 
+// errBlocked means one of the two has blocked the other. Unexported for the
+// same reason as errNotActive, and more pointedly: whoever is on the other side
+// of a block must not be able to learn that it exists.
+var errBlocked = errors.New("asks: one of the participants has blocked the other")
+
 // lockParticipants holds both people's rows for the rest of the transaction and
 // refuses unless both accounts are active.
 //
@@ -52,6 +57,32 @@ func lockParticipants(ctx context.Context, tx pgx.Tx, a, b uuid.UUID) error {
 		if status != "active" {
 			return errNotActive
 		}
+	}
+
+	// And neither of them has blocked the other.
+	//
+	// The matcher will not introduce a blocked pair, which is where this rule
+	// has always been enforced, and for a search that is enough. It is not
+	// enough for an offer: the ask is written at one moment and answered at
+	// another, and blocking somebody writes a row without touching the offer
+	// already on their phone. Half an hour later the driver taps accept, and
+	// the two of them have a seat in the same car, each other's meeting point
+	// and a chat channel — which is the one thing blocking is for.
+	//
+	// Read here rather than under its own lock. A block is a single committed
+	// insert, so this sees every one that landed before the transaction, and
+	// the pair that block and accept in the same instant is not the case worth
+	// serialising the whole matcher for.
+	var blocked bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM blocks
+			WHERE (blocker_id = $1 AND blocked_id = $2)
+			   OR (blocker_id = $2 AND blocked_id = $1))`, ids[0], ids[1]).Scan(&blocked); err != nil {
+		return fmt.Errorf("asks: reading blocks between participants: %w", err)
+	}
+	if blocked {
+		return errBlocked
 	}
 	return nil
 }

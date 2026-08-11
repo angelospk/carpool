@@ -402,7 +402,9 @@ func (s *Service) createAsk(
 	// the user row FOR UPDATE first, so sharing it here is what makes the two
 	// orders agree and the outcome decided rather than raced.
 	if err := lockParticipants(ctx, tx, c.DriverID, req.PassengerID); err != nil {
-		if errors.Is(err, errNotActive) {
+		if errors.Is(err, errNotActive) || errors.Is(err, errBlocked) {
+			// Both mean the same thing to a search: not this driver, try the
+			// next one.
 			return uuid.Nil, errNoRoomToAsk
 		}
 		return uuid.Nil, err

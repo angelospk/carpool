@@ -170,7 +170,7 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	// sitting on a driver's phone is exactly how a suspended passenger ends up
 	// with a seat held in their name.
 	if err := lockParticipants(ctx, tx, driverID, prePassenger); err != nil {
-		if errors.Is(err, errNotActive) {
+		if errors.Is(err, errNotActive) || errors.Is(err, errBlocked) {
 			return uuid.Nil, ErrAskNotPending
 		}
 		return uuid.Nil, err
