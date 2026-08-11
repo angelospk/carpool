@@ -447,6 +447,19 @@ from the clock that decision uses.** `now()` is fine for `updated_at` audit
 columns, which nothing compares. A guard test holds the clock six years from
 real time so the two can never agree by coincidence again.
 
+## Before notifications work on a phone
+
+The server has queued pushes since M4 and the app now registers a token on
+every launch while signed in (`src/push/`). One thing is still missing and it is
+not code: `app.json` has no `extra.eas.projectId`, and `getExpoPushTokenAsync`
+has nowhere to fetch a token from without one. It throws
+`ERR_NOTIFICATIONS_NO_EXPERIENCE_ID`, which is caught and logged as a plain
+sentence rather than a code, because the person reading that log is the person
+who has to go and create the EAS project.
+
+Nothing else about the app is affected: registration fails quietly and every
+other screen works. It sits with the MapTiler key as a thing the owner supplies.
+
 ## Known limitations
 
 - A websocket subscription is authorized once, at connect. A passenger whose

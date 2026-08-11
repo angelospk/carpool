@@ -8,6 +8,7 @@ import Constants from 'expo-constants';
 import { configure } from '../src/api/client';
 import { resolveBaseUrl } from '../src/api/baseUrl';
 import { useSession } from '../src/state/session';
+import { usePushRegistration } from '../src/push/usePushRegistration';
 import '../src/i18n';
 
 // See src/api/baseUrl.ts. On a device this is configuration; on web the API is
@@ -57,6 +58,12 @@ function AuthGate() {
   useEffect(() => {
     void restore();
   }, [restore]);
+
+  // Every launch while signed in, not once at sign-up: a token changes on
+  // reinstall and on restore to a new phone, the retention rule retires one
+  // that has gone two years without a delivery, and somebody who turned
+  // notifications on in Settings after refusing never tells the app.
+  usePushRegistration(status === 'signedIn');
 
   useEffect(() => {
     if (status === 'loading') return;
