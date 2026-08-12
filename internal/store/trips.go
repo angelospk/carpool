@@ -277,11 +277,22 @@ func ConfirmTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID u
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// A ride can only be confirmed after it was due to leave. Without this a
-	// pair could confirm and then rate a trip scheduled for next week.
+	// A ride can only be confirmed once the car cannot still be waiting.
+	//
+	// Measured from the far end of the departure window rather than the near
+	// one. A trip that may leave any time between 07:00 and 07:30 has not
+	// happened at 07:01, and confirming there was the app agreeing that a ride
+	// took place while the driver was still at the kerb — which is the whole of
+	// what a confirmation is worth, since it is what unlocks a rating.
+	//
+	// It still only proves the clock passed. Two people who agree to can confirm
+	// a journey neither made, and every rating in the app rests on that; closing
+	// it needs evidence a ride happened rather than a better timestamp. This is
+	// the least misleading line available without that evidence, and RISKS.md
+	// says so out loud.
 	var departed bool
 	err = tx.QueryRow(ctx,
-		`SELECT depart_earliest <= $2 FROM trip_occurrences WHERE id = $1 FOR UPDATE`,
+		`SELECT depart_latest <= $2 FROM trip_occurrences WHERE id = $1 FOR UPDATE`,
 		occurrenceID, now).Scan(&departed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotParticipant

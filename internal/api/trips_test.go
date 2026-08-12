@@ -566,3 +566,47 @@ func TestTheDriverDoesNotGetSomebodyElsesReceipt(t *testing.T) {
 		t.Error("the driver was shown a passenger's receipt")
 	}
 }
+
+// The line between "not yet" and "confirm it" is the far end of the departure
+// window, not the near one.
+//
+// A trip that may leave any time between 07:00 and 07:30 has not happened at
+// 07:01. Confirming there was the app agreeing a ride took place while the
+// driver was still at the kerb, and a confirmation is what unlocks a rating —
+// so the whole of what a rating is worth rested on a clock reading that could
+// be half an hour early.
+func TestATripInsideItsDepartureWindowCannotBeConfirmedYet(t *testing.T) {
+	h := newHarness(t)
+	driver, _, occurrenceID := h.bookedTrip(t)
+	now := h.clock.Now()
+	// It could have left ten minutes ago; it could also be leaving in twenty.
+	h.mustExec(`UPDATE trip_occurrences SET depart_earliest = $1, depart_latest = $2`,
+		now.Add(-10*time.Minute), now.Add(20*time.Minute))
+
+	rec := h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, driver)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 while the car may still be waiting", rec.Code)
+	}
+	var confirmed bool
+	h.mustQuery(`SELECT driver_confirmed FROM bookings`, &confirmed)
+	if confirmed {
+		t.Error("a trip that may not have left yet was confirmed")
+	}
+}
+
+// And at the far end it opens, so the rule above is a boundary rather than a
+// refusal.
+func TestATripIsConfirmableOnceItCouldNoLongerBeWaiting(t *testing.T) {
+	h := newHarness(t)
+	driver, _, occurrenceID := h.bookedTrip(t)
+	now := h.clock.Now()
+	h.mustExec(`UPDATE trip_occurrences SET depart_earliest = $1, depart_latest = $2`,
+		now.Add(-40*time.Minute), now.Add(-10*time.Minute))
+
+	rec := h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, driver)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 once the window has closed: %s", rec.Code, rec.Body.String())
+	}
+}

@@ -827,16 +827,22 @@ active account. Each of those was a way somebody could have moved on — cancell
 the journey themselves, been suspended, been matched by somebody else — and each
 is a quiet no-op rather than a failure.
 
-## Confirming a ride only proves the clock passed (raised 2026-08-12)
+## Confirming a ride only proves the clock passed (raised 2026-08-12, narrowed the same day)
 
-Codex made this point reviewing the departure work, and it is worth writing down
-even though nothing here changes it. Confirmation requires `depart_earliest <=
-now` and nothing else, so a pair can confirm — and then rate each other — for a
-journey neither of them made. Every rating in the app rests on that.
+Confirmation required `depart_earliest <= now` and nothing else, so a pair could
+confirm — and then rate each other — for a journey neither made. Every rating in
+the app rests on that.
 
-Fixing it needs evidence that a ride happened: a driver marking "on the way", two
-devices near each other at the pickup, or a confirmation window that opens at
-the far end of the departure window rather than the near one. The last is cheap
-and would help a little. The first two are the post-MVP location work that
-RISKS.md already parks. Recorded here so that the weakness of a rating is a
-known property rather than an assumption.
+The boundary has moved to `depart_latest`, the far end of the departure window.
+A trip that may leave any time between 07:00 and 07:30 has not happened at
+07:01, and the app was agreeing that it had while the driver was still at the
+kerb. Both sides must confirm before a booking completes, and only a completed
+booking can be rated, so this is the gate in front of every rating.
+
+**What is still open.** Two people who agree to it can confirm a ride neither
+took. No timestamp rule can fix that; it needs evidence that a journey happened
+— a driver marking "on the way", two devices near each other at the pickup, a
+code read out at the kerb — and the first two are the post-MVP location work
+this file already parks. A rating here means "both of them said it happened",
+and the app should not be built to imply more than that.
+
