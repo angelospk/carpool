@@ -492,6 +492,53 @@ rather than from the statement that cancelled them, and these reopenings add a
 lock order worth writing down. Both handled; the second is in RISKS.md as
 bounded rather than closed.
 
+## The QA pass over identity and recovery (2026-08-12)
+
+A third hunt, same method, and the two findings that matter are both about
+things the app held onto after it had been told to let go.
+
+**Erasure left the face and the person's own words.** "Erase me" was written
+against the users row, so what it reached was the columns on that row. Three
+things a person owns live elsewhere: their photograph, in a table of its own
+that the photo endpoint reads by id with no status check, so any account could
+still fetch a deleted person's picture; their bio, five hundred characters where
+somebody says where they work and what time they finish, shown to everyone on
+the trip; and their preference tags. This is the third time this class has been
+found here — the registration plate went the same way — and the pattern is not
+the columns. Erasure is a list maintained by hand while migrations keep adding
+tables with a user_id in them. The photo endpoint now checks the account as
+well, so a row an erasure misses is not served because nothing else looked.
+
+**A recovery could act on a match that had been and gone.** Reopening a stranded
+passenger's request moved out of the three transactions that cancel a departure
+and into the outbox, so that suspending an account no longer locks a row
+belonging to every passenger it strands. That was the lock-ordering hazard from
+the previous pass, closed rather than left open. But the handler's check proved
+the request was *vacant*, not that this booking had vacated it — and Codex
+walked the schedule where those differ: stranded, rematched, stranded again, and
+a replay of the first recovery arrives to find exactly what it expects. It
+consumes the reopening the second was owed and carries a key the outbox has
+already seen, so the request ends up open with nobody being asked. A request
+holds at most one live booking at a time, so the newest one it has is the one
+that last owned the match, and that is what the handler requires now.
+
+Smaller, same family: somebody who closed their account and still held a live
+access token was told it had been suspended; confirmation of a ride opened at
+the near end of the departure window, so the app agreed a journey had happened
+while the driver was still at the kerb.
+
+Two things I had wrong and the reviews corrected. I believed "one driver asked
+at a time" was held only by a row lock and wrote a migration for it —
+`asks_one_pending` has been in the schema since the first migration, and what
+was missing was a test. And I believed a contribution share of zero should
+charge nothing; the column is `CHECK (contribution_share > 0)`, so zero is
+unreachable in the database and means an unset field in Go, which has to read as
+the whole share or every route published before the choice existed silently
+reprices.
+
+CodeRabbit was unavailable for the last round (an org error, twice, after two
+good runs the same day), so that diff carries one reviewer rather than two.
+
 ## Deliberately not built
 
 Parked with a reason, not forgotten:
