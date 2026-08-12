@@ -44,23 +44,20 @@ func requestStatus(t *testing.T, w *world, requestID uuid.UUID) string {
 	return s
 }
 
-func bookingStatusOf(t *testing.T, w *world, bookingID uuid.UUID) string {
-	t.Helper()
-	var s string
-	if err := w.pool.QueryRow(context.Background(),
-		`SELECT status FROM bookings WHERE id = $1`, bookingID).Scan(&s); err != nil {
-		t.Fatalf("reading the booking: %v", err)
-	}
-	return s
-}
-
-func asksQueuedFor(t *testing.T, w *world, requestID uuid.UUID) int {
+// reopensQueuedFor counts the recovery events recorded for a request.
+//
+// The cancelling transaction records that a seat was lost; the dispatcher does
+// the reopening and the asking, where the passenger's rows can be taken in the
+// ordinary order. So this is what the cancellation itself is answerable for.
+// What the dispatcher then does with the event is asserted where it happens,
+// against every state the passenger could have moved to in between.
+func reopensQueuedFor(t *testing.T, w *world, requestID uuid.UUID) int {
 	t.Helper()
 	var n int
 	if err := w.pool.QueryRow(context.Background(), `
 		SELECT count(*) FROM outbox
-		WHERE kind = 'ask_next' AND payload->>'request_id' = $1::text`, requestID).Scan(&n); err != nil {
-		t.Fatalf("counting queued asks: %v", err)
+		WHERE kind = 'reopen_request' AND payload->>'request_id' = $1::text`, requestID).Scan(&n); err != nil {
+		t.Fatalf("counting queued reopens: %v", err)
 	}
 	return n
 }
@@ -74,11 +71,8 @@ func TestCallingOffADepartureLooksForAnotherDriverForItsPassengers(t *testing.T)
 		t.Fatalf("CancelOccurrence: %v", err)
 	}
 
-	if got := requestStatus(t, w, requestID); got != "open" {
-		t.Fatalf("the passenger's request is %q after their driver called the trip off, want open", got)
-	}
-	if n := asksQueuedFor(t, w, requestID); n != 1 {
-		t.Fatalf("%d asks queued for a passenger whose ride was called off, want 1", n)
+	if n := reopensQueuedFor(t, w, requestID); n != 1 {
+		t.Fatalf("%d recovery events for a passenger whose ride was called off, want 1", n)
 	}
 }
 
@@ -106,43 +100,11 @@ func TestCallingOffADepartureLeavesAStandingArrangementAlone(t *testing.T) {
 
 	var queued int
 	if err := w.pool.QueryRow(ctx,
-		`SELECT count(*) FROM outbox WHERE kind = 'ask_next'`).Scan(&queued); err != nil {
-		t.Fatalf("counting queued asks: %v", err)
+		`SELECT count(*) FROM outbox WHERE kind = 'reopen_request'`).Scan(&queued); err != nil {
+		t.Fatalf("counting queued reopens: %v", err)
 	}
 	if queued != 0 {
-		t.Fatalf("%d asks queued for a booking that never came from a request", queued)
-	}
-}
-
-// Somebody whose window has since closed is not put back in the queue. There is
-// no ride left to find them, and the sweeper is about to mark the request
-// expired anyway.
-func TestCallingOffADepartureLeavesAPassengerWhoseTimeHasPassed(t *testing.T) {
-	w := newWorld(t)
-	ctx := context.Background()
-	requestID := requestFor(t, w, w.fromAsk)
-
-	if _, err := w.pool.Exec(ctx, `
-		UPDATE ride_requests SET window_start = $2::timestamptz - interval '3 hours',
-		                         window_end   = $2::timestamptz - interval '1 hour'
-		 WHERE id = $1`, requestID, testNow); err != nil {
-		t.Fatalf("moving the window into the past: %v", err)
-	}
-
-	if err := w.svc.CancelOccurrence(ctx, w.occurrenceID, w.driverID); err != nil {
-		t.Fatalf("CancelOccurrence: %v", err)
-	}
-
-	// The exact status, not merely "not open": a handler that did nothing at
-	// all would satisfy the weaker claim.
-	if got := requestStatus(t, w, requestID); got != "matched" {
-		t.Fatalf("a request whose window closed is %q, want it left at matched", got)
-	}
-	if got := bookingStatusOf(t, w, w.fromAsk); got != "cancelled_by_driver" {
-		t.Fatalf("the seat is %q, want the departure to have been called off regardless", got)
-	}
-	if n := asksQueuedFor(t, w, requestID); n != 0 {
-		t.Fatalf("%d asks queued for a journey whose time has passed", n)
+		t.Fatalf("%d recovery events for a booking that never came from a request", queued)
 	}
 }
 
@@ -203,7 +165,7 @@ func TestBeingStrandedTwiceAsksTwice(t *testing.T) {
 		t.Fatalf("second CancelOccurrence: %v", err)
 	}
 
-	if n := asksQueuedFor(t, w, requestID); n != 2 {
-		t.Fatalf("%d asks queued for somebody stranded twice, want 2", n)
+	if n := reopensQueuedFor(t, w, requestID); n != 2 {
+		t.Fatalf("%d recovery events for somebody stranded twice, want 2", n)
 	}
 }

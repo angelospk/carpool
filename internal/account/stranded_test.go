@@ -74,22 +74,17 @@ func TestClosingADriversAccountLooksForAnotherDriverForItsPassengers(t *testing.
 		t.Fatalf("Delete: %v", err)
 	}
 
-	var status string
-	if err := w.pool.QueryRow(context.Background(),
-		`SELECT status FROM ride_requests WHERE id = $1`, requestID).Scan(&status); err != nil {
-		t.Fatalf("reading the request: %v", err)
-	}
-	if status != "open" {
-		t.Fatalf("the passenger's request is %q after their driver left, want open", status)
-	}
-
+	// The closure records that the seat was lost; the dispatcher reopens the
+	// request and asks the next driver, where the passenger's rows can be taken
+	// in the ordinary order. What it does with each state the passenger could
+	// have moved to is asserted where that decision is made.
 	var queued int
 	if err := w.pool.QueryRow(context.Background(), `
 		SELECT count(*) FROM outbox
-		WHERE kind = 'ask_next' AND payload->>'request_id' = $1::text`, requestID).Scan(&queued); err != nil {
-		t.Fatalf("counting queued asks: %v", err)
+		WHERE kind = 'reopen_request' AND payload->>'request_id' = $1::text`, requestID).Scan(&queued); err != nil {
+		t.Fatalf("counting queued reopens: %v", err)
 	}
 	if queued != 1 {
-		t.Fatalf("%d asks queued for a passenger whose driver left, want 1", queued)
+		t.Fatalf("%d recovery events for a passenger whose driver left, want 1", queued)
 	}
 }

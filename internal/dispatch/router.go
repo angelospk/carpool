@@ -13,6 +13,7 @@ import (
 	"log/slog"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/clock"
@@ -54,6 +55,8 @@ func (r *Router) Handle(ctx context.Context, m outbox.Message) error {
 		return r.handleAskNext(ctx, m)
 	case "wake_waiting":
 		return r.handleWake(ctx, m)
+	case "reopen_request":
+		return r.handleReopen(ctx, m)
 	default:
 		// An unknown kind will never become known by retrying.
 		return fmt.Errorf("%w: unknown outbox kind %q", outbox.ErrPermanent, m.Kind)
@@ -280,6 +283,115 @@ func (r *Router) handleWake(ctx context.Context, m outbox.Message) error {
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("dispatch: commit wake: %w", err)
+	}
+	return nil
+}
+
+// handleReopen puts a passenger whose seat was cancelled back in the matching
+// queue, and asks the next driver for them.
+//
+// This is deliberately not done by the transaction that cancelled the seat.
+// Suspending an account, closing one, and a driver calling off a departure are
+// each one transaction by design — a half-applied suspension is the bug the
+// whole cascade exists to prevent — and each of them holds the driver's user
+// row, the occurrence and the bookings. Reopening the passengers' requests
+// inside that transaction adds a lock on rows belonging to an unbounded set of
+// other people, taken after the occurrence and without their user rows, which is
+// the one order the rest of the app does not use. Two moderators acting at once
+// could then each hold what the other was waiting for.
+//
+// So the cancelling transaction records what happened and commits, and the
+// recovery happens here, where the rows can be taken in the ordinary order:
+// the passenger, then their request.
+//
+// Everything the producer knew is re-read rather than trusted. Between the
+// cancellation committing and this running, the passenger may have cancelled
+// the request themselves, been suspended, closed their account, been matched to
+// somebody else, or run out of window. Each of those makes this message a
+// no-op, which is a success and not a failure: there is nothing to retry and
+// nothing went wrong.
+func (r *Router) handleReopen(ctx context.Context, m outbox.Message) error {
+	var p struct {
+		BookingID uuid.UUID `json:"booking_id"`
+		RequestID uuid.UUID `json:"request_id"`
+		Reason    string    `json:"reason"`
+	}
+	if err := json.Unmarshal(m.Payload, &p); err != nil {
+		return fmt.Errorf("%w: undecodable reopen_request payload: %v", outbox.ErrPermanent, err)
+	}
+	if p.BookingID == uuid.Nil || p.RequestID == uuid.Nil {
+		return fmt.Errorf("%w: reopen_request payload names no booking and request", outbox.ErrPermanent)
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("dispatch: begin reopen: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var passengerID uuid.UUID
+	err = tx.QueryRow(ctx,
+		`SELECT passenger_id FROM bookings WHERE id = $1`, p.BookingID).Scan(&passengerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The booking is gone. Nothing to recover and nothing retrying fixes.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("dispatch: loading the cancelled booking: %w", err)
+	}
+
+	// The passenger first, and shared rather than exclusive, which is the order
+	// and the strength every other path between two people uses. Suspension and
+	// closure take this row exclusively, so either they wait and then see the
+	// reopened request, or this waits and then reads the status they wrote.
+	var accountStatus string
+	if err := tx.QueryRow(ctx,
+		`SELECT status FROM users WHERE id = $1 FOR SHARE`, passengerID).Scan(&accountStatus); err != nil {
+		return fmt.Errorf("dispatch: locking the passenger: %w", err)
+	}
+	if accountStatus != "active" {
+		return nil
+	}
+
+	// One statement decides. A request is reopened only if it is still the one
+	// this booking was for: still matched, still inside its window, and with no
+	// live booking of its own — which, given that a request may hold at most one
+	// confirmed or completed booking at a time, is what "this cancellation is
+	// still the most recent thing that happened to it" means.
+	tag, err := tx.Exec(ctx, `
+		UPDATE ride_requests rr SET status = 'open', updated_at = now()
+		 WHERE rr.id = $1
+		   AND rr.status = 'matched'
+		   AND rr.window_end > $2
+		   AND NOT EXISTS (
+		         SELECT 1 FROM bookings b
+		          WHERE b.request_id = rr.id AND b.status IN ('confirmed','completed'))`,
+		p.RequestID, r.clock.Now())
+	if err != nil {
+		return fmt.Errorf("dispatch: reopening the request: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil
+	}
+
+	payload, err := json.Marshal(map[string]any{"request_id": p.RequestID, "reason": p.Reason})
+	if err != nil {
+		return fmt.Errorf("dispatch: encoding ask_next for %s: %w", p.RequestID, err)
+	}
+	// Keyed on the seat that was lost, so the same cancellation asks once
+	// however many times this message is redelivered, while somebody stranded a
+	// second time — rematched, and stranded again by the next driver — is a
+	// different booking and so a different key.
+	if err := outbox.Enqueue(ctx, tx, outbox.Message{
+		Kind:           "ask_next",
+		IdempotencyKey: "ask_next:reopen:" + p.BookingID.String(),
+		Payload:        payload,
+	}, r.clock.Now()); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("dispatch: commit reopen: %w", err)
 	}
 	return nil
 }

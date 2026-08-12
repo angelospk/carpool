@@ -19,8 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -512,13 +510,6 @@ func (s *Service) tellThePassengers(
 		return fmt.Errorf("account: cancelling the seats in their departures: %w", err)
 	}
 
-	// Ordered by the request they are about, so that two closures running at
-	// once reach the same rows in the same sequence rather than each holding
-	// what the other is waiting for. See RISKS.md.
-	slices.SortFunc(affected, func(x, y stranded) int {
-		return strings.Compare(x.booking.String(), y.booking.String())
-	})
-
 	for _, a := range affected {
 		payload, err := json.Marshal(map[string]any{
 			"event": "booking_cancelled", "recipient_id": a.passenger, "booking_id": a.booking,
@@ -536,30 +527,22 @@ func (s *Service) tellThePassengers(
 		if a.request == nil {
 			continue
 		}
-		// The window is re-read because a journey whose time has passed has no
-		// ride left to find.
-		tag, err := tx.Exec(ctx, `
-			UPDATE ride_requests SET status = 'open', updated_at = now()
-			 WHERE id = $1 AND status = 'matched' AND window_end > $2`, *a.request, now)
+		// Recorded rather than done, so that closing an account does not also
+		// take a lock on a request belonging to each passenger it strands. The
+		// recovery, and the re-reads it depends on, happen in the dispatcher:
+		// see dispatch.handleReopen.
+		next, err := json.Marshal(map[string]any{
+			"booking_id": a.booking, "request_id": *a.request, "reason": "driver_left",
+		})
 		if err != nil {
-			return fmt.Errorf("account: reopening the stranded request: %w", err)
-		}
-		if tag.RowsAffected() == 0 {
-			continue
-		}
-		next, err := json.Marshal(map[string]any{"request_id": *a.request, "reason": "driver_left"})
-		if err != nil {
-			return fmt.Errorf("account: encoding the next ask: %w", err)
+			return fmt.Errorf("account: encoding the reopen: %w", err)
 		}
 		if err := outbox.Enqueue(ctx, tx, outbox.Message{
-			Kind: "ask_next",
-			// Keyed on the seat that was lost rather than on the request. The
-			// same request can be stranded more than once — rematched after
-			// this driver leaves, and stranded again when the next one does —
-			// and a key naming only the request would make the second event a
-			// duplicate of the first and swallow it, leaving that passenger
-			// waiting for an ask nobody was going to send.
-			IdempotencyKey: "ask_next:driver_left:" + a.booking.String(),
+			Kind: "reopen_request",
+			// Keyed on the seat that was lost: one closure asks once however
+			// many times it is retried, and somebody stranded a second time is
+			// a different booking and so a different key.
+			IdempotencyKey: "reopen:" + a.booking.String(),
 			Payload:        next,
 		}, now); err != nil {
 			return err

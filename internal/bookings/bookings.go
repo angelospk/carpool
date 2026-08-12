@@ -290,49 +290,32 @@ func (s *Service) CancelOccurrence(ctx context.Context, occurrenceID, userID uui
 	return nil
 }
 
-// lookAgainFor puts a passenger whose ride was called off back in the matching
-// queue and asks the next driver.
+// lookAgainFor records that a passenger's seat was cancelled out from under
+// them, so that the queue can go looking for another driver.
 //
-// A ride_request is standing permission to be matched inside its window: it is
-// how the first driver was found, and nothing about the driver cancelling
-// withdraws it. Without this the request sits at 'matched' for ever — no sweep
-// reads that state looking for work — so the app tells somebody their ride is
-// off and then never looks again, while a driver publishing on the same
-// corridor an hour later is never asked about them.
-//
-// Enqueued rather than left to the hourly reconciler, for the same reason as
-// every other continuation: somebody whose driver has just cancelled should not
-// wait an hour to hear that a different one can take them.
+// It records rather than does. A ride_request is standing permission to be
+// matched inside its window — it is how the first driver was found, and neither
+// the driver cancelling nor a moderator acting on them withdraws it — but
+// reopening it here would mean this transaction, which already holds the
+// occurrence and its bookings, also taking a lock on a row belonging to
+// somebody else, in an order nothing else in the app uses. The recovery happens
+// in the dispatcher, where the passenger and their request can be taken in the
+// ordinary order and everything can be re-read. See dispatch.handleReopen.
 func (s *Service) lookAgainFor(
 	ctx context.Context, tx pgx.Tx, requestID, bookingID uuid.UUID, now time.Time,
 ) error {
-	// The window is the one condition worth re-reading. A journey whose time has
-	// passed has no ride left to find, and the request sweeper is about to mark
-	// it expired; putting it back in the queue would spend a driver's attention
-	// on a lift nobody can give.
-	tag, err := tx.Exec(ctx, `
-		UPDATE ride_requests SET status = 'open', updated_at = now()
-		 WHERE id = $1 AND status = 'matched' AND window_end > $2`, requestID, now)
+	payload, err := json.Marshal(map[string]any{
+		"booking_id": bookingID, "request_id": requestID, "reason": "trip_cancelled",
+	})
 	if err != nil {
-		return fmt.Errorf("bookings: reopening the request: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return nil
-	}
-
-	payload, err := json.Marshal(map[string]any{"request_id": requestID, "reason": "trip_cancelled"})
-	if err != nil {
-		return fmt.Errorf("bookings: encoding the next ask: %w", err)
+		return fmt.Errorf("bookings: encoding the reopen: %w", err)
 	}
 	return outbox.Enqueue(ctx, tx, outbox.Message{
-		Kind: "ask_next",
-		// Keyed on the seat that was lost rather than on the request. The same
-		// request can be stranded more than once — rematched after one driver
-		// calls off, and stranded again when the next one does — and a key
-		// naming only the request would make the second event a duplicate of
-		// the first and swallow it, leaving that passenger waiting for an ask
-		// nobody was going to send.
-		IdempotencyKey: "ask_next:trip_cancelled:" + bookingID.String(),
+		Kind: "reopen_request",
+		// Keyed on the seat that was lost: one cancellation asks once however
+		// many times it is retried, and somebody stranded a second time is a
+		// different booking and so a different key.
+		IdempotencyKey: "reopen:" + bookingID.String(),
 		Payload:        payload,
 	}, now)
 }

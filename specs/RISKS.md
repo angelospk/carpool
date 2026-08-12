@@ -795,27 +795,37 @@ their window. Doing it properly needs a real departure time — the driver sayin
 "leaving now", or a live position — rather than the near end of a window. Both
 are post-MVP. Until then the app declines a booking it cannot promise.
 
-## Reopening a stranded request takes rows in an order that could deadlock (raised 2026-08-12)
+## Reopening a stranded request happens after the cancellation, not inside it (decided 2026-08-12)
 
-A cancelled departure now reopens its passengers' requests. That adds a lock on
-passenger-owned `ride_requests` rows to three transactions which previously held
-only the driver's user row plus occurrences and bookings. Codex flagged the
-consequence: an account closure or suspension working through several passengers
-can, in principle, wait on a request row that a second closure or suspension
-already holds while that one waits on a booking or occurrence held by the first.
+Raised the same day as a lock-ordering hazard and closed rather than left open.
 
-Two things bound it rather than close it. The rows are taken in a stable order
-(by booking id) inside each path, so two runs of the same kind agree; and
-Postgres detects a deadlock and aborts one transaction with an error, which the
-moderator sees as a failed action they can repeat, not as corruption.
+A cancelled departure has to put its passengers back in the matching queue.
+Doing that in the transaction that cancels the departure meant a suspension, an
+account closure or a driver calling off a trip also locking a `ride_requests`
+row belonging to every passenger it stranded — taken after the occurrence and
+without those passengers' user rows, which is the one order the rest of the app
+does not use. Two moderators acting at once could each hold what the other was
+waiting for.
 
-**Not closed.** Closing it properly means either locking every affected
-passenger's user row in sorted order before touching anything they own — which
-turns a moderator action into a lock over an unbounded set of accounts — or
-moving the reopening into a post-commit worker keyed on the cancelled booking.
-The second is the better design and is the one to build if this ever fires. It
-is not built now because the paths that can collide are human-initiated, rare,
-and safe when they fail.
+The alternative considered was pre-locking every affected passenger's user row
+in sorted order before touching anything. That was rejected: it turns one
+moderator action into a lock over an unbounded set of accounts, and it still
+has to discover that set before it can sort it.
+
+So the cancelling transaction records one `reopen_request` event per lost seat
+and commits. The dispatcher does the reopening, where the passenger and their
+request can be taken in the ordinary order. The three copies of the reopening
+logic became one.
+
+**What the split costs.** There is a moment when the booking is cancelled and
+the request has not reopened yet. The passenger has already been told their ride
+is off, so nothing is claimed that is not true; nothing further is promised
+until a driver is actually asked. And because time passes, everything the
+producer knew is re-read: the request is reopened only if it is still matched,
+still inside its window, has no live booking of its own, and belongs to an
+active account. Each of those was a way somebody could have moved on — cancelled
+the journey themselves, been suspended, been matched by somebody else — and each
+is a quiet no-op rather than a failure.
 
 ## Confirming a ride only proves the clock passed (raised 2026-08-12)
 

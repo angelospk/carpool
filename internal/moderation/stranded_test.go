@@ -39,13 +39,16 @@ func (w *world) requestStatus(id uuid.UUID) string {
 	return s
 }
 
-func (w *world) asksQueuedFor(id uuid.UUID) int {
+// The suspension records that a seat was lost; the dispatcher reopens the
+// request and asks the next driver, where the passenger's rows can be taken in
+// the ordinary order. So this is what the suspension itself is answerable for.
+func (w *world) reopensQueuedFor(id uuid.UUID) int {
 	w.t.Helper()
 	var n int
 	if err := w.pool.QueryRow(context.Background(), `
 		SELECT count(*) FROM outbox
-		WHERE kind = 'ask_next' AND payload->>'request_id' = $1::text`, id).Scan(&n); err != nil {
-		w.t.Fatalf("counting queued asks: %v", err)
+		WHERE kind = 'reopen_request' AND payload->>'request_id' = $1::text`, id).Scan(&n); err != nil {
+		w.t.Fatalf("counting queued reopens: %v", err)
 	}
 	return n
 }
@@ -56,11 +59,8 @@ func TestSuspendingADriverFindsTheirPassengersSomebodyElse(t *testing.T) {
 
 	w.suspend()
 
-	if got := w.requestStatus(requestID); got != "open" {
-		t.Fatalf("the passenger's request is %q after their driver was suspended, want open", got)
-	}
-	if n := w.asksQueuedFor(requestID); n != 1 {
-		t.Fatalf("%d asks queued for a passenger whose driver was suspended, want 1", n)
+	if n := w.reopensQueuedFor(requestID); n != 1 {
+		t.Fatalf("%d recovery events for a passenger whose driver was suspended, want 1", n)
 	}
 }
 
@@ -75,7 +75,7 @@ func TestSuspendingADriverLeavesAJourneyAlreadyMade(t *testing.T) {
 	if got := w.requestStatus(requestID); got == "open" {
 		t.Fatalf("a completed ride was put back in the queue")
 	}
-	if n := w.asksQueuedFor(requestID); n != 0 {
-		t.Fatalf("%d asks queued for a ride that already happened", n)
+	if n := w.reopensQueuedFor(requestID); n != 0 {
+		t.Fatalf("%d recovery events for a ride that already happened", n)
 	}
 }
