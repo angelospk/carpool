@@ -539,6 +539,45 @@ reprices.
 CodeRabbit was unavailable for the last round (an org error, twice, after two
 good runs the same day), so that diff carries one reviewer rather than two.
 
+## The QA pass over what the app says out loud (2026-08-13)
+
+A fourth hunt, and this one started as verification rather than a search: run
+the suite, run the app, run the whole product over real HTTP against a fresh
+database, and see whether the previous three passes hold. They do. What the
+run turned up was the outbox, which nothing had ever read afterwards.
+
+**Nobody has ever been told their ride was cancelled.** Six places queued a
+push saying what had happened; the dispatcher read a payload shape none of them
+wrote, found nobody to address it to, and dead-lettered every one as
+permanently undeliverable. Four cancellation paths and all four
+standing-arrangement events, silent since they were written. It was found by
+looking at the outbox table after a scenario rather than by a test, because
+every producer's test asserted the row had been enqueued and not one carried it
+the rest of the way. Both halves were tested; the seam between them was not.
+
+`internal/notices` is now the only thing that builds a notice and the only thing
+that reads one back, so a producer cannot write a shape the dispatcher cannot
+read. The dispatcher's test walks every event there is, which is what makes
+adding one without words for it a failing build instead of a quiet phone.
+`booking_cancelled` also became two events, because one sentence cannot be true
+for a passenger who has lost a ride and a driver who has a seat back — and
+neither of them says who did it, since the same fact reaches a passenger whether
+the driver cancelled, closed their account, or was suspended.
+
+Codex asked for the harder version of this — a versioned envelope, a replayable
+dead-letter queue with alerting — and it is right about the direction. What is
+built is the part that removes the class of bug rather than the part that
+survives it: one serializer, validated at construction, inside the transaction
+that would have queued it. The rest is in RISKS with its reasons. CodeRabbit
+caught that `omitempty` cannot drop a `uuid.UUID`, so every arrangement notice
+carried `booking_id: 00000000-…`, an id to a booking nobody made.
+
+Also recorded rather than fixed: the suggested contribution is computed from the
+straight-line distance between the passenger's endpoints, where MATCHING.md
+says the routed distance along the driver's route. It can only ever quote low,
+which is the safe direction for a formula whose whole job is to keep a driver
+from coming out ahead.
+
 ## Deliberately not built
 
 Parked with a reason, not forgotten:

@@ -98,12 +98,18 @@ func TestEveryNoticeReachesThePersonItNames(t *testing.T) {
 			if got.Data["idempotency_key"] != msg.IdempotencyKey {
 				t.Errorf("carried key %v, want %q", got.Data["idempotency_key"], msg.IdempotencyKey)
 			}
-			field := "booking_id"
+			field, absent := "booking_id", "arrangement_id"
 			if event != notices.BookingCancelledForPassenger && event != notices.BookingCancelledForDriver {
-				field = "arrangement_id"
+				field, absent = absent, field
 			}
 			if got.Data[field] != resource.String() {
 				t.Errorf("carried %s %v, want %s", field, got.Data[field], resource)
+			}
+			// And nothing else. An id the event does not use has to be absent
+			// rather than present and zero, or the app follows it to a booking
+			// that was never made.
+			if _, ok := got.Data[absent]; ok {
+				t.Errorf("carried %s %v, which this event has none of", absent, got.Data[absent])
 			}
 		})
 	}

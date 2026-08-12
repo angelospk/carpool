@@ -74,7 +74,7 @@ func (r *Router) Handle(ctx context.Context, m outbox.Message) error {
 type pushPayload struct {
 	Event         notices.Event `json:"event"`
 	RecipientID   uuid.UUID     `json:"recipient_id"`
-	ArrangementID uuid.UUID     `json:"arrangement_id"`
+	ArrangementID *uuid.UUID    `json:"arrangement_id"`
 
 	AskID       *uuid.UUID `json:"ask_id"`
 	DriverID    *uuid.UUID `json:"driver_id"`
@@ -120,7 +120,7 @@ func (r *Router) handlePush(ctx context.Context, m outbox.Message) error {
 	if p.BookingID != nil {
 		data["booking_id"] = p.BookingID.String()
 	}
-	if p.ArrangementID != uuid.Nil {
+	if p.ArrangementID != nil {
 		data["arrangement_id"] = p.ArrangementID.String()
 	}
 
@@ -223,7 +223,7 @@ func (p pushPayload) notification() (recipient uuid.UUID, title, body string, er
 	}
 	if err := (notices.Payload{
 		Event: p.Event, RecipientID: p.RecipientID,
-		BookingID: derefID(p.BookingID), ArrangementID: p.ArrangementID,
+		BookingID: p.BookingID, ArrangementID: p.ArrangementID,
 	}).Validate(); err != nil {
 		return uuid.Nil, "", "", err
 	}
@@ -260,13 +260,6 @@ func say(event notices.Event) (title, body string, ok bool) {
 	default:
 		return "", "", false
 	}
-}
-
-func derefID(id *uuid.UUID) uuid.UUID {
-	if id == nil {
-		return uuid.Nil
-	}
-	return *id
 }
 
 func (r *Router) tokensFor(ctx context.Context, userID uuid.UUID) ([]string, error) {

@@ -903,3 +903,60 @@ aboard, which is worse than a gap. What the gap actually wants is a departure
 the driver declares — "leaving now", or a no-show recorded against a booking —
 and both are the post-MVP work this file already parks. Recorded so that the
 next person to read the cancellation rule knows it is half of a pair.
+
+## No cancellation notice has ever been delivered (found 2026-08-13)
+
+Six places queued a push describing something that had happened —
+`booking_cancelled` from four different cancellation paths, and the four
+standing-arrangement events. Each wrote `{"event": …, "recipient_id": …}`. The
+dispatcher decoded neither field: it inferred the recipient from which ids
+happened to be present, recognised only the two shapes the ask and accept paths
+write, and dead-lettered everything else as "payload names no recipient".
+
+Measured against a running server before the fix: two of two `booking_cancelled`
+messages dead. So nobody has ever been told their ride was called off — not when
+the driver cancelled the departure, not when the driver closed their account,
+not when either side was suspended — and no standing arrangement has ever been
+answered on somebody's phone.
+
+Every producer had a test, and every one of those tests asserted that the outbox
+row had been written. Not one carried the row the rest of the way. That is the
+whole of how a producer and a consumer can disagree for months in a codebase
+with 780 tests: both halves were tested and the seam between them was not.
+
+**The fix.** `internal/notices` is now the only thing that builds a notice and
+the only thing that reads one back. Producers no longer hand-roll a JSON map;
+they call a constructor that refuses to return an incomplete payload, so the
+error surfaces inside the transaction that would have queued it rather than at
+delivery. The dispatcher's test walks `notices.All()`, so an event added without
+words for it fails the build rather than somebody's lock screen.
+
+`booking_cancelled` also became two events. One name covered both audiences, and
+no sentence is true for both: a passenger has lost a ride, a driver has a seat
+back. Neither says who did it, because the same fact reaches a passenger whether
+the driver cancelled, closed their account or was suspended, and only the first
+is the driver's doing.
+
+**What is knowingly not done.** An unknown event is dead-lettered rather than
+retried through a compatibility window, so a producer shipped ahead of its
+dispatcher loses those notices; the row keeps its payload and can be replayed by
+hand, which is the same trade already recorded for `reopen_request` under
+rolling deploys. There is no alerting on the dead-letter table — reading it is
+still somebody remembering to look. And the two older payloads (an ask offered,
+a booking confirmed) still travel in the shape-inferred form, kept so that rows
+queued by the version running before a deploy stay deliverable by the version
+after it; they should move to the envelope once no such rows can exist.
+
+## `trip_km` is the crow-flies distance, not the routed one (found 2026-08-13)
+
+MATCHING.md line 164 defines `trip_km` as the OSRM distance along the driver's
+route between the passenger's pickup and drop-off. The code prices with
+`ST_Distance(origin, destination)` — the straight line between the passenger's
+own endpoints, which ignores both the road and the driver's route.
+
+Left alone deliberately. Road distance is never shorter than the straight line,
+so every suggested contribution comes out at or below the figure the spec
+describes, which is the safe direction for the one thing pricing exists to
+protect: the driver must not come out ahead. Fixing it costs an OSRM call per
+candidate and can only raise prices. Recorded because the spec and the code say
+different things, and the next person to read one of them should know which.

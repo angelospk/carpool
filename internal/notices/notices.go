@@ -75,8 +75,13 @@ type Payload struct {
 	Event       Event     `json:"event"`
 	RecipientID uuid.UUID `json:"recipient_id"`
 
-	BookingID     uuid.UUID `json:"booking_id,omitempty"`
-	ArrangementID uuid.UUID `json:"arrangement_id,omitempty"`
+	// Pointers, so that the one this event does not use is absent from the JSON
+	// rather than present and zero. omitempty cannot drop a uuid.UUID — it is an
+	// array, and an array of zeroes is not empty — so a value type here would
+	// put "booking_id":"00000000-…" on every arrangement notice, and the app
+	// would be handed an id to a booking that does not exist.
+	BookingID     *uuid.UUID `json:"booking_id,omitempty"`
+	ArrangementID *uuid.UUID `json:"arrangement_id,omitempty"`
 }
 
 // Validate refuses a payload that could not be delivered to anybody, or that
@@ -90,11 +95,11 @@ func (p Payload) Validate() error {
 	case "":
 		return fmt.Errorf("notices: the payload names no event")
 	case BookingCancelledForPassenger, BookingCancelledForDriver:
-		if p.BookingID == uuid.Nil {
+		if p.BookingID == nil || *p.BookingID == uuid.Nil {
 			return fmt.Errorf("notices: %s names no booking", p.Event)
 		}
 	case ArrangementRequested, ArrangementApproved, ArrangementDeclined, ArrangementCancelled:
-		if p.ArrangementID == uuid.Nil {
+		if p.ArrangementID == nil || *p.ArrangementID == uuid.Nil {
 			return fmt.Errorf("notices: %s names no arrangement", p.Event)
 		}
 	default:
@@ -116,14 +121,14 @@ func BookingCancelled(event Event, recipient, booking uuid.UUID) (outbox.Message
 	if event != BookingCancelledForPassenger && event != BookingCancelledForDriver {
 		return outbox.Message{}, fmt.Errorf("notices: %q is not a cancellation", event)
 	}
-	return message(Payload{Event: event, RecipientID: recipient, BookingID: booking},
+	return message(Payload{Event: event, RecipientID: recipient, BookingID: &booking},
 		"booking_cancelled:"+booking.String())
 }
 
 // Arrangement builds the notice for one of the four things that can happen to a
 // standing arrangement.
 func Arrangement(event Event, recipient, arrangement uuid.UUID) (outbox.Message, error) {
-	return message(Payload{Event: event, RecipientID: recipient, ArrangementID: arrangement},
+	return message(Payload{Event: event, RecipientID: recipient, ArrangementID: &arrangement},
 		string(event)+":"+arrangement.String())
 }
 
