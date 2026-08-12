@@ -69,6 +69,11 @@ func TestADeletedAccountCannotUseTheApp(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403; body %s", rec.Code, rec.Body.String())
 	}
+	// Refused by the same door, but not with the same word: they were not
+	// suspended, they asked to be erased.
+	if got := h.errorCode(rec); got != "account_closed" {
+		t.Fatalf("a closed account is refused as %q", got)
+	}
 }
 
 // The check is a read of current state on every request, not something baked

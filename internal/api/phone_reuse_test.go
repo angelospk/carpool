@@ -84,9 +84,17 @@ func TestSigningUpAgainDoesNotReopenAClosedAccount(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	// The old session is dead the moment the account is.
-	if rec := h.do(http.MethodGet, "/v1/me", nil, token); rec.Code < 400 {
-		t.Fatalf("a token from before the closure still works: %d", rec.Code)
+	// The old session is dead the moment the account is, and it is told the
+	// truth about why. An access token outlives a closure by up to its
+	// lifetime, so somebody's own last tap lands here — and being told they
+	// were suspended, when what happened is that they asked to be erased, is a
+	// different and worse thing to say.
+	rec := h.do(http.MethodGet, "/v1/me", nil, token)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a token from before the closure gets %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+	if got := h.errorCode(rec); got != "account_closed" {
+		t.Fatalf("somebody who closed their account is told %q", got)
 	}
 
 	h.signUp(number, "Κάποιος")

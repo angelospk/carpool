@@ -846,3 +846,60 @@ code read out at the kerb — and the first two are the post-MVP location work
 this file already parks. A rating here means "both of them said it happened",
 and the app should not be built to imply more than that.
 
+
+## A new outbox kind is not safe to introduce during a rolling deploy (raised 2026-08-12)
+
+`reopen_request` is the first message kind added since the dispatcher was
+written, and Codex pointed out what that costs at deploy time: an old worker
+treats an unknown kind as a permanent failure, so during a rolling deploy a new
+producer can commit a message that an old worker dead-letters. The passenger it
+was for is then not put back in the queue by anything except the hourly
+reconciler.
+
+Not a problem today — the pilot runs one instance and deploys stop the world —
+and it is written down because the shape of the mistake outlives that. Before
+there are two workers, either unknown kinds have to become retryable rather than
+permanent (so an old worker leaves them for a new one), or a kind has to be
+taught to every worker in one release and produced in the next.
+
+## What a deleted account still holds, and where that is enforced (raised 2026-08-12)
+
+Erasure now takes the photograph, the bio and the preference tags, so the
+endpoints that read those columns come back empty for somebody who has left.
+That means the reads are safe *because the data is gone*, not because they
+check. Only the photo endpoint checks as well, and it does because a photograph
+is the one held thing that identifies somebody to a stranger on sight and it
+lives in a table of its own that an erasure has already been caught missing once.
+
+Codex's suggestion, recorded rather than built: centralise the user projection
+so that a deleted account exposes the placeholder identity and nothing else,
+whatever new column somebody adds to a profile later. That is the real fix for a
+class that has now been found three times — the plate, then the face and the
+bio. It is a refactor across every endpoint that names a person, and doing it
+badly would break the trip screens, so it wants its own change rather than the
+tail of a QA pass.
+
+**What is deliberately kept.** Chat messages written by somebody who has left
+stay standing, because a message is half of somebody else's conversation and
+deleting one side rewrites the other person's record. Codex is right that this
+means the app holds free text authored by an erased account, with a stable link
+to the thread it was in, and that this is retained personal data rather than
+anonymised data. It is covered by the ordinary retention window that deletes old
+trips and their messages; it is not covered by "erase me" and should not be
+described as if it were.
+
+## Between the two ends of a departure window a driver can do nothing (raised 2026-08-12)
+
+Moving confirmation to `depart_latest` left a gap that Codex named: from the
+moment a trip may leave until the moment it must have left, the driver can
+neither call it off (that closes at `depart_earliest`, because a trip that may
+already be moving is not one to cancel) nor confirm it. A driver still sitting
+at the kerb at 07:01 with a passenger who has not come has no honest action for
+the rest of the window.
+
+Left as it is rather than papered over. Extending cancellation to the far end
+would let a driver call off a trip they are already driving, with passengers
+aboard, which is worse than a gap. What the gap actually wants is a departure
+the driver declares — "leaving now", or a no-show recorded against a booking —
+and both are the post-MVP work this file already parks. Recorded so that the
+next person to read the cancellation rule knows it is half of a pair.

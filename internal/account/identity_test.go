@@ -1,7 +1,9 @@
 package account_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 )
@@ -101,12 +103,29 @@ func TestACopyIncludesTheProfileTheyWrote(t *testing.T) {
 		t.Error("the copy leaves out the bio they wrote")
 	}
 	prefs, _ := profile["preferences"].([]any)
-	if len(prefs) != 2 {
+	if len(prefs) != 2 || prefs[0] != "no_smoking" || prefs[1] != "quiet_ride" {
 		t.Errorf("the copy leaves out their preferences: %v", profile["preferences"])
 	}
-	// The bytes themselves are not in a JSON file; that a photograph is held,
-	// and can be asked for, is what the copy has to say.
+
+	// The photograph itself, not a note that one is held. An avatar is tens of
+	// kilobytes, and answering "we have a file" turns a right into an errand.
 	if profile["has_photo"] != true {
 		t.Error("the copy does not say a photograph is held")
+	}
+	if got := profile["photo_content_type"]; got != "image/jpeg" {
+		t.Errorf("the copy calls the photograph %v", got)
+	}
+	encoded, _ := profile["photo_base64"].(string)
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("the photograph in the copy is not readable: %v", err)
+	}
+	var stored []byte
+	if err := w.pool.QueryRow(context.Background(),
+		`SELECT data FROM profile_photos WHERE user_id = $1`, w.driverID).Scan(&stored); err != nil {
+		t.Fatalf("reading the stored photograph: %v", err)
+	}
+	if !bytes.Equal(decoded, stored) {
+		t.Errorf("the copy holds %d bytes of photograph, the account holds %d", len(decoded), len(stored))
 	}
 }

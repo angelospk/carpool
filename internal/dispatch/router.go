@@ -329,11 +329,36 @@ func (r *Router) handleReopen(ctx context.Context, m outbox.Message) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// The booking has to be the one this request most recently had.
+	//
+	// Being vacant is not the same as having been vacated by this booking, and
+	// the difference is reachable: a passenger stranded, rematched and stranded
+	// again has two recoveries owed, and the outbox is at-least-once. A replay
+	// of the first, arriving after the second driver cancelled, finds exactly
+	// what it expects — matched, no live booking — and consumes the reopening
+	// the second one was going to do, while carrying the first cancellation's
+	// key, which the outbox has already seen and drops. The request is left open
+	// with nobody being asked.
+	//
+	// A request holds at most one confirmed or completed booking at a time, so
+	// the newest booking it has is the one that last owned the match, and that
+	// is what makes the ordering here an answer about causation rather than
+	// about vacancy. The request id is checked against the booking too, rather
+	// than trusted alongside it: the payload names both, and nothing else makes
+	// them agree.
 	var passengerID uuid.UUID
-	err = tx.QueryRow(ctx,
-		`SELECT passenger_id FROM bookings WHERE id = $1`, p.BookingID).Scan(&passengerID)
+	err = tx.QueryRow(ctx, `
+		SELECT b.passenger_id FROM bookings b
+		 WHERE b.id = $1 AND b.request_id = $2
+		   AND NOT EXISTS (
+		         SELECT 1 FROM bookings later
+		          WHERE later.request_id = b.request_id
+		            AND (later.created_at, later.id) > (b.created_at, b.id))`,
+		p.BookingID, p.RequestID).Scan(&passengerID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// The booking is gone. Nothing to recover and nothing retrying fixes.
+		// The booking is gone, does not belong to that request, or has been
+		// superseded by a later match. Nothing to recover, and nothing that
+		// retrying fixes.
 		return nil
 	}
 	if err != nil {

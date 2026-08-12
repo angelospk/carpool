@@ -71,7 +71,7 @@ func TestARequestCannotHaveTwoLiveOffersAtOnce(t *testing.T) {
 		t.Fatal("a second driver was given a live offer for a request that already had one")
 	}
 	if !isUnique(err) {
-		t.Fatalf("the second offer was refused, but not by the uniqueness rule: %v", err)
+		t.Fatalf("the second offer was refused, but not by asks_one_pending: %v", err)
 	}
 }
 
@@ -97,7 +97,10 @@ func TestAskingTheNextDriverAfterADeclineIsAllowed(t *testing.T) {
 	}
 }
 
+// The constraint by name, not merely "some uniqueness rule". There are four
+// unique indexes on this table and the test is about one of them.
 func isUnique(err error) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" &&
+		pgErr.ConstraintName == "asks_one_pending"
 }

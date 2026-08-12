@@ -181,6 +181,7 @@ func TestARecoveryThatIsNoLongerWantedDoesNothing(t *testing.T) {
 			`UPDATE bookings SET status = 'confirmed' WHERE request_id = $1 AND status <> 'confirmed'`,
 			"a request holding a live seat is not stranded, and reopening it would sell that seat twice",
 		},
+
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newStrandedWorld(t)
@@ -243,5 +244,156 @@ func TestARecoveryDeliveredTwiceAsksOnce(t *testing.T) {
 
 	if n := w.asksQueued(t); n != 1 {
 		t.Fatalf("%d asks queued after two deliveries, want 1", n)
+	}
+}
+
+// A replayed recovery must not act on a match that has since been and gone.
+//
+// The outbox is at-least-once, so a message can arrive long after it was
+// written — after a lease expires, after a restart. Meanwhile the passenger can
+// have been matched again and stranded again, which queues a second recovery.
+// If the first one is replayed in that gap it finds exactly what it expects to
+// find: a request saying matched, with no live booking, because the *second*
+// driver just cancelled.
+//
+// Acting on it then is wrong twice over. It consumes the reopening that the
+// second cancellation was going to do, and its ask carries the first
+// cancellation's key, which the outbox has already seen and drops — so the
+// request ends up open with nobody being asked, waiting for the hourly
+// reconciler to notice.
+//
+// Being vacant is not the same as having been vacated by this booking.
+func TestAReplayedRecoveryDoesNotActOnALaterMatch(t *testing.T) {
+	w := newStrandedWorld(t)
+
+	// The first recovery runs and does its job.
+	if err := w.deliver(t); err != nil {
+		t.Fatalf("first delivery: %v", err)
+	}
+
+	// The passenger is matched again, to a second driver, and stranded again.
+	second := w.rematch(t)
+	if n := w.asksQueued(t); n != 1 {
+		t.Fatalf("%d asks queued before the replay, want the first one only", n)
+	}
+
+	// Now the first recovery arrives a second time.
+	if err := w.deliver(t); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+
+	if got := w.status(t); got != "matched" {
+		t.Fatalf("a replayed recovery reopened a request its own booking no longer owns: %q", got)
+	}
+
+	// And the recovery that is actually owed still works.
+	if err := w.deliverFor(t, second); err != nil {
+		t.Fatalf("the second recovery: %v", err)
+	}
+	if got := w.status(t); got != "open" {
+		t.Fatalf("the second cancellation left the request at %q", got)
+	}
+	if n := w.asksQueued(t); n != 2 {
+		t.Fatalf("%d asks queued after two genuine strandings, want 2", n)
+	}
+}
+
+// rematch gives the request a second booking on another departure and cancels
+// it, which is the state a second stranding leaves behind. It returns the new
+// booking's id.
+func (w *strandedWorld) rematch(t *testing.T) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+
+	var occurrenceID, askID, bookingID uuid.UUID
+	scan := func(dest *uuid.UUID, sql string, args ...any) {
+		t.Helper()
+		if err := w.pool.QueryRow(ctx, sql, args...).Scan(dest); err != nil {
+			t.Fatalf("rematching: %v", err)
+		}
+	}
+	scan(&occurrenceID, `
+		INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest,
+			depart_latest, seats_total, seats_free, template_revision, route_geom, route_km,
+			route_min, pricing_mode, status)
+		SELECT o.template_id, o.vehicle_id, o.service_date + 1, o.depart_earliest + interval '1 day',
+		       o.depart_latest + interval '1 day', 3, 2, 1, o.route_geom, o.route_km, o.route_min,
+		       'formula', 'cancelled'
+		  FROM trip_occurrences o WHERE o.id = $1
+		RETURNING id`, w.occurrenceID)
+	scan(&askID, `
+		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point,
+			dropoff_point, suggested_price_eur, itinerary_version, status, expires_at)
+		VALUES ($1, $2, 5, 2, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+			ST_SetSRID(ST_MakePoint(25.98,40.85),4326), 2.50, 0, 'accepted', '2026-07-29T13:00:00Z')
+		RETURNING id`, w.requestID, occurrenceID)
+	scan(&bookingID, `
+		INSERT INTO bookings (occurrence_id, request_id, passenger_id, ask_id, seats, price_eur,
+			status, pickup_point, dropoff_point)
+		VALUES ($1, $2, $3, $4, 1, 2.50, 'cancelled_by_driver',
+			ST_SetSRID(ST_MakePoint(25.82,40.85),4326), ST_SetSRID(ST_MakePoint(25.98,40.85),4326))
+		RETURNING id`, occurrenceID, w.requestID, w.passengerID, askID)
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE ride_requests SET status = 'matched' WHERE id = $1`, w.requestID); err != nil {
+		t.Fatalf("rematching: %v", err)
+	}
+	return bookingID
+}
+
+// deliverFor is deliver for a booking other than the fixture's own.
+func (w *strandedWorld) deliverFor(t *testing.T, bookingID uuid.UUID) error {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{
+		"booking_id": bookingID, "request_id": w.requestID, "reason": "trip_cancelled",
+	})
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	return w.router.Handle(context.Background(), outbox.Message{
+		Kind:           "reopen_request",
+		Payload:        payload,
+		IdempotencyKey: "reopen:" + bookingID.String(),
+	})
+}
+
+// The payload names a booking and a request, and nothing else makes the two
+// agree. A message pairing somebody's cancelled seat with a different person's
+// request must not reopen that request: the booking is the evidence, and it is
+// evidence about its own request only.
+func TestARecoveryNamingSomebodyElsesRequestDoesNothing(t *testing.T) {
+	w := newStrandedWorld(t)
+	ctx := context.Background()
+
+	var other uuid.UUID
+	if err := w.pool.QueryRow(ctx, `
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end,
+			seats, kind, status)
+		VALUES ($1, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+			ST_SetSRID(ST_MakePoint(25.98,40.85),4326),
+			'2026-07-30T05:00:00Z','2026-07-30T09:00:00Z', 1, 'open', 'matched')
+		RETURNING id`, w.passengerID).Scan(&other); err != nil {
+		t.Fatalf("seeding a second request: %v", err)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"booking_id": w.bookingID, "request_id": other, "reason": "trip_cancelled",
+	})
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	if err := w.router.Handle(ctx, outbox.Message{
+		Kind: "reopen_request", Payload: payload,
+		IdempotencyKey: "reopen:mismatched",
+	}); err != nil {
+		t.Fatalf("Handle: %v, want a quiet success", err)
+	}
+
+	var status string
+	if err := w.pool.QueryRow(ctx,
+		`SELECT status FROM ride_requests WHERE id = $1`, other).Scan(&status); err != nil {
+		t.Fatalf("reading the other request: %v", err)
+	}
+	if status != "matched" {
+		t.Fatalf("a recovery for one person's seat reopened another person's request: %q", status)
 	}
 }

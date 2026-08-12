@@ -62,6 +62,16 @@ func requireAuth(a authenticator, accounts accountReader) func(http.Handler) htt
 				// A database that cannot answer must not be read as consent.
 				writeError(w, http.StatusInternalServerError, "internal", "could not check the account")
 				return
+			case status == "deleted":
+				// Their own doing, and said as such. The branch above already
+				// refuses to call an erased account suspended when its row is
+				// gone; an erasure here leaves the row standing and anonymised,
+				// and it would have been told the same untruth. An access token
+				// outlives the closure by up to its lifetime, so this is what
+				// somebody's own last tap answers.
+				writeError(w, http.StatusForbidden, "account_closed",
+					"this account has been closed")
+				return
 			case status != "active":
 				writeError(w, http.StatusForbidden, "account_suspended",
 					"this account cannot be used")

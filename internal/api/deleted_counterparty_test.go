@@ -85,7 +85,11 @@ func TestARideAlreadyTakenSaysNothingAboutTheDriverWhoLeft(t *testing.T) {
 
 	var driverID uuid.UUID
 	h.mustQuery(`SELECT id FROM users WHERE phone = '+306900000031'`, &driverID)
-	h.mustExec(`UPDATE users SET bio = 'Δουλεύω στο νοσοκομείο' WHERE id = $1`, driverID)
+	h.mustExec(`UPDATE users SET bio = 'Δουλεύω στο νοσοκομείο',
+	                             facebook_handle = 'giannis.odigos',
+	                             instagram_handle = 'giannis_ig'
+	             WHERE id = $1`, driverID)
+	h.mustExec(`INSERT INTO user_preferences (user_id, tag) VALUES ($1, 'no_smoking')`, driverID)
 
 	// The ride happened: it left, and the seat was taken.
 	h.mustExec(`UPDATE trip_occurrences SET depart_earliest = $2::timestamptz - interval '2 hours',
@@ -102,7 +106,10 @@ func TestARideAlreadyTakenSaysNothingAboutTheDriverWhoLeft(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reading the trip after the driver left is %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	for _, leak := range []string{"νοσοκομείο", "+306900000031", "ΑΒΓ-1234", "ABC-1234"} {
+	for _, leak := range []string{
+		"νοσοκομείο", "+306900000031", "ΑΒΓ-1234", "ABC-1234",
+		"giannis.odigos", "giannis_ig", "no_smoking",
+	} {
 		if body := rec.Body.String(); strings.Contains(body, leak) {
 			t.Fatalf("the trip still names the person who left: %q appears in %s", leak, body)
 		}

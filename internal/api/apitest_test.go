@@ -218,7 +218,7 @@ func (h *harness) mustQuery(sql string, dest ...any) {
 	var args []any
 	for _, d := range dest {
 		switch d.(type) {
-		case *string, *int, *bool, *uuid.UUID, *float64:
+		case *string, *int, *bool, *uuid.UUID, *float64, *time.Time:
 			scan = append(scan, d)
 		default:
 			args = append(args, d)

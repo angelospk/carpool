@@ -580,8 +580,8 @@ func TestATripInsideItsDepartureWindowCannotBeConfirmedYet(t *testing.T) {
 	driver, _, occurrenceID := h.bookedTrip(t)
 	now := h.clock.Now()
 	// It could have left ten minutes ago; it could also be leaving in twenty.
-	h.mustExec(`UPDATE trip_occurrences SET depart_earliest = $1, depart_latest = $2`,
-		now.Add(-10*time.Minute), now.Add(20*time.Minute))
+	h.mustExec(`UPDATE trip_occurrences SET depart_earliest = $2, depart_latest = $3 WHERE id = $1`,
+		occurrenceID, now.Add(-10*time.Minute), now.Add(20*time.Minute))
 
 	rec := h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, driver)
 
@@ -589,7 +589,8 @@ func TestATripInsideItsDepartureWindowCannotBeConfirmedYet(t *testing.T) {
 		t.Fatalf("status = %d, want 409 while the car may still be waiting", rec.Code)
 	}
 	var confirmed bool
-	h.mustQuery(`SELECT driver_confirmed FROM bookings`, &confirmed)
+	h.mustQuery(`SELECT driver_confirmed FROM bookings WHERE occurrence_id = $1`,
+		&confirmed, occurrenceID)
 	if confirmed {
 		t.Error("a trip that may not have left yet was confirmed")
 	}
@@ -601,12 +602,20 @@ func TestATripIsConfirmableOnceItCouldNoLongerBeWaiting(t *testing.T) {
 	h := newHarness(t)
 	driver, _, occurrenceID := h.bookedTrip(t)
 	now := h.clock.Now()
-	h.mustExec(`UPDATE trip_occurrences SET depart_earliest = $1, depart_latest = $2`,
-		now.Add(-40*time.Minute), now.Add(-10*time.Minute))
+	// The last moment it could have set off is exactly now, which is the
+	// boundary itself rather than a comfortable distance past it.
+	h.mustExec(`UPDATE trip_occurrences SET depart_earliest = $2, depart_latest = $3 WHERE id = $1`,
+		occurrenceID, now.Add(-30*time.Minute), now)
 
 	rec := h.do(http.MethodPost, "/v1/trips/"+occurrenceID.String()+"/confirm", nil, driver)
 
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204 once the window has closed: %s", rec.Code, rec.Body.String())
+	}
+	var confirmed bool
+	h.mustQuery(`SELECT driver_confirmed FROM bookings WHERE occurrence_id = $1`,
+		&confirmed, occurrenceID)
+	if !confirmed {
+		t.Error("the confirmation was accepted but not recorded")
 	}
 }
