@@ -469,8 +469,6 @@ func (s *Service) tellThePassengers(
 	rows, err := tx.Query(ctx, `
 		UPDATE bookings SET status = 'cancelled_by_driver', updated_at = now()
 		 WHERE occurrence_id = ANY($1) AND status = 'confirmed'
-		-- Ordered so that two of these running at once take the rows the same
-		-- way round. See the note on lock ordering in RISKS.md.
 		RETURNING id, passenger_id, request_id`, calledOff)
 	if err != nil {
 		return fmt.Errorf("account: cancelling the seats in their departures: %w", err)

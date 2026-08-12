@@ -442,6 +442,56 @@ moved down to the layer they were actually about. And the ownership sweep in
 `internal/api/ownership_test.go` is meant to be walked next to `router.go`: a
 path parameter with no line in that table is a gap.
 
+## The QA pass over time and cancellation (2026-08-12)
+
+A second hunt, same method: a plan reviewed by Codex before any code, each fix
+held by a test proven to fail when only that fix is reverted, then CodeRabbit
+over the result. Four bugs, and the last one is the one that would have hurt.
+
+**The matcher offered seats in cars that had left.** The departure was compared
+against the *passenger's* window, and a window is written once, when somebody
+asks for a ride. Drivers are asked one at a time with half an hour each, so a
+request naming a morning is still being matched hours into that morning against
+a window that has not moved, and every departure inside it that had already gone
+stayed a candidate. Both directions: the forward filter offered them, and a seat
+handed back ten minutes after a car left woke everybody waiting on the corridor.
+Three layers now: neither filter offers a departure due to leave, an offer is
+given a deadline that ends at the departure rather than half an hour later, and
+the accept path refuses one that reaches it anyway.
+
+**Blocking somebody did not reach the offer already on their phone.** The
+matcher will not introduce a blocked pair, and that was the whole of the rule.
+But an ask is written at one moment and answered at another, and blocking writes
+a row and nothing else: the driver taps accept half an hour later and the two of
+them have a seat in the same car, each other's meeting point and a chat channel.
+Now read where both people are already held, and refused as "no longer pending"
+so that nobody learns from the refusal that a block exists.
+
+**A called-off departure told its passengers and then stopped.** Their request
+stayed at 'matched', and nothing reads that state looking for work, so the
+request that already says where they are going and when was never shown to
+another driver. All three paths that call off a departure had it — the driver
+doing it themselves, a suspension, an account closing.
+
+**And the closure path never cancelled the bookings at all.** It cancelled the
+departures and left the seats in them 'confirmed', with no push: the passenger's
+app went on showing a trip with a meeting point and a time for a driver who no
+longer exists, and the first they would have known is standing at the kerb.
+
+Two from the reviews, both real. CodeRabbit found that the queued ask was keyed
+on the request, so somebody stranded twice produced the same key twice and the
+outbox dropped the second as a duplicate — that passenger then waited for an ask
+nobody was going to send. And an ask could be born already expired, because the
+filter checks the departure without a lock and seconds earlier.
+
+Codex's diff review raised two "high" findings that turned out not to hold — the
+clock *is* read after the locks, and `bookings_one_live_per_request` already
+guarantees the cancelled booking was the one that owned the match — and two that
+did: the closure path inferred its work from "cancelled and in the future"
+rather than from the statement that cancelled them, and these reopenings add a
+lock order worth writing down. Both handled; the second is in RISKS.md as
+bounded rather than closed.
+
 ## Deliberately not built
 
 Parked with a reason, not forgotten:
