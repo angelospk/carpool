@@ -93,8 +93,22 @@ func (d Deps) handleGetPhoto(w http.ResponseWriter, r *http.Request) {
 		contentType string
 		sum         []byte
 	)
-	err = d.Pool.QueryRow(r.Context(),
-		`SELECT data, content_type, sha256 FROM profile_photos WHERE user_id = $1`, subject).
+	// Joined to the account rather than read by id alone. Erasure deletes the
+	// row below, so in an unbroken system this changes nothing; it is here
+	// because a photograph is the one piece of held data that identifies
+	// somebody to a stranger on sight, and this endpoint hands it to anyone who
+	// knows a uuid. A row the erasure missed — written by hand, or added by a
+	// migration nobody thought about — must not be served because nothing else
+	// looked.
+	//
+	// 'deleted' rather than "not active": a suspension is not an erasure. That
+	// person is coming back, and the passengers they are already carrying still
+	// have to recognise them at the kerb.
+	err = d.Pool.QueryRow(r.Context(), `
+		SELECT p.data, p.content_type, p.sha256
+		FROM profile_photos p
+		JOIN users u ON u.id = p.user_id
+		WHERE p.user_id = $1 AND u.status <> 'deleted'`, subject).
 		Scan(&data, &contentType, &sum)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "not_found", "no photo")

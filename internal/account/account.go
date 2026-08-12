@@ -15,6 +15,7 @@ package account
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -134,6 +135,16 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 		  WHERE rr.id = a.request_id AND o.id = a.occurrence_id AND t.id = o.template_id
 		    AND a.status = 'pending'
 		    AND (rr.passenger_id = $1 OR t.driver_id = $1)`,
+		// Their face. The users row loses its photo_url, but that column is a
+		// pointer and the image lives in a table of its own, which the endpoint
+		// that serves photographs reads by id. Deleted outright rather than
+		// blanked: a row here is a retrievable image, and there is nothing an
+		// empty one would be for.
+		`DELETE FROM profile_photos WHERE user_id = $1 AND $2::timestamptz IS NOT NULL`,
+		// The tags they picked. Not identifying on their own, but they are
+		// attributes of a person and nothing needs them once the account is
+		// closed.
+		`DELETE FROM user_preferences WHERE user_id = $1 AND $2::timestamptz IS NOT NULL`,
 		// Credentials and reachability go outright: they identify a living
 		// person and serve no purpose once the account is closed.
 		`DELETE FROM push_tokens WHERE user_id = $1 AND $2::timestamptz IS NOT NULL`,
@@ -247,6 +258,11 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 			phone      = 'deleted:' || id::text,
 			name       = 'Διαγραμμένος χρήστης',
 			photo_url  = NULL,
+			-- Five hundred characters somebody wrote about themselves, shown to
+			-- the driver and to every passenger on a trip. Free text is the
+			-- hardest thing here to anonymise and the easiest to forget: it is
+			-- where somebody says where they work and what time they finish.
+			bio        = NULL,
 			facebook_handle  = NULL,
 			instagram_handle = NULL,
 			gender     = NULL,
@@ -334,6 +350,9 @@ func (s *Service) Export(ctx context.Context, userID uuid.UUID) ([]byte, error) 
 	profile["phone"] = phone
 	profile["name"] = name
 	profile["photo_url"] = photo
+	if err := s.addTheProfileTheyWrote(ctx, userID, profile); err != nil {
+		return nil, err
+	}
 	profile["facebook_handle"] = facebook
 	profile["instagram_handle"] = instagram
 	profile["gender"] = gender
@@ -546,5 +565,65 @@ func (s *Service) tellThePassengers(
 			return err
 		}
 	}
+	return nil
+}
+
+// addTheProfileTheyWrote puts the three things erasure scrubs into the copy:
+// the bio, the preferences and the photograph.
+//
+// They belong here for the same reason the car did. What a person writes and
+// uploads about themselves is the most obviously theirs of anything held, and
+// the only way to see it used to be to open the app and look at the screen —
+// which is not what a copy of your data means.
+//
+// The image goes in as bytes rather than as "a photograph is held". It is an
+// avatar scaled to 512 pixels, so it is tens of kilobytes; saying a file exists
+// and making somebody ask again for it is the sort of answer that turns a right
+// into an errand.
+func (s *Service) addTheProfileTheyWrote(
+	ctx context.Context, userID uuid.UUID, profile map[string]any,
+) error {
+	var bio *string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT bio FROM users WHERE id = $1`, userID).Scan(&bio); err != nil {
+		return fmt.Errorf("account: loading the bio: %w", err)
+	}
+	profile["bio"] = bio
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT tag FROM user_preferences WHERE user_id = $1 ORDER BY tag`, userID)
+	if err != nil {
+		return fmt.Errorf("account: loading the preferences: %w", err)
+	}
+	preferences := []string{}
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			rows.Close()
+			return fmt.Errorf("account: reading a preference: %w", err)
+		}
+		preferences = append(preferences, tag)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("account: loading the preferences: %w", err)
+	}
+	profile["preferences"] = preferences
+
+	var data []byte
+	var contentType string
+	err = s.pool.QueryRow(ctx,
+		`SELECT data, content_type FROM profile_photos WHERE user_id = $1`, userID).
+		Scan(&data, &contentType)
+	if errors.Is(err, pgx.ErrNoRows) {
+		profile["has_photo"] = false
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("account: loading the photo: %w", err)
+	}
+	profile["has_photo"] = true
+	profile["photo_content_type"] = contentType
+	profile["photo_base64"] = base64.StdEncoding.EncodeToString(data)
 	return nil
 }
