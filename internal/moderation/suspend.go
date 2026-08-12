@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/clock"
+	"carpool/internal/notices"
 	"carpool/internal/outbox"
 )
 
@@ -123,17 +124,11 @@ func (s *Service) suspendTx(ctx context.Context, tx pgx.Tx, userID, actorID uuid
 	}
 
 	for _, n := range told {
-		payload, err := json.Marshal(map[string]any{
-			"event": "booking_cancelled", "recipient_id": n.recipient, "booking_id": n.booking,
-		})
+		notice, err := notices.BookingCancelled(n.event, n.recipient, n.booking)
 		if err != nil {
-			return fmt.Errorf("moderation: encoding the notification: %w", err)
+			return fmt.Errorf("moderation: %w", err)
 		}
-		if err := outbox.Enqueue(ctx, tx, outbox.Message{
-			Kind:           "push",
-			Payload:        payload,
-			IdempotencyKey: "booking_cancelled:" + n.booking.String(),
-		}, now); err != nil {
+		if err := outbox.Enqueue(ctx, tx, notice, now); err != nil {
 			return err
 		}
 	}
@@ -186,7 +181,15 @@ func (s *Service) Reinstate(ctx context.Context, userID, actorID uuid.UUID, reas
 }
 
 // told is one person who has to hear that a ride is off.
-type told struct{ recipient, booking uuid.UUID }
+//
+// A suspension reaches both sides of the app — the passengers of a driver who
+// can no longer drive, and the driver of a passenger who can no longer travel —
+// so which side is being told travels with the row. The two hear different
+// things: one has lost a ride, the other has a seat back.
+type told struct {
+	recipient, booking uuid.UUID
+	event              notices.Event
+}
 
 // callOffTheirDriving cancels every departure of theirs that has not left, and
 // every seat booked in one.
@@ -218,7 +221,7 @@ func (s *Service) callOffTheirDriving(ctx context.Context, tx pgx.Tx, userID uui
 		stranded []lostSeat
 	)
 	for rows.Next() {
-		var n told
+		n := told{event: notices.BookingCancelledForPassenger}
 		// Null for a seat that came from a standing arrangement, which carries
 		// its own standing permission and is cancelled in its own right.
 		var requestID *uuid.UUID
@@ -315,7 +318,7 @@ func (s *Service) giveBackTheirSeats(ctx context.Context, tx pgx.Tx, userID uuid
 		freed []uuid.UUID
 	)
 	for rows.Next() {
-		var n told
+		n := told{event: notices.BookingCancelledForDriver}
 		var occurrenceID uuid.UUID
 		if err := rows.Scan(&n.booking, &n.recipient, &occurrenceID); err != nil {
 			rows.Close()

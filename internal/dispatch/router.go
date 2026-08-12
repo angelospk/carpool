@@ -18,6 +18,7 @@ import (
 
 	"carpool/internal/clock"
 	"carpool/internal/match"
+	"carpool/internal/notices"
 	"carpool/internal/outbox"
 	"carpool/internal/push"
 )
@@ -63,9 +64,18 @@ func (r *Router) Handle(ctx context.Context, m outbox.Message) error {
 	}
 }
 
-// pushPayload covers the fields any push-kind message may carry. Which ids are
-// present depends on the event.
+// pushPayload covers the fields a push-kind message may carry.
+//
+// Two shapes arrive here. One says what happened — see internal/notices — and
+// is the only shape anything new may write. The other says nothing and leaves
+// the recipient to be inferred from which ids are present; it is what the two
+// oldest producers write, and it is read here so that a row queued by the
+// version running before a deploy is still deliverable by the version after it.
 type pushPayload struct {
+	Event         notices.Event `json:"event"`
+	RecipientID   uuid.UUID     `json:"recipient_id"`
+	ArrangementID uuid.UUID     `json:"arrangement_id"`
+
 	AskID       *uuid.UUID `json:"ask_id"`
 	DriverID    *uuid.UUID `json:"driver_id"`
 	PassengerID *uuid.UUID `json:"passenger_id"`
@@ -79,30 +89,39 @@ func (r *Router) handlePush(ctx context.Context, m outbox.Message) error {
 		return fmt.Errorf("%w: undecodable push payload: %v", outbox.ErrPermanent, err)
 	}
 
-	recipient, title, body := p.notification()
-	if recipient == nil || *recipient == uuid.Nil {
-		return fmt.Errorf("%w: push payload names no recipient", outbox.ErrPermanent)
+	recipient, title, body, err := p.notification()
+	if err != nil {
+		// Permanent, and it names what it could not say. The alternative —
+		// logging it and reporting success — is precisely how this went unseen:
+		// a producer and a dispatcher that disagree then look exactly like a
+		// quiet week. The dead-lettered row keeps its payload, so what was lost
+		// can be read afterwards and sent by hand.
+		return fmt.Errorf("%w: %v", outbox.ErrPermanent, err)
 	}
 
-	tokens, err := r.tokensFor(ctx, *recipient)
+	tokens, err := r.tokensFor(ctx, recipient)
 	if err != nil {
 		return err
 	}
 	if len(tokens) == 0 {
 		// Nothing to deliver to. Retrying will not conjure a device; the user
 		// reconciles over REST when they next open the app.
-		slog.Info("no live push tokens for recipient", "user", *recipient, "key", m.IdempotencyKey)
+		slog.Info("no live push tokens for recipient", "user", recipient, "key", m.IdempotencyKey)
 		return nil
 	}
 
 	// The idempotency key travels with the notification so the app can
-	// deduplicate a push it has already acted on.
+	// deduplicate a push it has already acted on, and the id of whatever it is
+	// about so the app can open that rather than the front page.
 	data := map[string]any{"idempotency_key": m.IdempotencyKey}
 	if p.AskID != nil {
 		data["ask_id"] = p.AskID.String()
 	}
 	if p.BookingID != nil {
 		data["booking_id"] = p.BookingID.String()
+	}
+	if p.ArrangementID != uuid.Nil {
+		data["arrangement_id"] = p.ArrangementID.String()
 	}
 
 	// One message fans out to every device the user has, and the devices fail
@@ -169,17 +188,85 @@ func (r *Router) handlePush(ctx context.Context, m outbox.Message) error {
 }
 
 // notification picks the recipient and copy for an event.
-func (p pushPayload) notification() (recipient *uuid.UUID, title, body string) {
-	switch {
-	case p.BookingID != nil && p.PassengerID != nil:
-		return p.PassengerID, "Η διαδρομή σου επιβεβαιώθηκε",
-			"Ο οδηγός δέχτηκε το αίτημά σου."
-	case p.AskID != nil && p.DriverID != nil:
-		return p.DriverID, "Νέο αίτημα διαδρομής",
-			fmt.Sprintf("Ένας επιβάτης ζητά μεταφορά, +%.0f λεπτά.", p.DetourMin)
-	default:
-		return nil, "", ""
+// notification works out who is told and what they read.
+//
+// An event, when there is one, is the whole answer and the payload is never
+// second-guessed from the ids around it: a notice that says what happened and
+// carries no recipient is a broken notice, not an invitation to deliver it to
+// whoever else is named. Guessing is what the two shapes below do, and it is
+// kept only for the rows written before there was anything better.
+func (p pushPayload) notification() (recipient uuid.UUID, title, body string, err error) {
+	if p.Event == "" {
+		var to uuid.UUID
+		switch {
+		case p.BookingID != nil && p.PassengerID != nil:
+			to, title, body = *p.PassengerID, "Η διαδρομή σου επιβεβαιώθηκε",
+				"Ο οδηγός δέχτηκε το αίτημά σου."
+		case p.AskID != nil && p.DriverID != nil:
+			to, title, body = *p.DriverID, "Νέο αίτημα διαδρομής",
+				fmt.Sprintf("Ένας επιβάτης ζητά μεταφορά, +%.0f λεπτά.", p.DetourMin)
+		default:
+			return uuid.Nil, "", "", errors.New("push payload names neither an event nor a recipient")
+		}
+		if to == uuid.Nil {
+			return uuid.Nil, "", "", errors.New("push payload names the zero user")
+		}
+		return to, title, body, nil
 	}
+
+	// What the words are is decided before the payload is checked to be
+	// complete, so that an event nobody has written words for is reported as
+	// exactly that rather than as a missing field.
+	title, body, ok := say(p.Event)
+	if !ok {
+		return uuid.Nil, "", "", fmt.Errorf("nothing to say for event %q", p.Event)
+	}
+	if err := (notices.Payload{
+		Event: p.Event, RecipientID: p.RecipientID,
+		BookingID: derefID(p.BookingID), ArrangementID: p.ArrangementID,
+	}).Validate(); err != nil {
+		return uuid.Nil, "", "", err
+	}
+	return p.RecipientID, title, body, nil
+}
+
+// say is the app's whole vocabulary: every event, and the words somebody reads
+// on a lock screen because of it.
+//
+// A cancellation says what is true for whoever is reading it and does not
+// account for itself. The same fact reaches a passenger whether the driver
+// called the trip off, closed their account or was suspended, and only the
+// first of those is the driver's doing — so none of the three is claimed.
+func say(event notices.Event) (title, body string, ok bool) {
+	switch event {
+	case notices.BookingCancelledForPassenger:
+		return "Η διαδρομή ακυρώθηκε",
+			"Η κράτησή σου δεν ισχύει πια.", true
+	case notices.BookingCancelledForDriver:
+		return "Ακυρώθηκε μια κράτηση",
+			"Ένας επιβάτης δεν θα έρθει τελικά, και η θέση είναι πάλι ελεύθερη.", true
+	case notices.ArrangementRequested:
+		return "Νέο αίτημα για σταθερή διαδρομή",
+			"Κάποιος ζητά να έρχεται μαζί σου τακτικά.", true
+	case notices.ArrangementApproved:
+		return "Η σταθερή διαδρομή εγκρίθηκε",
+			"Ο οδηγός δέχτηκε να ταξιδεύετε μαζί τακτικά.", true
+	case notices.ArrangementDeclined:
+		return "Το αίτημα δεν έγινε δεκτό",
+			"Ο οδηγός δεν μπορεί να σε παίρνει τακτικά.", true
+	case notices.ArrangementCancelled:
+		return "Η σταθερή διαδρομή σταμάτησε",
+			"Οι επόμενες εβδομάδες ακυρώθηκαν.", true
+	default:
+		return "", "", false
+	}
+}
+
+func derefID(id *uuid.UUID) uuid.UUID {
+	if id == nil {
+		return uuid.Nil
+	}
+	return *id
 }
 
 func (r *Router) tokensFor(ctx context.Context, userID uuid.UUID) ([]string, error) {

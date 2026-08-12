@@ -10,7 +10,6 @@ package standing
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,6 +21,7 @@ import (
 
 	"carpool/internal/clock"
 	"carpool/internal/jobs"
+	"carpool/internal/notices"
 	"carpool/internal/outbox"
 )
 
@@ -141,7 +141,7 @@ func (s *Service) Repeat(ctx context.Context, bookingID, passengerID uuid.UUID) 
 		return uuid.Nil, fmt.Errorf("standing: recording the arrangement: %w", err)
 	}
 
-	if err := s.notify(ctx, tx, "arrangement_requested", driverID, id, now); err != nil {
+	if err := s.notify(ctx, tx, notices.ArrangementRequested, driverID, id, now); err != nil {
 		return uuid.Nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -282,7 +282,7 @@ func (s *Service) Approve(ctx context.Context, arrangementID, driverID uuid.UUID
 		arrangementID); err != nil {
 		return fmt.Errorf("standing: activating: %w", err)
 	}
-	if err := s.notify(ctx, tx, "arrangement_approved", passengerID, arrangementID, now); err != nil {
+	if err := s.notify(ctx, tx, notices.ArrangementApproved, passengerID, arrangementID, now); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -293,19 +293,13 @@ func (s *Service) Approve(ctx context.Context, arrangementID, driverID uuid.UUID
 
 // notify queues a push in the same transaction as the state it announces.
 func (s *Service) notify(
-	ctx context.Context, tx pgx.Tx, event string, recipient, arrangementID uuid.UUID, now time.Time,
+	ctx context.Context, tx pgx.Tx, event notices.Event, recipient, arrangementID uuid.UUID, now time.Time,
 ) error {
-	payload, err := json.Marshal(map[string]any{
-		"event": event, "recipient_id": recipient, "arrangement_id": arrangementID,
-	})
+	notice, err := notices.Arrangement(event, recipient, arrangementID)
 	if err != nil {
-		return fmt.Errorf("standing: encoding the notification: %w", err)
+		return fmt.Errorf("standing: %w", err)
 	}
-	return outbox.Enqueue(ctx, tx, outbox.Message{
-		Kind:           "push",
-		Payload:        payload,
-		IdempotencyKey: event + ":" + arrangementID.String(),
-	}, now)
+	return outbox.Enqueue(ctx, tx, notice, now)
 }
 
 // Decline ends a pending arrangement without touching a single week.
@@ -394,7 +388,13 @@ func (s *Service) settle(ctx context.Context, arrangementID, userID uuid.UUID, t
 	if userID == passengerID {
 		recipient = driverID
 	}
-	if err := s.notify(ctx, tx, "arrangement_"+to, recipient, arrangementID, now); err != nil {
+	// Spelled out rather than pasted together from the status, so that a new
+	// status cannot invent an event name nothing knows how to say.
+	event := notices.ArrangementCancelled
+	if to == "declined" {
+		event = notices.ArrangementDeclined
+	}
+	if err := s.notify(ctx, tx, event, recipient, arrangementID, now); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {

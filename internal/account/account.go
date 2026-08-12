@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/clock"
+	"carpool/internal/notices"
 	"carpool/internal/outbox"
 )
 
@@ -511,17 +512,12 @@ func (s *Service) tellThePassengers(
 	}
 
 	for _, a := range affected {
-		payload, err := json.Marshal(map[string]any{
-			"event": "booking_cancelled", "recipient_id": a.passenger, "booking_id": a.booking,
-		})
+		notice, err := notices.BookingCancelled(
+			notices.BookingCancelledForPassenger, a.passenger, a.booking)
 		if err != nil {
-			return fmt.Errorf("account: encoding the notification: %w", err)
+			return fmt.Errorf("account: %w", err)
 		}
-		if err := outbox.Enqueue(ctx, tx, outbox.Message{
-			Kind:           "push",
-			Payload:        payload,
-			IdempotencyKey: "booking_cancelled:" + a.booking.String(),
-		}, now); err != nil {
+		if err := outbox.Enqueue(ctx, tx, notice, now); err != nil {
 			return err
 		}
 		if a.request == nil {

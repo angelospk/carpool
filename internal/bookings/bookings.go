@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/clock"
+	"carpool/internal/notices"
 	"carpool/internal/outbox"
 )
 
@@ -149,22 +150,18 @@ func (s *Service) Cancel(ctx context.Context, bookingID, userID uuid.UUID) error
 	}
 
 	// Whoever did not act is the one who needs telling, and they need telling
-	// before they drive to a stop nobody is standing at.
-	recipient := passengerID
+	// before they drive to a stop nobody is standing at. Which of the two it is
+	// decides the words as well as the address: a passenger has lost a ride, a
+	// driver has got a seat back, and one sentence cannot be both.
+	recipient, event := passengerID, notices.BookingCancelledForPassenger
 	if !byDriver {
-		recipient = driverID
+		recipient, event = driverID, notices.BookingCancelledForDriver
 	}
-	payload, err := json.Marshal(map[string]any{
-		"event": "booking_cancelled", "recipient_id": recipient, "booking_id": bookingID,
-	})
+	notice, err := notices.BookingCancelled(event, recipient, bookingID)
 	if err != nil {
-		return fmt.Errorf("bookings: encoding the notification: %w", err)
+		return fmt.Errorf("bookings: %w", err)
 	}
-	if err := outbox.Enqueue(ctx, tx, outbox.Message{
-		Kind:           "push",
-		Payload:        payload,
-		IdempotencyKey: "booking_cancelled:" + bookingID.String(),
-	}, now); err != nil {
+	if err := outbox.Enqueue(ctx, tx, notice, now); err != nil {
 		return err
 	}
 
@@ -263,17 +260,12 @@ func (s *Service) CancelOccurrence(ctx context.Context, occurrenceID, userID uui
 	}
 
 	for _, c := range affected {
-		payload, err := json.Marshal(map[string]any{
-			"event": "booking_cancelled", "recipient_id": c.passenger, "booking_id": c.booking,
-		})
+		notice, err := notices.BookingCancelled(
+			notices.BookingCancelledForPassenger, c.passenger, c.booking)
 		if err != nil {
-			return fmt.Errorf("bookings: encoding the notification: %w", err)
+			return fmt.Errorf("bookings: %w", err)
 		}
-		if err := outbox.Enqueue(ctx, tx, outbox.Message{
-			Kind:           "push",
-			Payload:        payload,
-			IdempotencyKey: "booking_cancelled:" + c.booking.String(),
-		}, now); err != nil {
+		if err := outbox.Enqueue(ctx, tx, notice, now); err != nil {
 			return err
 		}
 		if c.request == nil {

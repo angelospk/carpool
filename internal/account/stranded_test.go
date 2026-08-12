@@ -2,9 +2,12 @@ package account_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
+
+	"carpool/internal/notices"
 )
 
 // Closing a driver's account has to reach the people holding seats in their car.
@@ -51,15 +54,27 @@ func TestClosingADriversAccountTellsThePeopleHoldingSeats(t *testing.T) {
 		t.Fatalf("the booking is %q after the driver closed their account, want cancelled_by_driver", got)
 	}
 
-	var pushes int
+	// Queued, addressed to them, and in a shape the dispatcher can actually
+	// deliver. The last of those is not pedantry: for months every one of these
+	// was queued in a shape the dispatcher could not read, and a test that
+	// counted rows saw nothing wrong while nobody was told anything.
+	var raw []byte
 	if err := w.pool.QueryRow(context.Background(), `
-		SELECT count(*) FROM outbox
-		WHERE kind = 'push' AND payload->>'event' = 'booking_cancelled'
-		  AND payload->>'recipient_id' = $1::text`, w.passengerID).Scan(&pushes); err != nil {
-		t.Fatalf("counting pushes: %v", err)
+		SELECT payload FROM outbox
+		WHERE kind = 'push' AND payload->>'recipient_id' = $1::text`,
+		w.passengerID).Scan(&raw); err != nil {
+		t.Fatalf("finding the push to somebody whose ride was called off: %v", err)
 	}
-	if pushes != 1 {
-		t.Fatalf("%d pushes to somebody whose ride was called off, want 1", pushes)
+
+	var p notices.Payload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("the queued notice is not a notice: %v", err)
+	}
+	if p.Event != notices.BookingCancelledForPassenger {
+		t.Errorf("they are told %q", p.Event)
+	}
+	if err := p.Validate(); err != nil {
+		t.Errorf("the queued notice cannot be delivered: %v", err)
 	}
 }
 
