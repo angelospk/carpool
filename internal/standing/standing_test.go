@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/clock"
+	"carpool/internal/jobs"
 	"carpool/internal/standing"
 	"carpool/internal/store"
 	"carpool/internal/store/testdb"
@@ -405,5 +406,62 @@ func TestAnActiveArrangementCannotBeDeclined(t *testing.T) {
 
 	if err := w.svc.Decline(ctx, id, w.driverID); !errors.Is(err, standing.ErrNotRepeatable) {
 		t.Fatalf("Decline on an active arrangement returned %v; the booked weeks would keep their seats", err)
+	}
+}
+
+// A repeat is founded on a ride that happened, and takes both of its terms from
+// that ride rather than from whoever asked.
+//
+// This is why the two obvious ways to make a nonsense arrangement cannot be
+// reached: an end date already in the past, and a weekday the driver's schedule
+// does not serve. Neither is validated anywhere, because neither is an input —
+// the weekday is the Athens calendar day of the booking being repeated, and the
+// end date is the rolling horizon the materializer actually keeps.
+//
+// Written down because the endpoint has accepted, and ignored, a weekday and an
+// until_date in its body since before Repeat derived them. Somebody tidying up
+// by "wiring those through" would be adding both bugs at once, and this fails
+// when they do.
+func TestARepeatTakesItsWeekdayAndItsEndDateFromTheRideItRepeats(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
+	if err != nil {
+		t.Fatalf("Repeat: %v", err)
+	}
+
+	var weekday int
+	var until time.Time
+	if err := w.pool.QueryRow(ctx,
+		`SELECT weekday, until_date FROM standing_arrangements WHERE id = $1`, id).
+		Scan(&weekday, &until); err != nil {
+		t.Fatalf("reading the arrangement: %v", err)
+	}
+
+	var serviceDate time.Time
+	if err := w.pool.QueryRow(ctx, `
+		SELECT o.service_date FROM bookings b
+		JOIN trip_occurrences o ON o.id = b.occurrence_id
+		WHERE b.id = $1`, w.booking).Scan(&serviceDate); err != nil {
+		t.Fatalf("reading the ride it repeats: %v", err)
+	}
+	wantDay := int(serviceDate.Weekday())
+	if wantDay == 0 {
+		wantDay = 7
+	}
+	if weekday != wantDay {
+		t.Errorf("the arrangement repeats weekday %d, but the ride was on %d", weekday, wantDay)
+	}
+
+	// Far enough ahead to be worth having, and no further than the calendar the
+	// system keeps: a longer promise is a promise about departures that do not
+	// exist yet and cannot be reserved.
+	if !until.After(testNow) {
+		t.Errorf("the arrangement ends at %s, which has already passed", until.Format("2006-01-02"))
+	}
+	if want := testNow.AddDate(0, 0, jobs.HorizonDays); !until.Truncate(24*time.Hour).Equal(want.Truncate(24*time.Hour)) {
+		t.Errorf("the arrangement ends at %s, want the %d-day horizon at %s",
+			until.Format("2006-01-02"), jobs.HorizonDays, want.Format("2006-01-02"))
 	}
 }
