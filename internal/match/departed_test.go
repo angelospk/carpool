@@ -2,6 +2,7 @@ package match_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -83,5 +84,17 @@ func TestWaitingWillNotWakeAnyoneForATripThatIsDueToLeave(t *testing.T) {
 		if id == requestID {
 			t.Fatalf("a trip due to leave at 07:00 woke somebody at 07:30")
 		}
+	}
+
+	// And the same trip, asked before it is due to leave, does wake them. The
+	// refusal above is satisfied by a query that returns nothing for every trip,
+	// so the pair is what pins the boundary.
+	q.Now = time.Date(2026, time.July, 30, 6, 30, 0, 0, time.UTC)
+	got, err = match.Waiting(context.Background(), f.pool, q)
+	if err != nil {
+		t.Fatalf("Waiting: %v", err)
+	}
+	if !slices.Contains(got, requestID) {
+		t.Fatalf("a trip that has not set off woke nobody: %v", got)
 	}
 }

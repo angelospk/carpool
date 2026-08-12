@@ -13,6 +13,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -215,7 +217,7 @@ func (s *Service) callOffTheirDriving(ctx context.Context, tx pgx.Tx, userID uui
 
 	var (
 		out      []told
-		stranded []uuid.UUID
+		stranded []lostSeat
 	)
 	for rows.Next() {
 		var n told
@@ -228,13 +230,20 @@ func (s *Service) callOffTheirDriving(ctx context.Context, tx pgx.Tx, userID uui
 		}
 		out = append(out, n)
 		if requestID != nil {
-			stranded = append(stranded, *requestID)
+			stranded = append(stranded, lostSeat{request: *requestID, booking: n.booking})
 		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+
+	// Ordered so that two suspensions running at once reach the same rows in
+	// the same sequence rather than each holding what the other is waiting for.
+	// See RISKS.md.
+	slices.SortFunc(stranded, func(x, y lostSeat) int {
+		return strings.Compare(x.booking.String(), y.booking.String())
+	})
 
 	// Their passengers had a seat a moment ago. Telling them it is gone is half
 	// the job: the request that found this driver is still exactly what they
@@ -254,41 +263,32 @@ func (s *Service) callOffTheirDriving(ctx context.Context, tx pgx.Tx, userID uui
 // passed has no ride left to find, and the request sweeper is about to mark it
 // expired.
 func (s *Service) lookAgainFor(
-	ctx context.Context, tx pgx.Tx, requestIDs []uuid.UUID, now time.Time,
+	ctx context.Context, tx pgx.Tx, lost []lostSeat, now time.Time,
 ) error {
-	if len(requestIDs) == 0 {
-		return nil
-	}
-
-	rows, err := tx.Query(ctx, `
-		UPDATE ride_requests SET status = 'open', updated_at = now()
-		 WHERE id = ANY($1) AND status = 'matched' AND window_end > $2
-		RETURNING id`, requestIDs, now)
-	if err != nil {
-		return fmt.Errorf("moderation: reopening the stranded requests: %w", err)
-	}
-	var reopened []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return fmt.Errorf("moderation: reading the reopened requests: %w", err)
+	for _, l := range lost {
+		tag, err := tx.Exec(ctx, `
+			UPDATE ride_requests SET status = 'open', updated_at = now()
+			 WHERE id = $1 AND status = 'matched' AND window_end > $2`, l.request, now)
+		if err != nil {
+			return fmt.Errorf("moderation: reopening the stranded request: %w", err)
 		}
-		reopened = append(reopened, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("moderation: reopening the stranded requests: %w", err)
-	}
+		if tag.RowsAffected() == 0 {
+			continue
+		}
 
-	for _, id := range reopened {
-		payload, err := json.Marshal(map[string]any{"request_id": id, "reason": "driver_suspended"})
+		payload, err := json.Marshal(map[string]any{"request_id": l.request, "reason": "driver_suspended"})
 		if err != nil {
 			return fmt.Errorf("moderation: encoding the next ask: %w", err)
 		}
 		if err := outbox.Enqueue(ctx, tx, outbox.Message{
-			Kind:           "ask_next",
-			IdempotencyKey: "ask_next:driver_suspended:" + id.String(),
+			Kind: "ask_next",
+			// Keyed on the seat that was lost rather than on the request. The
+			// same request can be stranded more than once — rematched after one
+			// driver is suspended, and stranded again when the next one is —
+			// and a key naming only the request would make the second event a
+			// duplicate of the first and swallow it, leaving that passenger
+			// waiting for an ask nobody was going to send.
+			IdempotencyKey: "ask_next:driver_suspended:" + l.booking.String(),
 			Payload:        payload,
 		}, now); err != nil {
 			return err
@@ -296,6 +296,10 @@ func (s *Service) lookAgainFor(
 	}
 	return nil
 }
+
+// lostSeat is a booking that has just been cancelled out from under somebody,
+// with the request that will go looking for them again.
+type lostSeat struct{ request, booking uuid.UUID }
 
 // giveBackTheirSeats cancels every seat they are holding in a trip that has not
 // left, and hands each one back to its driver to sell again.

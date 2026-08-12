@@ -433,6 +433,18 @@ func (s *Service) createAsk(
 		return uuid.Nil, fmt.Errorf("asks: locking occurrence: %w", err)
 	}
 
+	// The clock is read here, after the row is held, and everything below uses
+	// this one instant. The filter that chose this candidate checked that the
+	// departure had not gone, but it checked seconds ago and without the lock,
+	// and a departure crossing in between would otherwise produce an offer whose
+	// deadline is already in the past: a push for a car that has left, a request
+	// moved to 'asking' with nothing live behind it, and a wait for the sweeper
+	// to undo it. Refused instead, so the next candidate is tried at once.
+	now := s.clock.Now()
+	if !departs.After(now) {
+		return uuid.Nil, errNoRoomToAsk
+	}
+
 	// Counted in its own statement, after the lock is held, and this separation
 	// is load-bearing rather than tidiness. Under READ COMMITTED a SELECT ...
 	// FOR UPDATE that waits for another transaction rechecks only the locked
@@ -443,7 +455,7 @@ func (s *Service) createAsk(
 	// the concurrency test fails exactly that way when the two are one query.
 	var spokenFor int
 	if err := tx.QueryRow(ctx,
-		`SELECT `+match.SeatsSpokenFor("$1", "$2"), c.OccurrenceID, s.clock.Now()).
+		`SELECT `+match.SeatsSpokenFor("$1", "$2"), c.OccurrenceID, now).
 		Scan(&spokenFor); err != nil {
 		return uuid.Nil, fmt.Errorf("asks: counting offers on the occurrence: %w", err)
 	}
@@ -473,7 +485,7 @@ func (s *Service) createAsk(
 	// passenger's request against a candidate that could only ever have said no.
 	// Ending it at the departure hands them back to the sweeper, which reopens
 	// the request and looks for somebody who has not gone yet.
-	expiresAt := s.clock.Now().Add(DefaultTTL)
+	expiresAt := now.Add(DefaultTTL)
 	if departs.Before(expiresAt) {
 		expiresAt = departs
 	}

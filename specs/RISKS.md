@@ -773,3 +773,60 @@ Left alone, with the reasoning:
 - A request whose window is in the past is accepted at creation. It matches
   nothing and the sweeper now finishes it, so refusing it would only be a
   friendlier error, not a fix.
+
+## A trip is a candidate until it is due to leave, not until it has left (raised 2026-08-12)
+
+The matcher compared a departure against the passenger's window, which is
+written once and never moves. Drivers are asked one at a time with half an hour
+each, so a request naming a morning is still being matched hours into that
+morning, and every departure inside that window which had already gone stayed a
+candidate. Both directions had it: the forward filter offered them, and a seat
+handed back after a car left woke everybody waiting on the corridor.
+
+The boundary now used is `depart_earliest`, because that is what the rest of the
+app already means by departed: the moment a pair may confirm the ride and rate
+each other, and the moment a driver may no longer call the trip off. A second
+definition in the matcher would be exactly the sort of drift that produces a
+trip which has left for one rule and not for another.
+
+**What it costs.** Somebody running for a driver who is late cannot be matched
+into that car, even though the driver may not pull away until the far end of
+their window. Doing it properly needs a real departure time — the driver saying
+"leaving now", or a live position — rather than the near end of a window. Both
+are post-MVP. Until then the app declines a booking it cannot promise.
+
+## Reopening a stranded request takes rows in an order that could deadlock (raised 2026-08-12)
+
+A cancelled departure now reopens its passengers' requests. That adds a lock on
+passenger-owned `ride_requests` rows to three transactions which previously held
+only the driver's user row plus occurrences and bookings. Codex flagged the
+consequence: an account closure or suspension working through several passengers
+can, in principle, wait on a request row that a second closure or suspension
+already holds while that one waits on a booking or occurrence held by the first.
+
+Two things bound it rather than close it. The rows are taken in a stable order
+(by booking id) inside each path, so two runs of the same kind agree; and
+Postgres detects a deadlock and aborts one transaction with an error, which the
+moderator sees as a failed action they can repeat, not as corruption.
+
+**Not closed.** Closing it properly means either locking every affected
+passenger's user row in sorted order before touching anything they own — which
+turns a moderator action into a lock over an unbounded set of accounts — or
+moving the reopening into a post-commit worker keyed on the cancelled booking.
+The second is the better design and is the one to build if this ever fires. It
+is not built now because the paths that can collide are human-initiated, rare,
+and safe when they fail.
+
+## Confirming a ride only proves the clock passed (raised 2026-08-12)
+
+Codex made this point reviewing the departure work, and it is worth writing down
+even though nothing here changes it. Confirmation requires `depart_earliest <=
+now` and nothing else, so a pair can confirm — and then rate each other — for a
+journey neither of them made. Every rating in the app rests on that.
+
+Fixing it needs evidence that a ride happened: a driver marking "on the way", two
+devices near each other at the pickup, or a confirmation window that opens at
+the far end of the departure window rather than the near one. The last is cheap
+and would help a little. The first two are the post-MVP location work that
+RISKS.md already parks. Recorded here so that the weakness of a rating is a
+known property rather than an assumption.

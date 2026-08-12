@@ -279,7 +279,7 @@ func (s *Service) CancelOccurrence(ctx context.Context, occurrenceID, userID uui
 		if c.request == nil {
 			continue
 		}
-		if err := s.lookAgainFor(ctx, tx, *c.request, occurrenceID, now); err != nil {
+		if err := s.lookAgainFor(ctx, tx, *c.request, c.booking, now); err != nil {
 			return err
 		}
 	}
@@ -304,7 +304,7 @@ func (s *Service) CancelOccurrence(ctx context.Context, occurrenceID, userID uui
 // every other continuation: somebody whose driver has just cancelled should not
 // wait an hour to hear that a different one can take them.
 func (s *Service) lookAgainFor(
-	ctx context.Context, tx pgx.Tx, requestID, occurrenceID uuid.UUID, now time.Time,
+	ctx context.Context, tx pgx.Tx, requestID, bookingID uuid.UUID, now time.Time,
 ) error {
 	// The window is the one condition worth re-reading. A journey whose time has
 	// passed has no ride left to find, and the request sweeper is about to mark
@@ -326,9 +326,13 @@ func (s *Service) lookAgainFor(
 	}
 	return outbox.Enqueue(ctx, tx, outbox.Message{
 		Kind: "ask_next",
-		// Keyed on the departure that was called off, so the one cancellation
-		// asks once however many times it is retried.
-		IdempotencyKey: "ask_next:trip_cancelled:" + occurrenceID.String() + ":" + requestID.String(),
+		// Keyed on the seat that was lost rather than on the request. The same
+		// request can be stranded more than once — rematched after one driver
+		// calls off, and stranded again when the next one does — and a key
+		// naming only the request would make the second event a duplicate of
+		// the first and swallow it, leaving that passenger waiting for an ask
+		// nobody was going to send.
+		IdempotencyKey: "ask_next:trip_cancelled:" + bookingID.String(),
 		Payload:        payload,
 	}, now)
 }

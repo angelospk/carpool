@@ -21,6 +21,7 @@ import (
 // separate conversation from a full car — the driver may well take somebody
 // with one bag instead of three — and it was arriving as an internal error.
 func TestEveryAskFailureReachesTheDriverAsItself(t *testing.T) {
+	seen := map[string]error{}
 	for _, err := range []error{
 		asks.ErrNotYours,
 		asks.ErrAskExpired,
@@ -38,6 +39,13 @@ func TestEveryAskFailureReachesTheDriverAsItself(t *testing.T) {
 			if code == "" || message == "" {
 				t.Fatalf("%v arrives as %d with code %q and message %q", err, status, code, message)
 			}
+			// Distinct, not merely non-500. Two failures sharing a code is the
+			// same loss of meaning one step further along: the app cannot show
+			// a different message for something it cannot tell apart.
+			if other, ok := seen[code]; ok {
+				t.Fatalf("%v and %v both arrive as %q", other, err, code)
+			}
+			seen[code] = err
 		})
 	}
 }

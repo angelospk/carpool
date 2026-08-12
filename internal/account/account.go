@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -118,10 +120,6 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 	windDown := []string{
 		`UPDATE route_templates SET active = false, updated_at = now()
 		 WHERE driver_id = $1 AND $2::timestamptz IS NOT NULL`,
-		`UPDATE trip_occurrences o SET status = 'cancelled', updated_at = now()
-		 FROM route_templates t
-		 WHERE t.id = o.template_id AND t.driver_id = $1
-		   AND o.status = 'scheduled' AND o.depart_earliest > $2`,
 		`UPDATE ride_requests SET status = 'cancelled', updated_at = now()
 		 WHERE passenger_id = $1 AND status IN ('open','asking') AND $2::timestamptz IS NOT NULL`,
 		`UPDATE standing_arrangements SET status = 'cancelled', updated_at = now()
@@ -148,6 +146,34 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 		}
 	}
 
+	// Their departures, called off in their own statement so that the ones this
+	// wind-down cancelled are known by id rather than inferred afterwards from
+	// their status. "Cancelled and in the future" would also name a departure
+	// something else called off last week, and would make the clean-up below
+	// depend on nothing having left a confirmed booking behind on one of those.
+	rows, err = tx.Query(ctx, `
+		UPDATE trip_occurrences o SET status = 'cancelled', updated_at = now()
+		 FROM route_templates t
+		 WHERE t.id = o.template_id AND t.driver_id = $1
+		   AND o.status = 'scheduled' AND o.depart_earliest > $2
+		RETURNING o.id`, userID, now)
+	if err != nil {
+		return fmt.Errorf("account: calling off their departures: %w", err)
+	}
+	var calledOff []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("account: reading a called-off departure: %w", err)
+		}
+		calledOff = append(calledOff, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("account: calling off their departures: %w", err)
+	}
+
 	// The people holding a seat in one of the departures just called off.
 	//
 	// Cancelling the departure is not what tells them: their booking went on
@@ -159,7 +185,7 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 	//
 	// The seats are not given back: the departure is gone, so there is nothing
 	// left to take a seat in.
-	if err := s.tellThePassengers(ctx, tx, userID, now); err != nil {
+	if err := s.tellThePassengers(ctx, tx, calledOff, now); err != nil {
 		return err
 	}
 
@@ -431,21 +457,21 @@ func collect(rows pgx.Rows) ([]map[string]any, error) {
 // account has just called off, tells each passenger, and puts the request
 // behind each one back in the matching queue.
 //
-// It runs after the wind-down has cancelled the occurrences, and finds its work
-// through them: a confirmed booking in a cancelled departure of this driver's
-// that has not left is a person expecting a lift that is not coming.
+// It takes the departures by id, from the statement that cancelled them, so it
+// acts only on what this closure did.
 func (s *Service) tellThePassengers(
-	ctx context.Context, tx pgx.Tx, userID uuid.UUID, now time.Time,
+	ctx context.Context, tx pgx.Tx, calledOff []uuid.UUID, now time.Time,
 ) error {
+	if len(calledOff) == 0 {
+		return nil
+	}
+
 	rows, err := tx.Query(ctx, `
-		UPDATE bookings b SET status = 'cancelled_by_driver', updated_at = now()
-		  FROM trip_occurrences o, route_templates t
-		 WHERE o.id = b.occurrence_id AND t.id = o.template_id
-		   AND t.driver_id = $1
-		   AND o.status = 'cancelled'
-		   AND o.depart_earliest > $2
-		   AND b.status = 'confirmed'
-		RETURNING b.id, b.passenger_id, b.request_id`, userID, now)
+		UPDATE bookings SET status = 'cancelled_by_driver', updated_at = now()
+		 WHERE occurrence_id = ANY($1) AND status = 'confirmed'
+		-- Ordered so that two of these running at once take the rows the same
+		-- way round. See the note on lock ordering in RISKS.md.
+		RETURNING id, passenger_id, request_id`, calledOff)
 	if err != nil {
 		return fmt.Errorf("account: cancelling the seats in their departures: %w", err)
 	}
@@ -468,6 +494,13 @@ func (s *Service) tellThePassengers(
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("account: cancelling the seats in their departures: %w", err)
 	}
+
+	// Ordered by the request they are about, so that two closures running at
+	// once reach the same rows in the same sequence rather than each holding
+	// what the other is waiting for. See RISKS.md.
+	slices.SortFunc(affected, func(x, y stranded) int {
+		return strings.Compare(x.booking.String(), y.booking.String())
+	})
 
 	for _, a := range affected {
 		payload, err := json.Marshal(map[string]any{
@@ -502,8 +535,14 @@ func (s *Service) tellThePassengers(
 			return fmt.Errorf("account: encoding the next ask: %w", err)
 		}
 		if err := outbox.Enqueue(ctx, tx, outbox.Message{
-			Kind:           "ask_next",
-			IdempotencyKey: "ask_next:driver_left:" + a.request.String(),
+			Kind: "ask_next",
+			// Keyed on the seat that was lost rather than on the request. The
+			// same request can be stranded more than once — rematched after
+			// this driver leaves, and stranded again when the next one does —
+			// and a key naming only the request would make the second event a
+			// duplicate of the first and swallow it, leaving that passenger
+			// waiting for an ask nobody was going to send.
+			IdempotencyKey: "ask_next:driver_left:" + a.booking.String(),
 			Payload:        next,
 		}, now); err != nil {
 			return err
