@@ -62,6 +62,11 @@ publish() { # token depart_earliest depart_latest
     \"depart_earliest\":\"$2\",\"depart_latest\":\"$3\"}" | j "d.route_km"
 }
 
+# Counted before anything happens rather than at the end: the script is made to
+# be re-run against the same database, and a message another run gave up on is
+# not this run's news.
+DEAD_BEFORE=$(psql "$DSN" -tAc "SELECT count(*) FROM outbox WHERE dead_at IS NOT NULL")
+
 step "1. two drivers on the same corridor, and a passenger"
 A=$(signup "+3069000${RUN}041" "Οδηγός Α")
 B=$(signup "+3069000${RUN}042" "Οδηγός Β")
@@ -128,7 +133,10 @@ psql "$DSN" -tAc "
 
 step "6. and the outbox did not dead-letter anything doing it"
 DEAD=$(psql "$DSN" -tAc "SELECT count(*) FROM outbox WHERE dead_at IS NOT NULL")
-[ "$DEAD" = "0" ] || { psql "$DSN" -c "SELECT kind, last_error, payload FROM outbox WHERE dead_at IS NOT NULL"; fail "$DEAD messages were dead-lettered"; }
+[ "$DEAD" = "$DEAD_BEFORE" ] || {
+  psql "$DSN" -c "SELECT kind, last_error, payload FROM outbox WHERE dead_at IS NOT NULL"
+  fail "$((DEAD - DEAD_BEFORE)) messages were dead-lettered by this run"
+}
 psql "$DSN" -tAc "SELECT '   ' || kind || ': ' || count(*) || ' delivered' FROM outbox WHERE done_at IS NOT NULL GROUP BY kind ORDER BY kind"
 
 printf '\n\033[32mstranded-passenger recovery passed\033[0m\n'

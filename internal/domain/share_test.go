@@ -105,10 +105,10 @@ func TestANonsenseShareIsReadAsAllOfIt(t *testing.T) {
 //
 // Up to basis version 2 the distance in a receipt was the straight line between
 // the passenger's two stops; from version 3 it is the road they are carried
-// along, which is always the longer of the two. A stored receipt is never
-// recomputed, so both live in the table at once — and showing a version 2
-// figure as though somebody had measured a road would be the app claiming
-// something nobody measured.
+// along, which is a different measurement rather than a correction of the same
+// one. A stored receipt is never recomputed, so both live in the table at once,
+// and showing a version 2 figure as though somebody had measured a road would
+// be the app claiming something nobody measured.
 func TestAReceiptFromBeforeTheRoadWasMeasuredSaysSo(t *testing.T) {
 	old := domain.Basis{Version: 2, TripKm: 18.8, OfferedSeats: 3, Mode: "formula"}
 	if got := domain.BreakdownOf(old).TripKmSource; got != domain.TripKmStraightLine {

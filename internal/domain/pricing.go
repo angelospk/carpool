@@ -147,10 +147,12 @@ func SuggestedPriceCents(in PricingInputs) int {
 // Version 3 changes trip_km itself. Up to version 2 it was the straight line
 // between the passenger's own two points; from here it is the distance along
 // the driver's route between where they get in and where they get out, which
-// is what MATCHING.md always said and what the car actually drives. Every
-// figure this produces is larger, so a version 2 receipt replayed through this
-// formula would disagree with the price beside it — which is exactly what the
-// version is for.
+// is what MATCHING.md always said and what the car actually drives. Usually it
+// is the larger of the two and often much larger, but not always: stops on
+// opposite sides of a route are further apart in a straight line than the arc
+// between the points they sit on. Either way a version 2 receipt replayed
+// through this formula disagrees with the price beside it, which is exactly
+// what the version is for.
 const BasisVersion = 3
 
 // Basis is the receipt: every input the formula used, plus what it produced.
