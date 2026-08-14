@@ -180,7 +180,19 @@ func (s *Service) evaluate(ctx context.Context, c match.Candidate, req request) 
 		return match.Insertion{}, 0, domain.Basis{}, err
 	}
 
-	pricing, err := s.pricingInputs(ctx, c.OccurrenceID, req.RequestKm)
+	// What this passenger is carried, along this driver's road: the arc of the
+	// route between the points their two stops sit on. Not the line between
+	// their own stops, which is what this used to be and which is never a
+	// distance anybody drives — on a river with one bridge it is not close to
+	// one either, and every such ride fell under the driver's free-below
+	// threshold and was given away.
+	//
+	// The figure is already here. The gross filter measures this same arc in
+	// PostGIS to decide whether an overlap is worth an offer at all, so every
+	// candidate arrives carrying it, and the filter that admitted this one has
+	// already established that it is positive and that the stops are in order.
+	// Measuring it again in Go would be a second answer to a settled question.
+	pricing, err := s.pricingInputs(ctx, c.OccurrenceID, c.SharedKm)
 	if err != nil {
 		return match.Insertion{}, 0, domain.Basis{}, err
 	}
@@ -247,6 +259,7 @@ func (s *Service) itinerary(ctx context.Context, occurrenceID uuid.UUID) (match.
 func (s *Service) pricingInputs(ctx context.Context, occurrenceID uuid.UUID, tripKm float64) (domain.PricingInputs, error) {
 	var in domain.PricingInputs
 	in.TripKm = tripKm
+	in.TripKmSource = domain.TripKmDriverRoute
 
 	var mode string
 	var lon, lat float64

@@ -6,7 +6,11 @@ import "math"
 //
 // Bump it when a field is added or its meaning changes, so a client written
 // against an older shape can tell rather than guess.
-const BreakdownVersion = 1
+//
+// Version 2 says what the distance is a distance of, because from basis
+// version 3 it is the road along the driver's route and before that it was the
+// straight line between the passenger's stops.
+const BreakdownVersion = 2
 
 // Breakdown is a contribution explained: the inputs, each step of the
 // arithmetic, and what came out.
@@ -43,6 +47,11 @@ type Breakdown struct {
 	PriceSource string `json:"price_source,omitempty"`
 
 	TripKm float64 `json:"trip_km"`
+	// TripKmSource is what that distance is a distance of. A receipt from
+	// before version 3 carries none, and none means the straight line between
+	// the passenger's own stops — never the road, and never to be shown as if
+	// it were.
+	TripKmSource TripKmSource `json:"trip_km_source"`
 
 	// The arithmetic, in the order it happens.
 	//
@@ -88,12 +97,20 @@ func BreakdownOf(b Basis) Breakdown {
 		PriceIsRegional:      b.PriceIsRegional,
 		PriceSource:          b.PriceSource,
 		TripKm:               b.TripKm,
+		TripKmSource:         b.TripKmSource,
 		ContributionShare:    b.ContributionShare,
 		FuelCostCents:        int(math.Round(b.CostEUR * 100)),
 		Divisor:              b.OfferedSeats + 1,
 		TollShareCents:       b.TollShareCents,
 		TotalCents:           b.SeatPriceCents,
 		Mode:                 b.Mode,
+	}
+
+	// A receipt written before the distance had a name was made of the straight
+	// line. Reading its silence as today's measure would show an old figure as
+	// something it is not.
+	if out.TripKmSource == "" {
+		out.TripKmSource = TripKmStraightLine
 	}
 
 	// A driver who asks for nothing charges nothing, barriers included. The

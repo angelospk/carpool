@@ -578,6 +578,40 @@ says the routed distance along the driver's route. It can only ever quote low,
 which is the safe direction for a formula whose whole job is to keep a driver
 from coming out ahead.
 
+## The contribution is for the road now (2026-08-14)
+
+The QA pass above recorded that `trip_km` was the straight line between the
+passenger's two stops, where MATCHING.md has always said it is the distance
+along the driver's route, and left it alone on the grounds that quoting low is
+the safe direction. That reasoning does not survive contact with the threshold
+under which a driver asks for nothing: five kilometres by default, and two stops
+on opposite banks of the Έβρος are four hundred metres apart on the map and
+eleven kilometres apart by road. Those rides were not quoted low. They were
+given away.
+
+Codex also broke the other half of the argument. A pickup north of the route and
+a drop-off south of it are further apart in a straight line than the arc between
+the points they sit on, so the straight line is not reliably the smaller number
+either — which is why the fix has no straight-line fallback in it.
+
+The fix is one line. The gross filter already measures this arc in PostGIS to
+decide whether an overlap is worth an offer, and every candidate has carried it
+all along as `SharedKm`; pricing was the one place that went and measured
+something else. No new query, no second projection, and nothing to fall back
+from: a candidate only reaches pricing after the filter has established that its
+stops are in order along the route.
+
+Receipts are version 3 and say which measure they were made of. Older ones say
+nothing and are read as the straight line, because a figure nobody recorded the
+provenance of is a figure nobody can argue with later.
+
+Two ways a frozen receipt could have been invalidated afterwards — the seats
+changing between quotes, and the route moving under a price derived from it —
+turned out to be unreachable: the materializer freezes an occurrence whole once
+anything is booked on it. That was already true and already tested by status;
+it is now tested against the columns pricing actually reads, because the price
+depends on them.
+
 ## Deliberately not built
 
 Parked with a reason, not forgotten:

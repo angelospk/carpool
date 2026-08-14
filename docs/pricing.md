@@ -55,6 +55,33 @@ free. The smallest figure the app can express is 50 cents, and quoting that for
 a 32-cent share is asking half again as much as the fuel. Free is accurate. Do
 not add a minimum charge.
 
+### trip_km is the road, not the line
+
+The distance is the arc of the driver's own route between the points the
+passenger's two stops sit on: what the car actually drives with them aboard.
+
+It was the straight line between the passenger's endpoints until August 2026,
+which is never a distance anybody drives and, on the roads this app is for, is
+not close to one. Έβρος is a river with few bridges. Two villages four hundred
+metres apart across the water are eleven kilometres apart by car, and under a
+driver's five-kilometre free-below threshold every such ride was given away.
+
+Two things it deliberately is not:
+
+**Not the passenger's own road distance.** The detour out to fetch somebody off
+the corridor is not in it. That is the driver's detour budget, which they chose
+and agreed to, and charging a passenger for the driver's decision to come and
+get them would make the figure depend on how far the driver was willing to go.
+
+**Not what the estimate endpoint quotes.** That routes the passenger's own
+journey before any driver exists. Both are road distances; they answer different
+questions and can legitimately differ.
+
+The number is not measured a second time for pricing. The gross filter computes
+this same arc in PostGIS to decide whether an overlap is worth an offer at all,
+so every candidate arrives carrying it — and a candidate that got here has
+already been shown to have its stops in the right order along the route.
+
 ### wear_factor is pinned at 1.0
 
 It allowed a driver to multiply the whole fuel cost by up to 1.5. Nothing in the

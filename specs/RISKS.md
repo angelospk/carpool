@@ -947,16 +947,64 @@ a booking confirmed) still travel in the shape-inferred form, kept so that rows
 queued by the version running before a deploy stay deliverable by the version
 after it; they should move to the envelope once no such rows can exist.
 
-## `trip_km` is the crow-flies distance, not the routed one (found 2026-08-13)
+## `trip_km` was the crow-flies distance (found 2026-08-13, fixed 2026-08-14)
 
 MATCHING.md line 164 defines `trip_km` as the OSRM distance along the driver's
-route between the passenger's pickup and drop-off. The code prices with
+route between the passenger's pickup and drop-off. The code priced with
 `ST_Distance(origin, destination)` — the straight line between the passenger's
 own endpoints, which ignores both the road and the driver's route.
 
-Left alone deliberately. Road distance is never shorter than the straight line,
-so every suggested contribution comes out at or below the figure the spec
-describes, which is the safe direction for the one thing pricing exists to
-protect: the driver must not come out ahead. Fixing it costs an OSRM call per
-candidate and can only raise prices. Recorded because the spec and the code say
-different things, and the next person to read one of them should know which.
+It was recorded here as a documentation drift on the grounds that the straight
+line always under-quotes, and that under-quoting is the safe direction for a
+formula whose job is to stop a driver coming out ahead. Both halves of that were
+wrong enough to matter:
+
+- Under-quoting is not harmless where `free_below_km` sits. A driver's threshold
+  is five kilometres by default. Two stops on opposite banks of the Έβρος are
+  four hundred metres apart on the map and eleven kilometres apart by road:
+  every such ride was waived outright, and the driver gave away eleven
+  kilometres of their own petrol because a straight line does not know about the
+  river.
+- The straight line is not even reliably shorter. Codex produced the
+  counterexample: a pickup three kilometres north of the route and a drop-off
+  three kilometres south of it are six kilometres apart, while the arc between
+  their projections is one. A fallback to the straight line can over-quote by
+  six times, so it is not a safe fallback either.
+
+**The fix cost one line.** The gross filter already computes this exact arc —
+`(f_d - f_o) * route_km` from `ST_LineLocatePoint` — to decide whether an
+overlap is worth an offer, and every candidate arrives carrying it as
+`SharedKm`. Pricing was the one place that went and measured something else.
+Because the filter that admits a candidate has already established that the
+stops are in order and the arc is at least a kilometre, there is no failure mode
+to fall back from: no extra query, no second projection to disagree with the
+first, no error path.
+
+`BasisVersion` is 3, and a receipt now records `trip_km_source`. A receipt
+without one was written before this and is read as the straight line, because a
+figure whose provenance is unrecorded is a figure nobody can argue with.
+
+**What this does not change.** The distance is the arc between the projections
+of the two stops, not the passenger's own road distance and not the driver's
+detour out to fetch them. A passenger picked up three kilometres off the
+corridor does not pay for those three kilometres; that is the driver's detour
+budget, which they set and agreed to. It also means the figure is not the same
+one the pre-request estimate quotes — that endpoint routes the passenger's own
+journey, which is a different question with a legitimately different answer.
+
+**What was checked rather than assumed.** Codex raised two ways a frozen receipt
+could be silently invalidated: seats changing between quotes (four passengers
+frozen at divisors 2, 3, 4 and 5 collect 1.28 times the cost) and the route
+moving under a price derived from it. Neither is reachable — the materializer's
+mutable predicate freezes an occurrence whole the moment anything is booked on
+it or a driver is being asked about it — and there is now a test asserting that
+against the columns pricing reads rather than against the status.
+
+**Left alone.** `match.Gross` still measures its shared-distance floor against
+the crow-flies request length (at least a kilometre, and at least 20% of it).
+That is a matching filter and not a price: it decides whether an overlap is
+worth an offer. Codex is right that a crow-flies request length is not a
+conservative bound for the arc, so the floor could in principle reject an
+off-corridor candidate it should keep. Changing it changes who gets matched,
+which is a different question from what they are asked to contribute, and it
+wants its own change with its own recall evidence.

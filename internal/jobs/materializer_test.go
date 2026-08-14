@@ -810,3 +810,64 @@ func TestMaterializeCarriesTheContributionShare(t *testing.T) {
 		t.Errorf("an unbooked departure still asks for %v after the route changed", got)
 	}
 }
+
+// A booked departure keeps the road it was priced on.
+//
+// This became load-bearing the day the suggested contribution started being
+// measured along the driver's route rather than across the map: what a
+// passenger agreed to is now a figure derived from this occurrence's geometry,
+// and a receipt is only explicable afterwards if the thing it was derived from
+// stays where it was. A driver rerouting through a different village next month
+// must not move a number somebody already said yes to.
+//
+// Nothing here is a new rule — the mutable predicate has always frozen a booked
+// occurrence whole — but the price now depends on it, so it is worth asserting
+// against the columns pricing actually reads rather than against the status.
+func TestABookedDepartureKeepsTheRoadItWasPricedOn(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t, time.Monday)
+
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var first string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT service_date::text FROM trip_occurrences ORDER BY service_date LIMIT 1`).Scan(&first); err != nil {
+		t.Fatalf("finding the first departure: %v", err)
+	}
+	occurrenceID := f.bookOccurrence(first)
+
+	type shape struct {
+		geom       string
+		km         float64
+		seatsTotal int
+	}
+	read := func() shape {
+		t.Helper()
+		var s shape
+		if err := f.pool.QueryRow(ctx, `
+			SELECT ST_AsText(route_geom), route_km, seats_total
+			  FROM trip_occurrences WHERE id = $1`, occurrenceID).
+			Scan(&s.geom, &s.km, &s.seatsTotal); err != nil {
+			t.Fatalf("reading the departure: %v", err)
+		}
+		return s
+	}
+	before := read()
+
+	// The driver reroutes and offers a seat more. Both are theirs to change;
+	// neither is theirs to change on a departure somebody has booked.
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE route_templates
+		   SET route_geom = ST_GeomFromText('LINESTRING(25.80 40.85, 25.90 40.95, 26.00 40.85)', 4326),
+		       route_km = 40, seats = seats + 1`); err != nil {
+		t.Fatalf("rerouting: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	if after := read(); after != before {
+		t.Errorf("the booked departure was repriced under somebody: %+v, was %+v", after, before)
+	}
+}

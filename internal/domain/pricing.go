@@ -19,6 +19,23 @@ const (
 	PricingFree PricingMode = "free"
 )
 
+// TripKmSource names where the distance in a receipt came from.
+type TripKmSource string
+
+const (
+	// TripKmDriverRoute is the distance along the driver's own route between
+	// the points this passenger's stops project onto: MATCHING.md's Ro' → Rd'.
+	// It is what the car actually drives with them aboard, and it deliberately
+	// excludes the detour out to fetch them, which is the driver's own budget
+	// to spend and not the passenger's to pay for.
+	TripKmDriverRoute TripKmSource = "driver_route"
+	// TripKmStraightLine is the line between the passenger's own two points,
+	// with no road in it. Nothing produces it any more. It is here because
+	// every receipt written before version 3 was made of it, and a figure whose
+	// provenance is unrecorded is a figure nobody can argue with later.
+	TripKmStraightLine TripKmSource = "straight_line"
+)
+
 // PricingInputs are the values the suggested-contribution formula needs.
 type PricingInputs struct {
 	TripKm                   float64
@@ -33,6 +50,11 @@ type PricingInputs struct {
 	OfferedSeats int
 
 	Mode PricingMode
+
+	// TripKmSource says how TripKm was arrived at, and travels into the receipt
+	// for the same reason ConsumptionSource does: the figure freezes into a
+	// booking and has to stay explicable afterwards.
+	TripKmSource TripKmSource
 
 	// ContributionShare is how much of the computed cost share this driver
 	// actually asks for, between zero (exclusive) and one.
@@ -121,7 +143,15 @@ func SuggestedPriceCents(in PricingInputs) int {
 // there or is the national one standing in. A version 1 receipt was built from
 // the driver's home region and one price for every fuel, which is a different
 // question answered, not the same question answered less precisely.
-const BasisVersion = 2
+//
+// Version 3 changes trip_km itself. Up to version 2 it was the straight line
+// between the passenger's own two points; from here it is the distance along
+// the driver's route between where they get in and where they get out, which
+// is what MATCHING.md always said and what the car actually drives. Every
+// figure this produces is larger, so a version 2 receipt replayed through this
+// formula would disagree with the price beside it — which is exactly what the
+// version is for.
+const BasisVersion = 3
 
 // Basis is the receipt: every input the formula used, plus what it produced.
 //
@@ -148,11 +178,15 @@ type Basis struct {
 	PriceIsRegional bool    `json:"price_is_regional,omitempty"`
 	PriceSource     string  `json:"price_source,omitempty"`
 	TripKm          float64 `json:"trip_km"`
-	WearFactor      float64 `json:"wear_factor"`
-	OfferedSeats    int     `json:"offered_seats"`
-	FreeBelowKm     float64 `json:"free_below_km"`
-	TollShareCents  int     `json:"toll_share_cents"`
-	Mode            string  `json:"mode"`
+	// TripKmSource is how that distance was measured. Absent on a receipt
+	// written before version 3, and absent means the straight line: see
+	// TripKmStraightLine.
+	TripKmSource   TripKmSource `json:"trip_km_source,omitempty"`
+	WearFactor     float64      `json:"wear_factor"`
+	OfferedSeats   int          `json:"offered_seats"`
+	FreeBelowKm    float64      `json:"free_below_km"`
+	TollShareCents int          `json:"toll_share_cents"`
+	Mode           string       `json:"mode"`
 
 	// CostEUR is the whole trip before it was divided or rounded. It is the
 	// number the no-profit argument is about, and reading it back should not
@@ -176,6 +210,7 @@ func SuggestedPrice(in PricingInputs) (int, Basis) {
 		PriceIsRegional:      in.PriceIsRegional,
 		PriceSource:          in.PriceSource,
 		TripKm:               in.TripKm,
+		TripKmSource:         in.TripKmSource,
 		WearFactor:           in.WearFactor,
 		OfferedSeats:         in.OfferedSeats,
 		FreeBelowKm:          in.FreeBelowKm,
