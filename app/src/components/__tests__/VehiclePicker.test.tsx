@@ -5,6 +5,12 @@ import type { ReactNode } from 'react';
 import { VehiclePicker } from '../VehiclePicker';
 import { api } from '../../api/endpoints';
 
+const mockPush = jest.fn();
+
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ push: mockPush }),
+}));
+
 jest.mock('../../api/endpoints', () => ({
   api: { vehicles: jest.fn() },
 }));
@@ -32,20 +38,16 @@ const van = { ...yaris, id: 'v2', name: 'το βαν', label: 'το βαν', mod
 
 beforeEach(() => jest.clearAllMocks());
 
-// A driver with one car is not asked a question with one answer.
-//
-// The flush matters: without it the component is still waiting for the list, so
-// it renders nothing whatever the rule is, and the assertion passes for a
-// picker that would have shown one lonely chip.
-test('one car means no choice to make', async () => {
+// One car is a fact rather than a question, and it used to be neither: the
+// section hid itself, so the driver never saw which car they were publishing
+// with or which plate the passenger would be told to look for.
+test('one car is stated, with its colour and plate', async () => {
   (api.vehicles as jest.Mock).mockResolvedValue([yaris]);
-  const onChange = jest.fn();
 
-  render(wrap(<VehiclePicker value={null} onChange={onChange} testID="veh" />));
+  render(wrap(<VehiclePicker value={null} onChange={jest.fn()} testID="veh" />));
 
-  await waitFor(() => expect(api.vehicles).toHaveBeenCalled());
-  await act(async () => {});
-  expect(screen.queryByTestId('veh')).toBeNull();
+  expect(await screen.findByTestId('veh-only')).toBeTruthy();
+  expect(screen.getByTestId('veh-detail').props.children).toContain('ΑΒΓ-1234');
 });
 
 test('two cars are offered, and choosing one reports it', async () => {
@@ -71,14 +73,61 @@ test('the default reads as chosen before anything is pressed', async () => {
   expect(screen.getByTestId('veh-v2').props.accessibilityState?.selected).toBe(false);
 });
 
-// A driver who has not said what they drive cannot publish, and the picker is
-// not the place to explain that — but it must not pretend there is a car.
-test('an empty garage offers nothing', async () => {
+// A car retired from the garage while the form was open must not leave the
+// section pointing at something that is no longer there.
+test('a chosen car that has gone falls back to the default', async () => {
+  (api.vehicles as jest.Mock).mockResolvedValue([yaris, van]);
+
+  render(wrap(<VehiclePicker value="gone" onChange={jest.fn()} testID="veh" />));
+
+  const first = await screen.findByTestId('veh-v1');
+  expect(first.props.accessibilityState?.selected).toBe(true);
+});
+
+// An empty garage is the reason publishing is about to fail, so it is said out
+// loud with the way to fix it, rather than the section disappearing.
+test('an empty garage says so and offers the way to the garage', async () => {
   (api.vehicles as jest.Mock).mockResolvedValue([]);
 
   render(wrap(<VehiclePicker value={null} onChange={jest.fn()} testID="veh" />));
 
-  await waitFor(() => expect(api.vehicles).toHaveBeenCalled());
+  fireEvent.press(await screen.findByTestId('veh-add'));
+  expect(mockPush).toHaveBeenCalledWith('/profile/vehicles');
+});
+
+// A garage that did not load is not a garage with no cars in it, and telling a
+// driver they own nothing because the network dropped is the worse of the two.
+test('a failed load offers a retry rather than claiming an empty garage', async () => {
+  (api.vehicles as jest.Mock).mockRejectedValue(new Error('offline'));
+
+  render(wrap(<VehiclePicker value={null} onChange={jest.fn()} testID="veh" />));
+
+  await waitFor(() => expect(screen.getByTestId('veh-retry')).toBeTruthy());
   await act(async () => {});
-  expect(screen.queryByTestId('veh')).toBeNull();
+  expect(screen.queryByTestId('veh-add')).toBeNull();
+});
+
+// A car retired from the garage screen leaves the publish form holding an id
+// the server will refuse — and the refusal reads "add your car first" to a
+// driver who has two. The picker already drew the fallback; it has to tell the
+// form the same thing, or the screen and the request disagree.
+test('a car retired out from under the form is replaced in the form, not just on screen', async () => {
+  (api.vehicles as jest.Mock).mockResolvedValue([yaris, van]);
+  const onChange = jest.fn();
+
+  render(wrap(<VehiclePicker testID="veh" value="v-gone" onChange={onChange} />));
+
+  await waitFor(() => expect(onChange).toHaveBeenCalledWith('v1'));
+});
+
+// The ordinary case must stay quiet: a form that already names a car it owns is
+// not corrected, and a re-render is not a change of mind.
+test('a car that is still there is left alone', async () => {
+  (api.vehicles as jest.Mock).mockResolvedValue([yaris, van]);
+  const onChange = jest.fn();
+
+  render(wrap(<VehiclePicker testID="veh" value="v2" onChange={onChange} />));
+
+  await waitFor(() => expect(screen.getByTestId('veh-v2')).toBeTruthy());
+  expect(onChange).not.toHaveBeenCalled();
 });

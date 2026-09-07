@@ -15,22 +15,46 @@ import {
   View,
 } from 'react-native';
 import { useEffect, useState, type ReactNode } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, initials, lift, radius, space, tileColor, type } from '../design/tokens';
 import { photoSource } from '../api/images';
 
 export { colors };
 
+// The app draws edge to edge (`edgeToEdgeEnabled` in gradle.properties), so a
+// screen with no navigation header above it starts underneath the Android
+// status bar. The tab bar already reads insets.bottom; topInset is the same
+// debt at the other end.
+//
+// It is opt-in rather than automatic because most screens here sit under a
+// header, and react-navigation has already moved their content clear of the
+// status bar — adding the inset there would pad twice. The screens that ask for
+// it are the ones whose layout sets headerShown: false, which is the tabs and
+// the sign-in flow.
 export function Screen({
   children,
   scroll,
   padded = true,
+  topInset = false,
 }: {
   children: ReactNode;
   scroll?: boolean;
   padded?: boolean;
+  topInset?: boolean;
 }) {
-  return <View style={[styles.screen, padded && styles.screenPadded]}>{children}</View>;
+  const insets = useSafeAreaInsets();
+  return (
+    <View
+      style={[
+        styles.screen,
+        padded && styles.screenPadded,
+        topInset && { paddingTop: insets.top + (padded ? space.lg : 0) },
+      ]}
+    >
+      {children}
+    </View>
+  );
 }
 
 /** The big line at the top of a screen. */
@@ -99,7 +123,7 @@ export function Button({
     <Pressable
       testID={testID}
       accessibilityRole="button"
-      accessibilityState={{ disabled: !!disabled }}
+      aria-disabled={!!disabled}
       onPress={onPress}
       disabled={disabled}
       style={({ pressed }) => [
@@ -406,11 +430,16 @@ export function Stepper({
 /** A selectable pill, used for weekdays. */
 export function Chip({
   label,
+  glyph,
   selected,
   onPress,
   testID,
 }: {
   label: string;
+  /** A pictogram shown before the label. Decoration over a word that already
+      says it, so it is hidden from a screen reader rather than read out under
+      whatever name the platform happens to give the character. */
+  glyph?: string;
   selected: boolean;
   onPress: () => void;
   testID?: string;
@@ -419,10 +448,21 @@ export function Chip({
     <Pressable
       testID={testID}
       accessibilityRole="button"
-      accessibilityState={{ selected }}
+      accessibilityLabel={label}
+      aria-selected={selected}
       onPress={onPress}
       style={[styles.chip, selected && styles.chipSelected]}
     >
+      {glyph ? (
+        <Text
+          testID={testID ? `${testID}-glyph` : undefined}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+          style={styles.chipGlyph}
+        >
+          {glyph}
+        </Text>
+      ) : null}
       <Text style={[styles.chipLabel, selected && styles.chipLabelSelected]}>{label}</Text>
     </Pressable>
   );
@@ -608,6 +648,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.inner,
     backgroundColor: colors.sunken,
   },
+  chipGlyph: { fontSize: 20, lineHeight: 24 },
   chipSelected: { backgroundColor: colors.primary },
   chipLabel: { ...type.label, color: colors.muted },
   chipLabelSelected: { color: colors.primaryInk },

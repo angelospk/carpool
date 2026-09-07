@@ -72,7 +72,7 @@ export default function ProfileSetupScreen() {
   };
 
   return (
-    <Screen>
+    <Screen topInset>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Title>{t('auth.profileTitle')}</Title>
 

@@ -203,6 +203,10 @@ func (d Deps) handlePastTrips(w http.ResponseWriter, r *http.Request) {
 			"price_eur":         t.PriceEUR,
 			"seats_free":        t.SeatsFree,
 			"driver_name":       t.DriverName,
+			"origin_lon":        t.OriginLon,
+			"origin_lat":        t.OriginLat,
+			"destination_lon":   t.DestLon,
+			"destination_lat":   t.DestLat,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"trips": out})

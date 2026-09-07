@@ -85,3 +85,40 @@ describe('how many', () => {
     expect(onCount).toHaveBeenCalledWith(0);
   });
 });
+
+// A pictogram beside each word, because "κανονική βαλίτσα" and "ποδήλατο, σκι,
+// καρότσι" are a scale rather than a list, and a scale is read faster as a
+// picture than as prose. The word stays: an icon alone is a guess, and this
+// choice decides who is offered the trip.
+describe('the scale is drawn as well as written', () => {
+  it('gives every size its own mark, on both sides', () => {
+    const { rerender } = render(<LuggagePicker value="none" onChange={jest.fn()} testID="lp" />);
+
+    // includeHiddenElements, because the marks are deliberately hidden from
+    // assistive technology — see the next test, which is what makes that a
+    // property rather than an accident.
+    const mark = (size: string) =>
+      screen.getByTestId(`lp-${size}-glyph`, { includeHiddenElements: true })
+        .props.children as string;
+
+    const marks = LUGGAGE_SIZES.map(mark);
+    expect(new Set(marks).size).toBe(LUGGAGE_SIZES.length);
+
+    rerender(<LuggagePicker value="none" onChange={jest.fn()} asDriver testID="lp" />);
+    for (const size of LUGGAGE_SIZES) {
+      expect(mark(size)).toBeTruthy();
+    }
+  });
+
+  // The mark is decoration over a label that already says it. A screen reader
+  // announcing "🧳 κανονική βαλίτσα" reads the emoji's own name aloud, which is
+  // whatever the platform calls it rather than what this app means by it — so
+  // the chip carries the name and the mark is hidden. The default query not
+  // finding it is the assertion: that is the same filter a screen reader has.
+  it('names the size for a screen reader, and does not read the mark aloud', () => {
+    render(<LuggagePicker value="none" onChange={jest.fn()} testID="lp" />);
+
+    expect(screen.getByTestId('lp-suitcase').props.accessibilityLabel).toBe('Κανονική βαλίτσα');
+    expect(screen.queryByTestId('lp-suitcase-glyph')).toBeNull();
+  });
+});

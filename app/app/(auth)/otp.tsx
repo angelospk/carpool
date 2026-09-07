@@ -67,7 +67,7 @@ export default function OtpScreen() {
   };
 
   return (
-    <Screen>
+    <Screen topInset>
       <View style={styles.top}>
         <Title>{t('auth.otpTitle')}</Title>
         <Hint>{t('auth.otpHint')}</Hint>

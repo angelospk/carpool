@@ -240,3 +240,73 @@ func TestAShareOfZeroIsRefusedWhileAnAbsentOneIsAllOfIt(t *testing.T) {
 		t.Fatalf("omitting the share gave %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// The set of pricing modes is closed, and the app is about to start sending
+// one. An unknown value used to be cast straight through to the insert, where
+// the column's CHECK refused it and the driver was told "internal error" for
+// what is a typo in a request body.
+func TestAPricingModeMustBeOneTheAppKnows(t *testing.T) {
+	h := newRoutingHarness(t)
+	token, _ := h.signUp("+306901000010", "Οδηγός")
+	h.becomeDriver(token)
+
+	route := func(mode any) map[string]any {
+		body := map[string]any{
+			"origin_lon": 25.80, "origin_lat": 40.85,
+			"destination_lon": 26.00, "destination_lat": 40.85,
+			"origin_label": "A", "destination_label": "B",
+			"seats": 3, "kind": "oneoff",
+			"oneoff_date":     h.clock.Now().Add(48 * time.Hour).Format("2006-01-02"),
+			"depart_earliest": "07:30", "depart_latest": "08:00",
+		}
+		if mode != nil {
+			body["pricing_mode"] = mode
+		}
+		return body
+	}
+
+	rec := h.do(http.MethodPost, "/v1/routes", route("whatever"), token)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("an unknown mode gave %d, want 400", rec.Code)
+	} else if code := h.errorCode(rec); code != "invalid_pricing_mode" {
+		t.Errorf("an unknown mode gave error %q, want invalid_pricing_mode", code)
+	}
+
+	// Every mode the app can choose publishes, and so does the client that has
+	// never heard of the field.
+	for _, mode := range []any{nil, "formula", "free_contribution", "free"} {
+		rec := h.do(http.MethodPost, "/v1/routes", route(mode), token)
+		if rec.Code != http.StatusCreated {
+			t.Errorf("pricing_mode %v gave %d: %s", mode, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// A share is a fraction of a figure the formula produced. Under any other mode
+// there is no figure, so a share stored beside it would be a number nobody
+// could explain when the receipt is read back.
+func TestAnOpenContributionKeepsNoShareBesideIt(t *testing.T) {
+	h := newRoutingHarness(t)
+	token, _ := h.signUp("+306901000011", "Οδηγός")
+	h.becomeDriver(token)
+
+	rec := h.do(http.MethodPost, "/v1/routes", map[string]any{
+		"origin_lon": 25.80, "origin_lat": 40.85,
+		"destination_lon": 26.00, "destination_lat": 40.85,
+		"origin_label": "A", "destination_label": "B",
+		"seats": 3, "kind": "oneoff",
+		"oneoff_date":     h.clock.Now().Add(48 * time.Hour).Format("2006-01-02"),
+		"depart_earliest": "07:30", "depart_latest": "08:00",
+		"pricing_mode": "free_contribution", "contribution_share": 0.5,
+	}, token)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("publishing gave %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var share float64
+	h.mustQuery(`SELECT contribution_share FROM route_templates
+	             WHERE pricing_mode = 'free_contribution' ORDER BY created_at DESC LIMIT 1`, &share)
+	if share != 1 {
+		t.Fatalf("contribution_share = %v beside an open contribution, want 1", share)
+	}
+}

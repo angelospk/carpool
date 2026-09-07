@@ -152,6 +152,10 @@ func NewRouter(deps Deps) http.Handler {
 			// A driver seeing and retiring their own routes. Reads and writes
 			// the pool directly, so there is no collaborator to guard on.
 			r.Get("/me/routes", deps.handleMyRoutes)
+
+			// What the caller is still waiting on. Read-only over the pool, so
+			// it sits outside the matcher's guard below — see the handler.
+			r.Get("/requests/mine", deps.handleMyRequests)
 			r.Delete("/me/routes/{id}", deps.handleRetireRoute)
 
 			if deps.PhoneChange != nil {

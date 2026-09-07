@@ -14,7 +14,11 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { cancelRequest: jest.fn() },
+  api: { cancelRequest: jest.fn(), myRequests: jest.fn() },
+}));
+
+jest.mock('../../src/state/session', () => ({
+  useSession: (select: (s: unknown) => unknown) => select({ status: 'signedIn' }),
 }));
 
 function wrap(node: ReactNode) {
@@ -22,7 +26,47 @@ function wrap(node: ReactNode) {
   return <QueryClientProvider client={client}>{node}</QueryClientProvider>;
 }
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  (api.myRequests as jest.Mock).mockResolvedValue({ requests: [] });
+});
+
+// The card on the home screen says how far the search has got. Opening it used
+// to show a pulsing dot over a raw uuid, which is less than the card said.
+test('the screen says the same thing the card that led here said', async () => {
+  (api.myRequests as jest.Mock).mockResolvedValue({
+    requests: [
+      {
+        id: 'req-1',
+        origin_label: 'Αλεξανδρούπολη',
+        destination_label: 'Κομοτηνή',
+        window_start: '2026-07-29T04:30:00Z',
+        window_end: '2026-07-29T06:30:00Z',
+        seats: 1,
+        status: 'asking',
+        drivers_asked: 2,
+        drivers_declined: 1,
+        asking_now: true,
+        created_at: '2026-07-29T04:00:00Z',
+      },
+    ],
+  });
+
+  render(wrap(<RequestScreen />));
+
+  await waitFor(() => expect(screen.getByTestId('request-route')).toBeTruthy());
+  expect(screen.getByTestId('request-progress').props.children).toContain('τώρα');
+  expect(screen.queryByText('req-1')).toBeNull();
+});
+
+// A request that has been matched, cancelled or has simply not arrived yet is
+// not in the list, and none of those is worth guessing at out loud.
+test('a request that is not in the list falls back to the general wording', async () => {
+  render(wrap(<RequestScreen />));
+
+  await waitFor(() => expect(api.myRequests).toHaveBeenCalled());
+  expect(screen.queryByTestId('request-progress')).toBeNull();
+});
 
 test('cancelling a request that is still asking takes them home', async () => {
   (api.cancelRequest as jest.Mock).mockResolvedValue(undefined);

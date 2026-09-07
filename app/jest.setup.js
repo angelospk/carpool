@@ -23,3 +23,10 @@ global.__DEV__ = true;
 // Screens render translated copy, so i18n has to be initialised or every label
 // comes out as its key and assertions test nothing.
 require('./src/i18n');
+
+// Screens read the status bar inset (ui.tsx `Screen topInset`). The hook throws
+// outside a provider rather than returning zeros, so without this every screen
+// test fails on a value none of them assert.
+jest.mock('react-native-safe-area-context', () =>
+  require('react-native-safe-area-context/jest/mock').default,
+);

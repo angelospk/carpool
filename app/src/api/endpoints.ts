@@ -73,6 +73,15 @@ export type Vehicle = {
   is_default: boolean;
 };
 
+/**
+ * What the driver asks for.
+ *
+ * `formula` is the app working out the fuel share; `free_contribution` leaves
+ * the figure to the two people, and nothing is suggested; `free` is a driver
+ * asking for nothing at all.
+ */
+export type PricingMode = 'formula' | 'free_contribution' | 'free';
+
 /** The closed vocabulary of what a ride is like. Describes; does not enforce. */
 export const PREFERENCE_TAGS = [
   'no_smoking',
@@ -220,6 +229,36 @@ export type TripDetail = TripSummary & {
 export type PastTrip = TripSummary & {
   booking_id: string;
   driver_name: string;
+  /** Where this passenger actually got in and out, off their own booking.
+      It is what makes a past ride repeatable: a label names a town, and there
+      is no geocoder here to turn one back into a point. */
+  origin_lon: number;
+  origin_lat: number;
+  destination_lon: number;
+  destination_lat: number;
+};
+
+/**
+ * A ride somebody asked for and is still waiting on.
+ *
+ * Asking is sequential — one driver at a time, each with an expiry — so for
+ * minutes at a stretch nothing visible happens. These counts are what let the
+ * home screen say which of the several kinds of nothing it is.
+ */
+export type OpenRequest = {
+  id: string;
+  origin_label: string;
+  destination_label: string;
+  window_start: string;
+  window_end: string;
+  seats: number;
+  status: 'open' | 'asking';
+  /** People, not attempts: two departures of one driver's route are one driver. */
+  drivers_asked: number;
+  drivers_declined: number;
+  /** Somebody is looking at it this minute. An ask that has lapsed is not. */
+  asking_now: boolean;
+  created_at: string;
 };
 
 export type Arrangement = {
@@ -419,6 +458,11 @@ export const api = {
      * deciding where under that cap you sit.
      */
     contribution_share?: number;
+    /**
+     * Whether a figure is suggested at all. Omitted means the formula, which
+     * is what every route published before the app asked was doing.
+     */
+    pricing_mode?: PricingMode;
   }) => request<{ template_id: string; route_km: number; ends_at_port: boolean }>('/v1/routes', {
       method: 'POST',
       body,
@@ -461,6 +505,9 @@ export const api = {
       method: 'POST',
       body,
     }),
+
+  /** What the caller is still waiting on, and how far the search has got. */
+  myRequests: () => request<{ requests: OpenRequest[] }>('/v1/requests/mine'),
 
   cancelRequest: (id: string) => request<void>(`/v1/requests/${id}`, { method: 'DELETE' }),
 

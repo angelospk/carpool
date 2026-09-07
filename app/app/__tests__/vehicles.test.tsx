@@ -89,7 +89,11 @@ test('a car is described, never rated', async () => {
   expect(Object.keys(body)).not.toContain('consumption_l_100km');
 });
 
-test('a car cannot be saved without a make, a model and a plate', async () => {
+// The displacement is in this list because of what happens without it: the
+// server can place the car in no band, so a model the dataset has never heard
+// of has no consumption at all and the save is refused by the API instead of by
+// the form. A refusal the form can make is one the driver can act on.
+test('a car cannot be saved without a make, a model, a plate and a displacement', async () => {
   render(wrap(<VehiclesScreen />));
   fireEvent.press(await screen.findByTestId('garage-add'));
 
@@ -101,6 +105,9 @@ test('a car cannot be saved without a make, a model and a plate', async () => {
   expect(save().props.accessibilityState?.disabled).toBe(true);
 
   fireEvent.changeText(screen.getByTestId('garage-plate'), 'ΖΗΘ-9999');
+  expect(save().props.accessibilityState?.disabled).toBe(true);
+
+  fireEvent.changeText(screen.getByTestId('garage-cc'), '2287');
   expect(save().props.accessibilityState?.disabled).toBe(false);
 });
 

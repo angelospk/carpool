@@ -33,10 +33,11 @@ func TestSuspensionSurvivesTheMaterializer(t *testing.T) {
 	// A schedule, so the materializer has something to plan. Wednesday is the
 	// weekday of the fixture's own tomorrow, 30 July 2026.
 	if _, err := w.pool.Exec(ctx, `
-		INSERT INTO route_schedules (template_id, kind, weekdays, depart_earliest, depart_latest)
-		SELECT t.id, 'recurring', ARRAY[1,2,3,4,5,6,7], '07:30', '08:00'
+		INSERT INTO route_schedules (template_id, kind, weekdays, depart_earliest, depart_latest,
+			effective_from)
+		SELECT t.id, 'recurring', ARRAY[1,2,3,4,5,6,7], '07:30', '08:00', $2::date
 		  FROM route_templates t WHERE t.driver_id = $1`,
-		w.driver); err != nil {
+		w.driver, w.clock.Now()); err != nil {
 		t.Fatalf("seeding the schedule: %v", err)
 	}
 
@@ -67,6 +68,15 @@ func TestSuspensionSurvivesTheMaterializer(t *testing.T) {
 	}
 }
 
+// The schedules below name effective_from rather than taking the column
+// default, and that is not tidiness. The default is CURRENT_DATE — the
+// database's own calendar — while the materializer plans its horizon from the
+// injected clock, which these tests hold at 29 July 2026. The two agreed while
+// the real date was still inside the 21-day window and stopped agreeing in the
+// middle of August, at which point a committed test began failing on its own,
+// with nothing in the diff to blame. It is the same mixing of clocks that has
+// now cost this codebase four bugs; see PROGRESS.md, "The clock lesson".
+//
 // Reinstatement gives back the ability to drive. It does not give back the
 // particular mornings that were called off — those passengers were told the trip
 // was cancelled and have made other arrangements — but the route itself must
@@ -76,10 +86,11 @@ func TestReinstatementLetsTheMaterializerPlanAgain(t *testing.T) {
 	w := newWorld(t)
 
 	if _, err := w.pool.Exec(ctx, `
-		INSERT INTO route_schedules (template_id, kind, weekdays, depart_earliest, depart_latest)
-		SELECT t.id, 'recurring', ARRAY[1,2,3,4,5,6,7], '07:30', '08:00'
+		INSERT INTO route_schedules (template_id, kind, weekdays, depart_earliest, depart_latest,
+			effective_from)
+		SELECT t.id, 'recurring', ARRAY[1,2,3,4,5,6,7], '07:30', '08:00', $2::date
 		  FROM route_templates t WHERE t.driver_id = $1`,
-		w.driver); err != nil {
+		w.driver, w.clock.Now()); err != nil {
 		t.Fatalf("seeding the schedule: %v", err)
 	}
 

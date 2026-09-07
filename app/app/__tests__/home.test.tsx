@@ -12,7 +12,7 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { upcomingTrips: jest.fn(), pastTrips: jest.fn(), trip: jest.fn() },
+  api: { upcomingTrips: jest.fn(), pastTrips: jest.fn(), trip: jest.fn(), myRequests: jest.fn() },
 }));
 
 // Prefixed `mock` because jest.mock's factory may not close over anything else.
@@ -49,6 +49,9 @@ function wrap(node: ReactNode) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // The screen lists what is still being waited on as well as what is booked,
+  // and an empty screen is only empty when both of them are.
+  (api.myRequests as jest.Mock).mockResolvedValue({ requests: [] });
   (api.trip as jest.Mock).mockResolvedValue({
     ...trip(),
     // A short encoded polyline: two points near Alexandroupoli.
@@ -120,5 +123,6 @@ describe('before the session is settled', () => {
 
     expect(api.upcomingTrips).not.toHaveBeenCalled();
     expect(api.pastTrips).not.toHaveBeenCalled();
+    expect(api.myRequests).not.toHaveBeenCalled();
   });
 });

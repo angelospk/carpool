@@ -160,13 +160,22 @@ export default function VehiclesScreen() {
                 />
               ))}
             </View>
+            {/* Required, not optional, and this is why: with no displacement
+                the server can place the car in no band at all, so when the
+                dataset does not know the model there is nothing left to fall
+                back on. It answered ErrUnusable, the app showed "check the
+                make, model and fuel" — all three of which were filled in — and
+                the driver had a form that would not save and would not say
+                what was wrong. */}
             <Field
               testID="garage-cc"
               label={t('garage.engineCC')}
               value={engineCC}
               onChangeText={(v) => setEngineCC(v.replace(/\D/g, '').slice(0, 4))}
               placeholder="1329"
+              keyboardType="number-pad"
             />
+            <Hint>{t('garage.engineCCHint')}</Hint>
             <Field
               testID="garage-plate"
               label={t('garage.plate')}
@@ -185,7 +194,13 @@ export default function VehiclesScreen() {
             <Button
               testID="garage-save"
               label={t('common.save')}
-              disabled={!make.trim() || !model.trim() || !plate.trim() || add.isPending}
+              disabled={
+                !make.trim() ||
+                !model.trim() ||
+                !plate.trim() ||
+                Number(engineCC) <= 0 ||
+                add.isPending
+              }
               onPress={() => add.mutate()}
             />
           </Card>

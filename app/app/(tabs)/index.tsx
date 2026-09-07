@@ -5,6 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api, type TripSummary } from '../../src/api/endpoints';
 import { PastTrips } from '../../src/components/PastTrips';
+import { OpenRequests, useOpenRequests } from '../../src/components/OpenRequests';
+import { Suggestions } from '../../src/components/Suggestions';
 import { useSession } from '../../src/state/session';
 import {
   AsyncState,
@@ -46,11 +48,18 @@ export default function HomeScreen() {
     enabled: signedIn,
   });
 
+  // Asked here as well as inside the card so that the empty state can account
+  // for it: somebody whose only activity is an open request must not be told
+  // they have nothing, with the request they are waiting on hidden underneath.
+  // The same hook as the card, so it is the same one query either way — and the
+  // signed-in guard and the poll interval live in one place rather than two.
+  const requests = useOpenRequests();
+
   const all = trips.data?.trips ?? [];
   const [next, ...rest] = all;
 
   return (
-    <Screen>
+    <Screen topInset>
       <View style={styles.header}>
         <View style={styles.greeting}>
           <Avatar name={me?.name ?? '·'} photoUrl={me?.photo_url} size={44} />
@@ -65,26 +74,48 @@ export default function HomeScreen() {
         loading={trips.isLoading}
         error={trips.error}
         onRetry={() => void trips.refetch()}
-        empty={!all.length && !(past.data?.trips.length ?? 0)}
+        // Everything has to be both settled and empty. A request still loading
+        // is not an absence, and neither is one that failed to load.
+        empty={
+          !all.length &&
+          !(past.data?.trips.length ?? 0) &&
+          !(requests.data?.requests.length ?? 0) &&
+          // Neither still asking nor having failed to ask. A query that broke
+          // knows nothing about whether there is anything there, and "δεν έχεις
+          // επόμενες διαδρομές" is a claim rather than a shrug.
+          !requests.isLoading &&
+          !requests.isError &&
+          !past.isError
+        }
         emptyLabel={t('home.empty')}
       >
         <FlatList
           testID="trip-list"
           data={rest}
           keyExtractor={(item) => item.id}
-          refreshing={trips.isRefetching}
-          onRefresh={() => void trips.refetch()}
+          refreshing={trips.isRefetching || requests.isRefetching}
+          // Nothing here changes because of anything done on this phone: a
+          // driver answers somewhere else and the screen finds out by asking.
+          // So a pull refreshes the requests as well as the trips.
+          onRefresh={() => {
+            void trips.refetch();
+            void requests.refetch();
+          }}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
           ListHeaderComponent={
-            next ? (
-              <View style={styles.listHeader}>
-                <NextTrip trip={next} onPress={() => router.push(`/trip/${next.id}`)} />
-                {rest.length ? <SectionHeader title={t('home.upcoming')} /> : null}
-              </View>
-            ) : null
+            <View style={styles.listHeader}>
+              {next ? <NextTrip trip={next} onPress={() => router.push(`/trip/${next.id}`)} /> : null}
+              <OpenRequests />
+              {rest.length ? <SectionHeader title={t('home.upcoming')} /> : null}
+            </View>
           }
-          ListFooterComponent={<PastTrips />}
+          ListFooterComponent={
+            <>
+              <PastTrips />
+              <Suggestions />
+            </>
+          }
           renderItem={({ item, index }) => (
             <>
               {startsNewDay(item.depart_earliest, rest[index - 1]?.depart_earliest) ? (

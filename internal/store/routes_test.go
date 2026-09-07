@@ -272,3 +272,38 @@ func TestARouteCannotBePublishedWithSomebodyElsesCar(t *testing.T) {
 		t.Fatal("a route was published with somebody else's car")
 	}
 }
+
+// Real road geometry crosses itself. A route through a grade-separated
+// junction, or one that doubles back along the road it came in on, is a
+// LineString that touches itself when flattened to two dimensions — and the
+// schema used to refuse it outright, so publishing Αλεξανδρούπολη to Μάκρη
+// returned "the route was rejected" with nothing on screen to explain why.
+//
+// Measured against the Greece extract: of ten ordinary routes between 2.5 and
+// 164 km, one was non-simple, with 516 vertices and not a repeated coordinate
+// among them. It is not a degenerate shape to be cleaned up; it is what the
+// road does.
+func TestARouteThatCrossesItselfCanStillBePublished(t *testing.T) {
+	ctx := context.Background()
+	pool, driverID := driverAndPool(t)
+
+	// Out east, up, back west, then south across the line it came in on.
+	const crossing = "LINESTRING(25.80 40.85, 25.90 40.85, 25.90 40.90, 25.85 40.90, 25.85 40.80)"
+
+	// Guard the guard: a line that PostGIS considers simple would let this test
+	// pass without ever exercising what it is named after.
+	var simple bool
+	if err := pool.QueryRow(ctx,
+		`SELECT ST_IsSimple(ST_GeomFromText($1, 4326))`, crossing).Scan(&simple); err != nil {
+		t.Fatalf("checking the fixture: %v", err)
+	}
+	if simple {
+		t.Fatalf("the fixture %s does not cross itself", crossing)
+	}
+
+	params := templateParams(t, pool, driverID, match.Budget{AllowStops: true, Km: 5, Min: 10})
+	params.RouteWKT = crossing
+	if _, err := store.CreateRouteTemplate(ctx, pool, params); err != nil {
+		t.Fatalf("CreateRouteTemplate on a self-crossing route: %v", err)
+	}
+}

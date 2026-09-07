@@ -50,7 +50,7 @@ export default function PhoneScreen() {
   };
 
   return (
-    <Screen>
+    <Screen topInset>
       <View style={styles.top}>
         <Title>{t('auth.phoneTitle')}</Title>
         <Hint>{t('auth.phoneHint')}</Hint>

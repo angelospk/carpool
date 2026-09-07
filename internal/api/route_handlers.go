@@ -37,8 +37,11 @@ type routeBody struct {
 	// Luggage is the largest thing this route will carry. Absent means a
 	// suitcase, which is what an ordinary boot takes.
 	Luggage string `json:"luggage"`
-	// LuggageCapacity is how many of them the boot holds. Absent means three,
-	// which is an ordinary boot on a trip with three seats on offer.
+	// LuggageCapacity is how many of them are free for passengers, which is not
+	// the size of the boot: the driver's own luggage is not modelled, so it has
+	// to be deducted before it gets here. See store.RoutePlan.LuggageCapacity.
+	// Absent means three, which is an ordinary boot on a trip with three seats
+	// on offer.
 	LuggageCapacity *int `json:"luggage_capacity"`
 
 	// ContributionShare is how much of the computed cost share this driver
@@ -127,9 +130,31 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 	if body.Seats <= 0 {
 		body.Seats = 3 // the wizard's default
 	}
-	mode := domain.PricingMode(body.PricingMode)
-	if mode == "" {
+	// An unknown mode used to be cast straight through to the insert, where the
+	// column's CHECK refused it and the driver was told "internal error". The
+	// set is closed and small, so it is checked here and named back.
+	//
+	// Absent is not an error: every client published before this field existed,
+	// and they all meant the formula.
+	var mode domain.PricingMode
+	switch body.PricingMode {
+	case "", string(domain.PricingFormula):
 		mode = domain.PricingFormula
+	case string(domain.PricingFreeContribution):
+		mode = domain.PricingFreeContribution
+	case string(domain.PricingFree):
+		mode = domain.PricingFree
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_pricing_mode",
+			"a route either suggests a share of the fuel, leaves the contribution open, or asks for nothing")
+		return
+	}
+
+	// A share is a fraction of a figure the formula produced. Under any other
+	// mode there is no figure, so a share stored beside it would be a number
+	// nobody could later explain — see the receipt in domain.Basis.
+	if mode != domain.PricingFormula {
+		share = 1
 	}
 
 	// A driver profile is what makes someone publishable; without one there is

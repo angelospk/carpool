@@ -56,6 +56,7 @@ export function LuggagePicker({
           <Chip
             key={size}
             testID={testID ? `${testID}-${size}` : undefined}
+            glyph={LUGGAGE_GLYPHS[size]}
             label={t(`luggage.${size}`)}
             selected={value === size}
             onPress={() => pick(size)}
@@ -90,6 +91,18 @@ export function LuggagePicker({
     </View>
   );
 }
+
+// One mark per size, in the order the scale runs.
+//
+// The words stay under them. A picture of a rucksack is quicker to find than
+// "μικρή βαλίτσα", but it is also ambiguous in a way the sentence is not — this
+// choice decides who is even offered the trip, so the reader gets both.
+const LUGGAGE_GLYPHS: Record<LuggageSize, string> = {
+  none: '👜',
+  cabin: '🎒',
+  suitcase: '🧳',
+  bulky: '🚲',
+};
 
 // What a passenger can declare, and what a boot can be said to hold. Both match
 // the CHECK constraints in migration 00026: somebody with five things is moving

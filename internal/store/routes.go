@@ -64,8 +64,15 @@ type CreateRouteTemplateParams struct {
 	// rather than on the car for the same reason the detour budget does: "the
 	// boot is full of my own things today" is a statement about today.
 	Luggage domain.Luggage
-	// LuggageCapacity is how many items of that size the boot holds. Zero is
-	// only meaningful alongside a Luggage of 'none', which the schema enforces.
+	// LuggageCapacity is how many items of that size are free for passengers —
+	// not how big the boot is. Nothing in the schema models what the driver is
+	// bringing themselves, and the matcher subtracts only the luggage already
+	// booked by others (internal/match/gross.go), so anything the driver puts
+	// in the boot has to be out of this number before it is stored or the route
+	// promises room it does not have.
+	//
+	// Zero is only meaningful alongside a Luggage of 'none', which the schema
+	// enforces.
 	LuggageCapacity int
 	// ContributionShare is how much of the computed cost share this driver asks
 	// for. The app caps; the driver chooses. Zero means they did not say, which

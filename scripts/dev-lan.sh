@@ -51,7 +51,10 @@ DEV_MODE=true HTTP_ADDR="0.0.0.0:$API_PORT" \
 REGION_FIXTURE=fixtures/regions/greece.geojson \
   setsid ./bin/api < /dev/null > /tmp/api-lan.log 2>&1 &
 disown
-for _ in $(seq 20); do
+# 60s, not 20: the first boot after a schema change runs migrations before it
+# listens, and a run that gave up at 20 seconds was declared failed nine seconds
+# before the API answered.
+for _ in $(seq 60); do
   curl -fs -o /dev/null "http://$IP:$API_PORT/v1/regions" 2>/dev/null && break
   sleep 1
 done

@@ -3,6 +3,7 @@ package match_test
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,14 @@ const (
 	// A crossing route runs south→north through the middle of the corridor,
 	// sharing only the crossing point.
 	crossingWKT = "LINESTRING(25.90 40.75, 25.90 40.95)"
+	// The same corridor, but with a loop in the middle that brings the road
+	// back over the line it came in on: west along 40.85, north, west again,
+	// then south across its own path at (25.86, 40.85) before rejoining. Real
+	// OSRM output does this at every grade-separated junction, so a matcher
+	// that only ever sees lines with no crossings has not been tested against
+	// the roads it runs on.
+	selfCrossingCorridorWKT = "LINESTRING(25.80 40.85, 25.88 40.85, 25.88 40.87, " +
+		"25.86 40.87, 25.86 40.84, 25.90 40.84, 25.90 40.85, 26.00 40.85)"
 )
 
 type fixture struct {
@@ -489,5 +498,68 @@ func TestLuggageIsComparedBySizeAndNotAlphabetically(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A driver whose road crosses itself is still a driver going the passenger's
+// way. ST_LineLocatePoint returns the earliest position of minimum distance on
+// such a line rather than failing, so the ordering check and the shared-distance
+// floor still mean what they say; only a pin sitting within metres of the
+// crossing itself is ambiguous, and there the two candidate positions are half
+// a kilometre apart on the corridor that provoked this.
+func TestGrossMatchAcceptsARouteThatCrossesItself(t *testing.T) {
+	f := setup(t)
+
+	var simple bool
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT ST_IsSimple(ST_GeomFromText($1, 4326))`, selfCrossingCorridorWKT).Scan(&simple); err != nil {
+		t.Fatalf("checking the fixture: %v", err)
+	}
+	if simple {
+		t.Fatalf("the fixture %s does not cross itself", selfCrossingCorridorWKT)
+	}
+
+	f.addOccurrence(t, selfCrossingCorridorWKT)
+
+	got, err := match.Gross(context.Background(), f.pool, query())
+	if err != nil {
+		t.Fatalf("Gross: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d candidates, want 1: %+v", len(got), got)
+	}
+
+	// Exact, not merely ordered. "The fractions look sane" would pass just as
+	// well with the pickup placed on the wrong pass of the crossing, which is
+	// the one thing this route can get wrong.
+	//
+	// The numbers are geodesic, not planar, and that is not an accident of
+	// arithmetic — it is an accident of type inference. $1 reaches the query
+	// first as $1::geography inside the ST_DWithin, so PostgreSQL infers the
+	// parameter as geography, and ST_ClosestPoint and ST_LineLocatePoint then
+	// resolve to their geography overloads with route_geom cast to match. The
+	// fractions are therefore fractions of the line's length on the spheroid,
+	// which is the same quantity route_km is in and is why multiplying them
+	// together gives kilometres that mean anything.
+	//
+	// Planar would put the pickup at 0.02/0.30 = 0.0667 rather than 0.0627 —
+	// six percent of the corridor. If this test starts failing with those
+	// values, somebody moved the ST_DWithin and the whole matcher quietly went
+	// flat-earth.
+	const (
+		wantOrigin = 0.0626937
+		wantDest   = 0.9373058
+		tolerance  = 1e-7
+	)
+	if math.Abs(got[0].FractionOrigin-wantOrigin) > tolerance {
+		t.Errorf("pickup fraction %v, want %v", got[0].FractionOrigin, wantOrigin)
+	}
+	if math.Abs(got[0].FractionDest-wantDest) > tolerance {
+		t.Errorf("dropoff fraction %v, want %v", got[0].FractionDest, wantDest)
+	}
+	// The occurrence is 17 km long, so the shared stretch is all but the two
+	// ends the passenger is not on.
+	if want := (wantDest - wantOrigin) * 17.0; math.Abs(got[0].SharedKm-want) > 1e-5 {
+		t.Errorf("shared %v km, want %v", got[0].SharedKm, want)
 	}
 }

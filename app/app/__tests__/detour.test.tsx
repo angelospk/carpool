@@ -5,6 +5,12 @@ import type { ReactNode } from 'react';
 import PublishScreen from '../(tabs)/publish';
 import { api } from '../../src/api/endpoints';
 
+// The publish screen names a car now, and the car section offers the way to
+// the garage — so the screen reaches the router even though this test does not.
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+}));
+
 jest.mock('../../src/api/endpoints', () => ({
   api: { publishRoute: jest.fn(), places: jest.fn(), meetingPoints: jest.fn(), vehicles: jest.fn() },
   // The screen renders pickers built from these, so a mock that omits them
@@ -31,6 +37,24 @@ const pin = (label: string, lon: number, lat: number) => ({
 // Fills in enough of the form that the publish button becomes usable.
 async function fillRoute() {
   (api.places as jest.Mock).mockResolvedValue({ places: [pin('Αλεξανδρούπολη', 25.87, 40.84)] });
+  // A driver with no car cannot publish, and the screen now says so before the
+  // server does — so these tests need a garage with something in it.
+  (api.vehicles as jest.Mock).mockResolvedValue([
+    {
+      id: 'v1',
+      name: 'Toyota Yaris',
+      label: '',
+      make: 'Toyota',
+      model: 'Yaris',
+      fuel: 'petrol',
+      colour: 'λευκό',
+      plate: 'ΑΒΓ-1234',
+      consumption_l_100km: 5.6,
+      consumption_source: 'dataset',
+      consumption_capped: false,
+      is_default: true,
+    },
+  ]);
   render(wrap(<PublishScreen />));
 
   for (const field of ['publish-origin', 'publish-destination']) {

@@ -142,6 +142,45 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, out)
 }
 
+// handleMyRequests lists what the caller is still waiting on, and how far the
+// search for a driver has got.
+//
+// It is not guarded on deps.Asks the way posting a request is: this only reads
+// the pool, and a deployment wired without the matcher should still be able to
+// show somebody the requests they already have rather than answering 404 to a
+// screen that exists.
+func (d Deps) handleMyRequests(w http.ResponseWriter, r *http.Request) {
+	userID, ok := callerID(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
+		return
+	}
+
+	list, err := store.OpenRequests(r.Context(), d.Pool, userID, d.now(), 20)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not load your requests")
+		return
+	}
+
+	out := make([]map[string]any, 0, len(list))
+	for _, q := range list {
+		out = append(out, map[string]any{
+			"id":                q.ID,
+			"origin_label":      q.OriginLabel,
+			"destination_label": q.DestinationLabel,
+			"window_start":      q.WindowStart,
+			"window_end":        q.WindowEnd,
+			"seats":             q.Seats,
+			"status":            q.Status,
+			"drivers_asked":     q.DriversAsked,
+			"drivers_declined":  q.DriversDeclined,
+			"asking_now":        q.AskingNow,
+			"created_at":        q.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"requests": out})
+}
+
 func (d Deps) handleCancelRequest(w http.ResponseWriter, r *http.Request) {
 	userID, ok := callerID(r.Context())
 	if !ok {

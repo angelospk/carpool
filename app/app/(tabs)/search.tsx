@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { api, type LuggageSize } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
@@ -11,11 +11,12 @@ import { PlaceField } from '../../src/components/PlaceField';
 import { LuggagePicker } from '../../src/components/LuggagePicker';
 import { Estimate } from '../../src/components/Estimate';
 import { colors, space, type } from '../../src/design/tokens';
-import { type Pin } from '../../src/design/pin';
+import { pinsFromParams, type Pin } from '../../src/design/pin';
 
 export default function SearchScreen() {
   const { t } = useTranslation();
   const router = useRouter();
+  const queryClient = useQueryClient();
   // The place itself rather than the text naming it: PlaceField only hands one
   // up once it refers to somewhere real, and takes it back the moment the text
   // is edited.
@@ -25,6 +26,25 @@ export default function SearchScreen() {
   const [luggage, setLuggage] = useState<LuggageSize>('none');
   const [luggageCount, setLuggageCount] = useState(0);
   const [outcome, setOutcome] = useState<string | null>(null);
+
+  // Arriving from a suggestion on the home screen, both ends already known.
+  //
+  // The tab stays mounted, so this cannot simply run on every render: it would
+  // overwrite whatever the person typed after they got here. `preset` is the
+  // identity of the link, so pressing the same suggestion again fills the form
+  // again, while editing it afterwards is left alone.
+  const params = useLocalSearchParams<Record<string, string | string[]>>();
+  const preset = Array.isArray(params.preset) ? params.preset[0] : params.preset;
+  const applied = useRef<string | null>(null);
+  useEffect(() => {
+    if (!preset || applied.current === preset) return;
+    const pins = pinsFromParams(params);
+    if (!pins) return;
+
+    applied.current = preset;
+    setFrom(pins.from);
+    setTo(pins.to);
+  }, [preset, params]);
 
   const create = useMutation({
     mutationFn: () => {
@@ -49,6 +69,9 @@ export default function SearchScreen() {
       // No driver yet is a normal outcome, not an error: the request stays open
       // and the server asks someone when a route appears.
       setOutcome(res.asking ? t('search.asking') : t('search.noDrivers'));
+      // It belongs on the home screen from this moment, not from whenever that
+      // screen next happens to refetch.
+      void queryClient.invalidateQueries({ queryKey: ['requests'] });
       router.push(`/request/${res.request_id}`);
     },
     onError: (e) =>
@@ -58,7 +81,7 @@ export default function SearchScreen() {
   });
 
   return (
-    <Screen>
+    <Screen topInset>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Title>{t('search.title')}</Title>
 

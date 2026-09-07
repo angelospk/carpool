@@ -249,6 +249,20 @@ func newRoutingHarness(t *testing.T) *harness {
 		t.Skipf("%s is not set; skipping the routing test", OSRMEnv)
 	}
 
+	return newHarnessRoutedBy(t, base)
+}
+
+// newHarnessRoutedBy is newRoutingHarness with the routing service named
+// outright, so a test that needs one specific answer out of OSRM can stand up
+// an httptest server and hand over its URL.
+//
+// Deps.Router stays a concrete *geo.OSRM either way. The stub speaks HTTP, not
+// Go, so nothing in production has to become an interface for a test's benefit
+// — and what is exercised is the real decoder, the real ferry check and the
+// real WKT, which a Go-level fake would have replaced.
+func newHarnessRoutedBy(t *testing.T, base string) *harness {
+	t.Helper()
+
 	h := newHarness(t)
 	h.router = api.NewRouter(api.Deps{
 		Ready: h.pool.Ping, Pool: h.pool, Clock: h.clock, Location: testLocation(),

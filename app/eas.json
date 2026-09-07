@@ -5,7 +5,8 @@
       "//": "An APK you can sideload onto a phone. 'internal' makes the build URL install directly; 'apk' switches the Gradle task from bundleRelease to assembleRelease, which is what stops it producing an AAB the Play Store wants and a phone cannot open.",
       "distribution": "internal",
       "android": { "buildType": "apk" },
-      "env": { "EXPO_PUBLIC_API_URL": "http://192.168.1.10:8080" }
+      "//env": "A Tailscale address, not the LAN one: the phone that installs this APK is not always on the same wifi, and the URL is compiled into the bundle.",
+      "env": { "EXPO_PUBLIC_API_URL": "http://100.123.255.50:8080" }
     },
     "development": {
       "//": "A dev client: the same native code, but it loads JS from the Metro server, so a change shows up without another 20-minute build. This is also the only kind of build where Android push notifications work — Expo Go dropped them in SDK 53.",

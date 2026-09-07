@@ -45,29 +45,35 @@
     "save": "Save"
   },
   "contribution": {
-    "label": "What do you ask for towards the fuel?",
+    "label": "What about the fuel?",
     "share": {
       "100": "The whole share",
       "75": "Three quarters",
       "50": "Half",
       "25": "A quarter"
     },
-    "hint": "You decide what you ask for. The app works out what the trip burns and will not let you ask for more than your share — profit is not allowed. If you want nothing, choose “free” above."
+    "hint": "You decide what you ask for. The app works out what the trip burns and will not let you ask for more than your share, because profit is not allowed.",
+    "title": "Contribution",
+    "auto": "Worked out for me",
+    "autoHint": "The app works out the fuel share and suggests it to the passenger.",
+    "free": "Open contribution",
+    "freeHint": "No figure is suggested. Whatever the passenger gives is between the two of you.",
+    "less": "I ask for less than my share"
   },
   "estimate": {
     "about": "Estimated share of the fuel: about {{amount}}",
     "basis": "For {{km}} km, with a typical car and {{seats}} seats offered.",
-    "notAnOffer": "This is not an offer of a trip — no driver has been found or agreed. The real contribution appears with the specific car and may differ.",
+    "notAnOffer": "This is not an offer of a trip. No driver has been found or agreed. The real contribution appears with the specific car and may differ.",
     "upTo": "With a thirstier car, up to {{amount}}."
   },
   "garage": {
     "add": "Add a car",
     "addTitle": "The car",
     "capped": "capped for pricing",
-    "consumptionNotAsked": "We do not ask how much it drinks. We work it out from the car — which is what keeps the contribution below cost.",
+    "consumptionNotAsked": "We do not ask how much it drinks. We work it out from the car, which is what keeps the contribution below cost.",
     "drinks": "Priced at {{litres}} l/100 km",
     "empty": "You have not said what you drive yet.",
-    "engineCC": "Engine cc",
+    "engineCC": "Engine size (cc)",
     "fuel": {
       "petrol": "Petrol",
       "diesel": "Diesel",
@@ -82,12 +88,13 @@
     "make": "Make",
     "makeDefault": "Make it the default",
     "model": "Model",
-    "notACar": "I cannot work out what that drinks. Check the make, model and fuel.",
+    "notACar": "I cannot work out a consumption for this car. Check the engine size and the fuel.",
     "plate": "Plate",
     "retire": "Retire it",
     "sourceBand": "a floor for its class",
     "title": "My cars",
-    "tooMany": "That is as many cars as one account may keep."
+    "tooMany": "That is as many cars as one account may keep.",
+    "engineCCHint": "Field P.1 on the registration document. Without it there is no consumption to work out."
   },
   "home": {
     "asDriver": "Driving",
@@ -99,7 +106,17 @@
     "past": "Earlier rides",
     "again": "Again",
     "againAsked": "The driver has been asked",
-    "againNone": "No next trip with a free seat"
+    "againNone": "No next trip with a free seat",
+    "requests": "What you are waiting on",
+    "requestNobody": "No driver has been asked yet.",
+    "requestAsking": "A driver is being asked right now.",
+    "requestSearching": "Looking for the next driver.",
+    "requestWaiting": "Waiting for an answer.",
+    "requestDeclined_one": "{{count}} driver could not.",
+    "requestDeclined_other": "{{count}} drivers could not.",
+    "requestsFailed": "Your requests did not load.",
+    "suggestions": "Routes you take often",
+    "suggestionHint": "Tap one to ask for a seat again."
   },
   "luggage": {
     "bulky": "A bicycle, skis, a pushchair",
@@ -111,7 +128,12 @@
     "none": "A bag on my lap",
     "suitcase": "A suitcase",
     "countLabel": "How many bags?",
-    "driverCountLabel": "How many fit?"
+    "driverCountLabel": "How many luggage places are left for passengers?",
+    "bootTotal": "How many bags fit in total?",
+    "bootOwn": "Of those, how many are yours?",
+    "bootLeft_one": "1 place left for passengers.",
+    "bootLeft_other": "{{count}} places left for passengers.",
+    "bootNothingLeft": "No room left for passengers. Choose “a bag at your feet” above."
   },
   "map": {
     "unconfigured": "No map is configured on this deployment."
@@ -130,14 +152,15 @@
   "places": {
     "city": "city",
     "hamlet": "settlement",
-    "noMeetingPoints": "No meeting point is listed here — agree one between yourselves.",
+    "noMeetingPoints": "No meeting point is listed here. Agree one between yourselves.",
     "none": "No such place",
     "point": {
       "bus_station": "bus station",
       "train_station": "station",
       "port": "port",
       "fuel": "petrol station",
-      "parking": "car park"
+      "parking": "car park",
+      "other": "other"
     },
     "proposeBadName": "That name cannot be used.",
     "proposeDuplicate": "There is already a point there.",
@@ -159,7 +182,7 @@
     "bioLabel": "A few words about you",
     "bioPlaceholder": "e.g. I work in Alexandroupoli and drive down Tuesdays and Thursdays.",
     "chatty": "Happy to chat",
-    "hint": "These are not rules — they are what to expect.",
+    "hint": "These are not rules, they are what to expect.",
     "keep_to_myself": "I keep to myself",
     "music_on": "Music on",
     "no_pets": "No pets",
@@ -171,7 +194,7 @@
   },
   "price": {
     "consumptionIsAFloor": "The consumption is an approximation for the car's class.",
-    "dividedBy": "Divided by {{divisor}} — every seat and the driver",
+    "dividedBy": "Divided by {{divisor}} (every seat and the driver)",
     "explain": "How is this worked out?",
     "fuelForTheTrip": "Fuel: {{litres}} l/100 km × {{price}} €/l × {{km}} km",
     "mode": {
@@ -238,7 +261,17 @@
     "seatsN": "{{count}} seats",
     "title": "Publish a route",
     "until": "Until",
-    "whichCar": "Which car?"
+    "whichCar": "Which car?",
+    "noDriverProfile": "Add your car in your profile first, then publish the route.",
+    "carSection": "The car",
+    "seatsSection": "Seats and luggage",
+    "presetWeekdays": "Weekdays",
+    "presetWeekend": "Weekend",
+    "presetEveryday": "Every day",
+    "noCar": "You have not said what you drive yet.",
+    "addCar": "Add a car",
+    "changeCar": "Change",
+    "carFailed": "Your garage did not load."
   },
   "request": {
     "alreadyMatched": "A driver took your ride, so the request was not cancelled. If you can no longer go, cancel the booking from the trip.",
@@ -282,7 +315,7 @@
     "repeatTitle": "Repeats every {{day}}",
     "repeatWeekFull": "No seat on {{dates}}",
     "send": "Send",
-    "socialSelfDeclared": "Self-declared — we have not verified it",
+    "socialSelfDeclared": "Self-declared, we have not verified it",
     "title": "Trip",
     "portTitle": "The trip ends at the port",
     "portBody": "The rest of the way is by boat. The ferry ticket is not part of the price and is arranged separately."

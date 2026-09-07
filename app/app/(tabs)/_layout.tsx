@@ -56,7 +56,7 @@ function PillTabBar({ state, descriptors, navigation }: TabBarProps) {
               key={route.key}
               testID={`tab-${route.name}`}
               accessibilityRole="button"
-              accessibilityState={{ selected: focused }}
+              aria-selected={focused}
               accessibilityLabel={label}
               onPress={() => {
                 const event = navigation.emit({

@@ -398,6 +398,15 @@ type PastTrip struct {
 	Trip
 	BookingID  uuid.UUID
 	DriverName string
+
+	// Where this passenger actually got in and out, as stored on their own
+	// booking rather than as the route's endpoints. It is what makes a past
+	// ride repeatable from the search screen: a label alone names a town, and
+	// the app has no geocoder to turn one back into a point.
+	OriginLon float64
+	OriginLat float64
+	DestLon   float64
+	DestLat   float64
 }
 
 // PastTrips lists a passenger's completed rides, newest first.
@@ -413,7 +422,9 @@ func PastTrips(
 	rows, err := pool.Query(ctx, `
 		SELECT o.id, o.depart_earliest, o.depart_latest, o.status, o.route_km,
 		       t.origin_label, t.destination_label, b.price_eur, o.seats_free,
-		       b.id, u.name
+		       b.id, u.name,
+		       ST_X(b.pickup_point), ST_Y(b.pickup_point),
+		       ST_X(b.dropoff_point), ST_Y(b.dropoff_point)
 		FROM bookings b
 		JOIN trip_occurrences o ON o.id = b.occurrence_id
 		JOIN route_templates t  ON t.id = o.template_id
@@ -434,7 +445,8 @@ func PastTrips(
 		p.Role = RolePassenger
 		if err := rows.Scan(&p.OccurrenceID, &p.DepartEarliest, &p.DepartLatest, &p.Status,
 			&p.RouteKm, &p.OriginLabel, &p.DestLabel, &p.PriceEUR, &p.SeatsFree,
-			&p.BookingID, &p.DriverName); err != nil {
+			&p.BookingID, &p.DriverName,
+			&p.OriginLon, &p.OriginLat, &p.DestLon, &p.DestLat); err != nil {
 			return nil, fmt.Errorf("store: scanning a past trip: %w", err)
 		}
 		out = append(out, p)

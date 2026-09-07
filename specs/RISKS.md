@@ -287,9 +287,10 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
     ever argues otherwise. A driver-typed consumption of 14 is that argument
     breaking.
 
-14. **Half of the prefecture's main corridor cannot be published.**
-    `route_templates_geom_simple` rejects a route whose geometry is not simple,
-    and the reasoning is sound: `ST_LineLocatePoint` cannot place a point on a
+14. **Half of the prefecture's main corridor cannot be published — fixed
+    2026-09-02, with a matcher limitation accepted in its place.**
+    `route_templates_geom_simple` rejected a route whose geometry is not simple,
+    and the reasoning was sound: `ST_LineLocatePoint` cannot place a point on a
     self-intersecting line, and the gross match depends on it.
 
     Measured against real OSRM output on 3 August 2026:
@@ -305,14 +306,41 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
     edge case: it is the road the pilot exists to serve, and a driver who
     publishes their morning commute cannot publish the evening return.
 
-    Not fixed, because the fix is a choice rather than a patch.
-    `ST_RemoveRepeatedPoints` or a small `ST_Simplify` before storing would
-    likely make these simple, at the cost of the stored geometry no longer being
-    exactly what OSRM returned. The alternative is to stop depending on
-    `ST_LineLocatePoint`, which is a matcher change.
+    Measured again on 2 September 2026, this time against the whole-Greece
+    extract: of ten routes between 2.5 and 164 km, Αλεξανδρούπολη → Μάκρη came
+    back non-simple — 516 vertices, no repeated coordinate, one genuine crossing
+    at (25.75149, 40.85981). `ST_RemoveRepeatedPoints` changes nothing about it.
 
-    Discovered because `scripts/seed-demo.sh` could not publish the second
-    route, and the handler was throwing the reason away. It now logs it.
+    Fixed by migration 00031, which drops the constraint. Repairing the geometry
+    instead was rejected: `ST_Node`, `ST_UnaryUnion` and `ST_LineMerge` work on
+    planar linework rather than on an ordered traversal, so they can drop a
+    repeated pass, reverse a direction, or return a `MultiLineString`. The
+    stored line has to stay exactly the ordered sequence OSRM returned, because
+    that order is what every fraction along it means.
+
+    **What is now accepted, and is not fixed.** On a non-simple line
+    `ST_LineLocatePoint` returns the earliest position of minimum distance
+    rather than failing, so a pin within metres of a crossing can be placed on
+    the first pass instead of the second. On Αλεξανδρούπολη → Μάκρη the two
+    passes are 0.54 km apart on a 17.8 km line, which is why this was judged
+    cheaper than publishing nothing — but the bound is the route length, not
+    that gap. A route that revisits the same coordinate near both ends can have
+    a 5 km shared section read as nearly the whole route, or an `f_o`/`f_d` pair
+    read in the wrong order and dropped. Anything downstream that assumes a
+    monotonic fraction — toll attribution, detour, meeting points, progress —
+    inherits it.
+
+    The real fix is occurrence-aware projection: enumerate the candidate
+    segments with cumulative measures and choose the pickup/dropoff pair
+    jointly, rather than taking each endpoint's nearest position independently.
+    Even that cannot tell two levels of an interchange apart without edge
+    identity from OSRM. Nobody has needed it yet; when a mismatch is reported on
+    a route that crosses itself, this is the paragraph it belongs to.
+
+    First discovered because `scripts/seed-demo.sh` could not publish the second
+    route, and the handler was throwing the reason away. It now logs it — which
+    is how the reason was in hand within a minute the second time somebody hit
+    it, from the app rather than a script.
 
 15. **The place list stopped at the prefecture line — fixed 2026-08-04.**
     `internal/places` held 153 settlements harvested inside the Evros boundary,

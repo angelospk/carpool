@@ -1,9 +1,14 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 
-import { api, type LuggageSize, type MeetingPoint } from '../../src/api/endpoints';
+import {
+  api,
+  type LuggageSize,
+  type MeetingPoint,
+  type PricingMode,
+} from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import {
   Button,
@@ -18,11 +23,22 @@ import {
 } from '../../src/components/ui';
 import { VehiclePicker } from '../../src/components/VehiclePicker';
 import { LuggagePicker } from '../../src/components/LuggagePicker';
+import { BootShare } from '../../src/components/BootShare';
 import { ContributionChoice } from '../../src/components/ContributionChoice';
 import { colors, space, type } from '../../src/design/tokens';
 import { type Pin } from '../../src/design/pin';
 import { PlaceField } from '../../src/components/PlaceField';
 import { MeetingPointField } from '../../src/components/MeetingPointField';
+
+// The three answers that cover almost every published route. They replace the
+// set rather than adding to it: "καθημερινές" is a whole schedule, not five
+// separate taps, and a driver who wants Monday and Thursday still has the days
+// themselves underneath.
+const PRESETS = [
+  { key: 'presetWeekdays', days: [1, 2, 3, 4, 5] },
+  { key: 'presetWeekend', days: [6, 7] },
+  { key: 'presetEveryday', days: [1, 2, 3, 4, 5, 6, 7] },
+] as const;
 
 const WEEKDAYS = [
   { iso: 1, label: 'Δε' },
@@ -62,8 +78,17 @@ export default function PublishScreen() {
   const [luggage, setLuggage] = useState<LuggageSize>('suitcase');
   const [luggageCapacity, setLuggageCapacity] = useState(3);
   // All of it until the driver says otherwise, which is what every route
-  // published before they could choose was implicitly asking for.
+  // published before they could choose was implicitly asking for. The fraction
+  // is kept while the open contribution is selected, so switching to it and
+  // back does not quietly reset a driver who had chosen half.
   const [share, setShare] = useState(1);
+  const [pricing, setPricing] = useState<PricingMode>('formula');
+
+  // Shares react-query's cache with the picker below, so asking here costs no
+  // request. It is asked because an empty garage is the reason publishing is
+  // about to fail, and the button should say so before it is pressed.
+  const garage = useQuery({ queryKey: ['vehicles'], queryFn: api.vehicles });
+  const noCar = garage.isSuccess && garage.data.length === 0;
   const [outcome, setOutcome] = useState<string | null>(null);
 
 
@@ -89,13 +114,20 @@ export default function PublishScreen() {
         ...(vehicleID !== null ? { vehicle_id: vehicleID } : {}),
         luggage,
         luggage_capacity: luggageCapacity,
-        contribution_share: share,
+        pricing_mode: pricing,
+        // A fraction only means something under the formula. The server
+        // normalises it either way; sending it anyway would put a number in
+        // the request that the receipt could not later explain.
+        ...(pricing === 'formula' ? { contribution_share: share } : {}),
       }),
     onSuccess: (r) => setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`),
     onError: (e) =>
       setOutcome(
+        // The server's own wording is English, and it reached the screen
+        // verbatim: a Greek pilot user was told "add your car details before
+        // publishing a route". The code is the contract; the sentence is ours.
         e instanceof ApiError && (e.code === 'no_driver_profile' || e.code === 'no_vehicle')
-          ? e.message
+          ? t('publish.noDriverProfile')
           : t('common.error'),
       ),
   });
@@ -104,7 +136,7 @@ export default function PublishScreen() {
     setWeekdays((d) => (d.includes(iso) ? d.filter((x) => x !== iso) : [...d, iso].sort()));
 
   return (
-    <Screen>
+    <Screen topInset>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Title>{t('publish.title')}</Title>
 
@@ -144,9 +176,24 @@ export default function PublishScreen() {
           />
         </Card>
 
+        {/* The schedule is when the car goes, and nothing else. Seats, bags and
+            the fuel used to live in this card too, which made "πρόγραμμα" the
+            name of a box holding everything the form had not found a home
+            for. */}
         <SectionHeader title={t('publish.schedule')} />
         <Card>
           <Text style={styles.label}>{t('publish.recurring')}</Text>
+          <View style={styles.days}>
+            {PRESETS.map((p) => (
+              <Chip
+                key={p.key}
+                testID={`preset-${p.key}`}
+                label={t(`publish.${p.key}`)}
+                selected={sameDays(weekdays, p.days)}
+                onPress={() => setWeekdays([...p.days])}
+              />
+            ))}
+          </View>
           <View style={styles.days}>
             {WEEKDAYS.map((d) => (
               <Chip
@@ -176,8 +223,21 @@ export default function PublishScreen() {
               compact
             />
           </View>
+        </Card>
 
+        <SectionHeader title={t('publish.carSection')} />
+        <Card>
           <VehiclePicker testID="publish-vehicle" value={vehicleID} onChange={setVehicleID} />
+        </Card>
+
+        <SectionHeader title={t('publish.seatsSection')} />
+        <Card>
+          <View style={styles.seats}>
+            <Text style={styles.seatsLabel}>{t('publish.seats')}</Text>
+            <Stepper testID="publish-seats" value={seats} onChange={setSeats} min={1} max={6} />
+          </View>
+
+          <View style={styles.divider} />
 
           <LuggagePicker
             testID="publish-luggage"
@@ -188,12 +248,23 @@ export default function PublishScreen() {
             asDriver
           />
 
-          <ContributionChoice testID="publish-share" value={share} onChange={setShare} />
+          {/* Only while a size is chosen: with 'none' there is no capacity to
+              divide up, and the picker above has already hidden its own count
+              for the same reason. */}
+          {luggage !== 'none' ? (
+            <BootShare testID="publish-boot" onResult={setLuggageCapacity} />
+          ) : null}
+        </Card>
 
-          <View style={styles.seats}>
-            <Text style={styles.seatsLabel}>{t('publish.seats')}</Text>
-            <Stepper testID="publish-seats" value={seats} onChange={setSeats} min={1} max={6} />
-          </View>
+        <SectionHeader title={t('contribution.title')} />
+        <Card>
+          <ContributionChoice
+            testID="publish-share"
+            mode={pricing}
+            onModeChange={setPricing}
+            share={share}
+            onShareChange={setShare}
+          />
         </Card>
 
         {/* How far out of the way, for this trip. It is a question about today:
@@ -254,12 +325,13 @@ export default function PublishScreen() {
         </Card>
 
         {outcome ? <Hint>{outcome}</Hint> : null}
+        {noCar ? <Hint>{t('publish.noDriverProfile')}</Hint> : null}
 
         <Button
           testID="publish-submit"
           label={t('publish.publish')}
           onPress={() => publish.mutate()}
-          disabled={!from || !to || !weekdays.length || publish.isPending}
+          disabled={!from || !to || !weekdays.length || noCar || publish.isPending}
         />
       </ScrollView>
     </Screen>
@@ -282,6 +354,13 @@ const styles = StyleSheet.create({
 // this trip. Until then nothing is shown and nothing is sent, so this is never
 // mistaken for what their profile holds.
 const defaultDetourKm = 10;
+
+// Whether the days chosen are exactly a preset's, so the preset can read as
+// selected. Order is not part of the answer: the day chips keep the list
+// sorted, but a preset is a set either way.
+function sameDays(chosen: number[], preset: readonly number[]): boolean {
+  return chosen.length === preset.length && preset.every((d) => chosen.includes(d));
+}
 
 // "Φέρες, ΚΤΕΛ Έβρου" rather than either alone: the town is what somebody
 // recognises in a list and the landmark is what they drive to.

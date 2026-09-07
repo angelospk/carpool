@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react-native';
 
-import { PreferenceChips, PreferencePicker } from '../Preferences';
+import { PREFERENCE_EMOJI, PreferenceChips, PreferencePicker } from '../Preferences';
 import { type PreferenceTag } from '../../api/endpoints';
 
 describe('showing what a ride is like', () => {
@@ -71,7 +71,28 @@ describe('choosing your own', () => {
 
   test('what is already chosen reads as chosen', () => {
     render(<Picker initial={['pets_ok']} />);
-    expect(screen.getByTestId('pp-pets_ok').props.accessibilityState?.selected).toBe(true);
-    expect(screen.getByTestId('pp-no_pets').props.accessibilityState?.selected).toBe(false);
+    expect(screen.getByTestId('pp-pets_ok').props.accessibilityState?.checked).toBe(true);
+    expect(screen.getByTestId('pp-no_pets').props.accessibilityState?.checked).toBe(false);
+  });
+
+  // Nine pills in a wrapped row came out as three cramped columns of half-read
+  // words. One switch per line, with a glyph you read before the sentence.
+  test('every tag has a picture of its own', () => {
+    render(<Picker initial={[]} />);
+
+    const seen = Object.values(PREFERENCE_EMOJI);
+    expect(new Set(seen).size).toBe(seen.length);
+    expect(screen.getByText(PREFERENCE_EMOJI.no_smoking)).toBeTruthy();
+  });
+
+  // Colour alone is not a state somebody with any of the common kinds of
+  // colour blindness can read, and this is nine rows of it stacked.
+  test('on and off are words, not only a colour', () => {
+    render(<Picker initial={['no_smoking']} />);
+
+    const row = screen.getByTestId('pp-no_smoking');
+    expect(row.props.accessibilityRole).toBe('switch');
+    expect(screen.getAllByText('Ενεργό').length).toBe(1);
+    expect(screen.getAllByText('Ανενεργό').length).toBe(8);
   });
 });

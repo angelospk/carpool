@@ -112,7 +112,7 @@ export function ProposePoint({ place, testID }: { place: Pin; testID?: string })
             key={k}
             testID={testID ? `${testID}-kind-${k}` : undefined}
             accessibilityRole="radio"
-            accessibilityState={{ selected: kind === k }}
+            aria-selected={kind === k}
             onPress={() => setKind(k)}
             style={[styles.kind, kind === k && styles.kindChosen]}
           >

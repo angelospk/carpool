@@ -123,7 +123,7 @@ export default function ProfileScreen() {
     name !== null || facebook !== null || instagram !== null || bio !== null || tags !== null;
 
   return (
-    <Screen>
+    <Screen topInset>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Card>
           <View style={styles.identity}>
