@@ -135,6 +135,10 @@ export default function PublishScreen() {
   const toggle = (iso: number) =>
     setWeekdays((d) => (d.includes(iso) ? d.filter((x) => x !== iso) : [...d, iso].sort()));
 
+  // The boot calculator can land on zero, and zero cannot be sent alongside a
+  // luggage size: `route_templates` pairs a capacity of zero with 'none'.
+  const noBootLeft = luggage !== 'none' && luggageCapacity < 1;
+
   return (
     <Screen topInset>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
@@ -326,12 +330,16 @@ export default function PublishScreen() {
 
         {outcome ? <Hint>{outcome}</Hint> : null}
         {noCar ? <Hint>{t('publish.noDriverProfile')}</Hint> : null}
+        {/* A boot with nothing left in it and a luggage size still chosen is a
+            pair the database refuses. Saying so here is better than a 400 after
+            the driver has filled in everything else. */}
+        {noBootLeft ? <Hint>{t('publish.bootFullHint')}</Hint> : null}
 
         <Button
           testID="publish-submit"
           label={t('publish.publish')}
           onPress={() => publish.mutate()}
-          disabled={!from || !to || !weekdays.length || noCar || publish.isPending}
+          disabled={!from || !to || !weekdays.length || noCar || noBootLeft || publish.isPending}
         />
       </ScrollView>
     </Screen>

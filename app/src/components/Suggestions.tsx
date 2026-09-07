@@ -12,6 +12,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 
 import { api } from '../api/endpoints';
+import { useSession } from '../state/session';
 import { Card } from './ui';
 import { suggestRoutes } from '../design/suggestions';
 import { colors, space, type } from '../design/tokens';
@@ -27,8 +28,22 @@ export function Suggestions() {
   // from a re-render of the first, and quietly does nothing.
   const presses = useRef(0);
 
-  const past = useQuery({ queryKey: ['trips', 'past'], queryFn: () => api.pastTrips() });
-  const upcoming = useQuery({ queryKey: ['trips', 'upcoming'], queryFn: () => api.upcomingTrips() });
+  // The same guard the home screen carries, for the same reason: this section
+  // mounts inside the tab list before the session has settled, and an observer
+  // without the guard fires its own request without a token and gets a 401.
+  // Sharing the cache key is not sharing the `enabled` flag.
+  const signedIn = useSession((s) => s.status === 'signedIn');
+
+  const past = useQuery({
+    queryKey: ['trips', 'past'],
+    queryFn: () => api.pastTrips(),
+    enabled: signedIn,
+  });
+  const upcoming = useQuery({
+    queryKey: ['trips', 'upcoming'],
+    queryFn: () => api.upcomingTrips(),
+    enabled: signedIn,
+  });
 
   const suggestions = suggestRoutes(past.data?.trips ?? [], upcoming.data?.trips ?? []);
   if (suggestions.length === 0) return null;

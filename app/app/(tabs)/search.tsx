@@ -9,9 +9,11 @@ import { ApiError } from '../../src/api/client';
 import { Button, Card, Hint, Screen, Stepper, Title } from '../../src/components/ui';
 import { PlaceField } from '../../src/components/PlaceField';
 import { LuggagePicker } from '../../src/components/LuggagePicker';
+import { WhenPicker } from '../../src/components/WhenPicker';
 import { Estimate } from '../../src/components/Estimate';
 import { colors, space, type } from '../../src/design/tokens';
 import { pinsFromParams, type Pin } from '../../src/design/pin';
+import { departureWindow, type Band, type Day } from '../../src/design/when';
 
 export default function SearchScreen() {
   const { t } = useTranslation();
@@ -23,6 +25,10 @@ export default function SearchScreen() {
   const [from, setFrom] = useState<Pin | null>(null);
   const [to, setTo] = useState<Pin | null>(null);
   const [seats, setSeats] = useState(1);
+  // "Now" keeps the behaviour this screen always had; the difference is that it
+  // is now a visible answer rather than an assumption.
+  const [day, setDay] = useState<Day>('today');
+  const [band, setBand] = useState<Band>('now');
   const [luggage, setLuggage] = useState<LuggageSize>('none');
   const [luggageCount, setLuggageCount] = useState(0);
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -48,9 +54,9 @@ export default function SearchScreen() {
 
   const create = useMutation({
     mutationFn: () => {
-      // A two-hour window from now is the common case; the picker refines it.
-      const start = new Date();
-      const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+      // Read at the moment of sending rather than at render: somebody can sit
+      // on this screen for ten minutes, and "now" has to mean now.
+      const { start, end } = departureWindow(day, band, new Date());
       return api.createRequest({
         origin_lon: (from as Pin).lon,
         origin_lat: (from as Pin).lat,
@@ -112,6 +118,16 @@ export default function SearchScreen() {
 
           <Estimate testID="estimate" from={from} to={to} />
 
+          <WhenPicker
+            testID="when"
+            day={day}
+            band={band}
+            onChange={(next) => {
+              setDay(next.day);
+              setBand(next.band);
+            }}
+          />
+
           <LuggagePicker
             testID="luggage"
             value={luggage}
@@ -127,6 +143,8 @@ export default function SearchScreen() {
         </Card>
 
         {outcome ? <Hint>{outcome}</Hint> : null}
+
+        <Hint>{t('search.whatHappens')}</Hint>
 
         <Button
           testID="search-submit"

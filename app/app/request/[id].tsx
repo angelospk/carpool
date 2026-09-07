@@ -55,32 +55,41 @@ export default function RequestScreen() {
 
   return (
     <Screen>
-      <Title>{t('search.asking')}</Title>
+      {/* This is a receipt for something that has been asked, not a dispatch in
+          progress. The journey reads first and the pulse is a small mark beside
+          the status line, rather than a countdown filling the screen. */}
+      <Title>{t('request.title')}</Title>
 
       <Card>
-        {/* Asking is sequential and one driver at a time, so waiting is the
-            normal state here rather than a failure. */}
-        <View style={styles.pulse}>
-          <View style={styles.ring} />
-          <View style={styles.core} />
-        </View>
         {mine ? (
           <>
-            <Text testID="request-route" style={styles.route} numberOfLines={1}>
+            <Text testID="request-route" style={styles.route}>
               {mine.origin_label} → {mine.destination_label}
             </Text>
             <Text style={styles.when}>
               {athensDay(mine.window_start)} · {athensTime(mine.window_start)}–
               {athensTime(mine.window_end)}
             </Text>
-            <Text testID="request-progress" style={styles.progress}>
-              {requestProgress(mine, t)}
-            </Text>
+            <View style={styles.status}>
+              {/* Asking is sequential and one driver at a time, so waiting is
+                  the normal state here rather than a failure. */}
+              <View style={styles.core} />
+              <Text testID="request-progress" style={styles.progress}>
+                {requestProgress(mine, t)}
+              </Text>
+            </View>
           </>
         ) : (
+          // Not in the open list means matched, cancelled, expired, or simply
+          // not loaded yet. None of those is "nobody is driving", so this must
+          // not be read as an answer about supply.
           <Hint>{t('search.noDrivers')}</Hint>
         )}
       </Card>
+
+      {/* Nobody should sit here watching. Saying so is the difference between a
+          waiting room and a thing you can walk away from. */}
+      <Hint>{t('request.leaveOk')}</Hint>
 
       {outcome ? (
         <Text testID="request-outcome" style={styles.outcome}>
@@ -97,38 +106,36 @@ export default function RequestScreen() {
           onPress={() => router.replace('/(tabs)')}
         />
       ) : (
-        <Button
-          testID="cancel-request"
-          label={t('common.cancel')}
-          variant="secondary"
-          onPress={() => cancel.mutate()}
-          disabled={cancel.isPending}
-        />
+        <View style={styles.actions}>
+          {/* Leaving is the ordinary thing to do, so it is the ordinary button.
+              A bare "Ακύρωση" beside it would read as cancelling the screen. */}
+          <Button
+            testID="request-back-home"
+            label={t('request.backHome')}
+            onPress={() => router.replace('/(tabs)')}
+          />
+          <Button
+            testID="cancel-request"
+            label={t('request.cancel')}
+            variant="secondary"
+            onPress={() => cancel.mutate()}
+            disabled={cancel.isPending}
+          />
+        </View>
       )}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  pulse: { alignItems: 'center', justifyContent: 'center', height: 96 },
-  ring: {
-    position: 'absolute',
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    borderWidth: 2,
-    borderColor: colors.accentSoft,
-  },
-  core: { width: 18, height: 18, borderRadius: 9, backgroundColor: colors.accent },
-  route: { ...type.body, color: colors.ink, textAlign: 'center' },
-  when: { ...type.caption, color: colors.muted, marginTop: 2, textAlign: 'center' },
-  progress: {
-    ...type.caption,
-    color: colors.accent,
-    fontWeight: '700',
-    marginTop: space.xs,
-    textAlign: 'center',
-  },
+  // Place names wrap rather than truncate: "Αλεξανδρούπολη → Πεπλος" cut at
+  // one line is a journey nobody can check.
+  route: { ...type.title, color: colors.ink },
+  when: { ...type.body, color: colors.muted, marginTop: 2 },
+  status: { flexDirection: 'row', alignItems: 'center', gap: space.xs, marginTop: space.md },
+  core: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },
+  progress: { ...type.caption, color: colors.accent, fontWeight: '700', flex: 1 },
   outcome: { ...type.body, color: colors.danger },
   spacer: { flex: 1 },
+  actions: { gap: space.sm },
 });

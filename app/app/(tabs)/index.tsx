@@ -14,9 +14,9 @@ import {
   Badge,
   Card,
   RouteSpine,
+  Button,
   Screen,
   SectionHeader,
-  SeatPips,
 } from '../../src/components/ui';
 import { RouteGlyph, decodeRoute } from '../../src/components/RouteGlyph';
 import { colors, space, type } from '../../src/design/tokens';
@@ -87,7 +87,7 @@ export default function HomeScreen() {
           !requests.isError &&
           !past.isError
         }
-        emptyLabel={t('home.empty')}
+        emptySlot={<FirstRun onAsk={() => router.push('/search')} onOffer={() => router.push('/publish')} />}
       >
         <FlatList
           testID="trip-list"
@@ -155,27 +155,69 @@ function NextTrip({ trip, onPress }: { trip: TripSummary; onPress: () => void })
         />
       </View>
 
+      {/* The names first and the drawing second. A long Greek place name is
+          what somebody recognises the journey by; the glyph is texture. */}
       <View style={styles.nextBody}>
-        <RouteGlyph
-          points={decodeRoute(detail.data?.route_polyline)}
-          seed={`${trip.origin_label}${trip.destination_label}`}
-          width={104}
-          height={92}
-          testID="route-glyph"
-        />
         <View style={styles.nextRoute}>
           <RouteSpine from={trip.origin_label} to={trip.destination_label} />
         </View>
+        <RouteGlyph
+          points={decodeRoute(detail.data?.route_polyline)}
+          seed={`${trip.origin_label}${trip.destination_label}`}
+          width={72}
+          height={64}
+          testID="route-glyph"
+        />
       </View>
 
       <View style={styles.footer}>
-        <SeatPips free={trip.seats_free} total={trip.seats_free + 1} testID="seat-pips" />
+        {/* Said in words rather than in pips. The pips drew a total of
+            `seats_free + 1`, which is not the car's capacity and never was —
+            it made a five-seater with one seat left look like a two-seater. */}
+        <Text testID="seats-free" style={styles.meta}>
+          {trip.seats_free > 0
+            ? t('home.seatsFree', { count: trip.seats_free })
+            : t('home.seatsFull')}
+        </Text>
         <Text style={styles.meta}>{trip.route_km.toFixed(1)} χλμ</Text>
         {trip.price_eur > 0 ? (
-          <Text style={styles.price}>{trip.price_eur.toFixed(2)} €</Text>
+          <View style={styles.priceBox}>
+            {/* Bare euros beside a journey reads as a fare. It is not one. */}
+            <Text style={styles.priceLabel}>{t('home.contribution')}</Text>
+            <Text style={styles.price}>{trip.price_eur.toFixed(2)} €</Text>
+          </View>
         ) : null}
       </View>
     </Card>
+  );
+}
+
+/**
+ * What the home screen says before anything has happened.
+ *
+ * "Δεν έχεις επόμενες διαδρομές" is true and useless: it tells a new arrival
+ * nothing about what this is or what to do, at the exact moment they have the
+ * most questions and the least patience. In a region of this size the honest
+ * thing is also the useful one — say what the app does, say that somebody may
+ * not turn up straight away, and offer both sides of the deal, because whoever
+ * is reading this is as likely to have a car as to need one.
+ */
+function FirstRun({ onAsk, onOffer }: { onAsk: () => void; onOffer: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <View testID="empty" style={styles.firstRun}>
+      <Text style={styles.firstRunTitle}>{t('home.emptyTitle')}</Text>
+      <Text style={styles.firstRunBody}>{t('home.emptyBody')}</Text>
+      <View style={styles.firstRunActions}>
+        <Button testID="empty-ask" label={t('home.emptyAskSeat')} onPress={onAsk} />
+        <Button
+          testID="empty-offer"
+          label={t('home.emptyOfferSeat')}
+          variant="secondary"
+          onPress={onOffer}
+        />
+      </View>
+    </View>
   );
 }
 
@@ -226,7 +268,14 @@ const styles = StyleSheet.create({
 
   footer: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   meta: { ...type.caption, color: colors.muted },
-  price: { ...type.label, color: colors.primary, marginLeft: 'auto' },
+  priceBox: { marginLeft: 'auto', alignItems: 'flex-end' },
+  priceLabel: { ...type.caption, color: colors.muted, fontSize: 11 },
+  price: { ...type.label, color: colors.primary },
+
+  firstRun: { flex: 1, justifyContent: 'center', gap: space.md, paddingBottom: 80 },
+  firstRunTitle: { ...type.display, fontSize: 26, color: colors.ink },
+  firstRunBody: { ...type.body, color: colors.muted },
+  firstRunActions: { gap: space.sm, marginTop: space.sm },
 
   rowCard: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   rowWhen: { alignItems: 'center', gap: 6 },

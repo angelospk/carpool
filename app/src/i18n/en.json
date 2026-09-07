@@ -116,7 +116,15 @@
     "requestDeclined_other": "{{count}} drivers could not.",
     "requestsFailed": "Your requests did not load.",
     "suggestions": "Routes you take often",
-    "suggestionHint": "Tap one to ask for a seat again."
+    "suggestionHint": "Tap one to ask for a seat again.",
+    "emptyTitle": "Where do you usually go?",
+    "emptyBody": "Shared journeys around Evros, with drivers already going that way. Early on, somebody may not turn up straight away.",
+    "emptyAskSeat": "I need a seat",
+    "emptyOfferSeat": "I have a seat in my car",
+    "seatsFree_one": "{{count}} seat free",
+    "seatsFree_other": "{{count}} seats free",
+    "seatsFull": "Full",
+    "contribution": "Suggested contribution"
   },
   "luggage": {
     "bulky": "A bicycle, skis, a pushchair",
@@ -271,23 +279,28 @@
     "noCar": "You have not said what you drive yet.",
     "addCar": "Add a car",
     "changeCar": "Change",
-    "carFailed": "Your garage did not load."
+    "carFailed": "Your garage did not load.",
+    "bootFullHint": "Your own luggage fills the boot. Pick “None” for luggage to publish with no space, or leave one place free."
   },
   "request": {
     "alreadyMatched": "A driver took your ride, so the request was not cancelled. If you can no longer go, cancel the booking from the trip.",
     "seeMyTrips": "See your trips",
-    "title": "Your request"
+    "title": "Your request",
+    "backHome": "Back to home",
+    "cancel": "Cancel request",
+    "leaveOk": "You can close the app. We will notify you as soon as a driver accepts."
   },
   "search": {
     "asking": "Asking a driver…",
     "from": "From",
     "noDrivers": "No driver right now. We'll let you know.",
     "placeholder": "Type a town or village",
-    "post": "Send request",
+    "post": "Ask for a seat",
     "seats": "Seats",
-    "title": "Find a ride",
+    "title": "Ask for a seat",
     "to": "To",
-    "when": "When"
+    "when": "When",
+    "whatHappens": "We ask drivers heading that way, one at a time, and tell you as soon as somebody says yes. Nothing is charged."
   },
   "trip": {
     "cancel": "Cancel trip",
@@ -358,5 +371,15 @@
     "5": "Fri",
     "6": "Sat",
     "7": "Sun"
+  },
+  "when": {
+    "today": "Today",
+    "tomorrow": "Tomorrow",
+    "now": "Now",
+    "morning": "Morning",
+    "midday": "Midday",
+    "afternoon": "Afternoon",
+    "evening": "Evening",
+    "summary": "{{day}}, {{from}}–{{to}}"
   }
 }

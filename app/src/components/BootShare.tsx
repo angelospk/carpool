@@ -32,8 +32,8 @@ export function BootShare({
   onResult,
   testID,
 }: {
-  /** Called with the places that remain, whenever both halves are known and
-      the answer is one the form can hold. */
+  /** Called with the places that remain as soon as both halves are known —
+      including zero, which the form cannot send but must not hide. */
   onResult: (available: number) => void;
   testID?: string;
 }) {
@@ -51,10 +51,12 @@ export function BootShare({
     setTotal(nextTotal);
     setOwn(nextOwn);
     if (nextTotal === null || nextOwn === null) return;
-    const remaining = nextTotal - nextOwn;
     // Zero is a real answer and not one this field can carry: the CHECK pairs a
-    // capacity of zero with the size 'none'. It is said rather than sent.
-    if (remaining > 0) onResult(remaining);
+    // capacity of zero with the size 'none'. It is still reported, because the
+    // alternative was worse — swallowing it left the previous, larger number in
+    // the form, so a driver who said "the boot is full" published a promise of
+    // three places. The publish screen refuses the pair instead.
+    onResult(nextTotal - nextOwn);
   };
 
   return (

@@ -1004,9 +1004,32 @@ wrong enough to matter:
 overlap is worth an offer, and every candidate arrives carrying it as
 `SharedKm`. Pricing was the one place that went and measured something else.
 Because the filter that admits a candidate has already established that the
-stops are in order and the arc is at least a kilometre, there is no failure mode
+stops are in order and the arc is at least a kilometre, there is no error path
 to fall back from: no extra query, no second projection to disagree with the
-first, no error path.
+first.
+
+**Amended 2026-09-07, after migration 31.** "No failure mode" was written when
+every stored route was required to be simple. Migration 31 dropped that
+constraint, because real roads cross themselves and the Αλεξανδρούπολη → Μάκρη
+route could not be published. On a self-crossing line `ST_LineLocatePoint`
+returns the earliest position of minimum distance rather than failing, so a stop
+sitting within metres of a crossing can be located on the first pass when the
+passenger means the second. Two consequences for pricing, both bounded:
+
+- The arc can be measured over the wrong passage, which on the measured route is
+  0.54 km of difference. The figure stays a suggestion, and the gross filter's
+  one-kilometre floor still applies, so it cannot turn a short hop into a long
+  one.
+- If both stops land on reversed passages, `f_d - f_o` can come out negative;
+  the filter rejects the candidate before pricing sees it, so this shows up as
+  a trip that is never offered rather than as a negative price.
+
+What is not claimed any more is that the arc is exact for every stored route.
+It is exact for a simple one — which is nearly all of them — and on the rest it
+is the arc of whichever passage the projection chose. Fixing this properly means
+carrying the intended fraction from the match rather than re-projecting, and
+that is worth doing when a corridor with a crossing carries real traffic, not
+before.
 
 `BasisVersion` is 3, and a receipt now records `trip_km_source`. A receipt
 without one was written before this and is read as the straight line, because a

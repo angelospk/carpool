@@ -70,7 +70,24 @@ test('shows the next departure in Athens time, with its route glyph', async () =
 
   expect(await screen.findByText('07:30')).toBeTruthy();
   expect(screen.getByTestId('route-glyph')).toBeTruthy();
-  expect(screen.getByTestId('seat-pips')).toBeTruthy();
+  // In words, not in pips. The pips drew a total of `seats_free + 1`, so a
+  // five-seater with two seats left rendered as a three-seater.
+  expect(screen.getByTestId('seats-free')).toHaveTextContent(/2/);
+});
+
+// Somebody opening the app for the first time has nothing booked and no
+// history, which used to produce "δεν έχεις επόμενες διαδρομές" and no way in.
+test('an account with nothing on it is offered both sides of the deal', async () => {
+  (api.upcomingTrips as jest.Mock).mockResolvedValue({ trips: [] });
+  (api.pastTrips as jest.Mock).mockResolvedValue({ trips: [] });
+
+  render(wrap(<HomeScreen />));
+
+  fireEvent.press(await screen.findByTestId('empty-ask'));
+  await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/search'));
+
+  fireEvent.press(screen.getByTestId('empty-offer'));
+  await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/publish'));
 });
 
 test('opens a trip when its card is pressed', async () => {

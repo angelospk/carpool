@@ -184,18 +184,32 @@ describe('the boot, minus what the driver is bringing', () => {
   // Zero places left is a real answer, but it is not one this field can carry:
   // the CHECK in migration 00026 pairs a capacity of zero with the size 'none'.
   // Saying so is better than quietly clamping the driver's own luggage down to
-  // leave one place they did not say they had.
-  test('taking the whole boot says so instead of publishing a lie', async () => {
+  // leave one place they did not say they had — and better than the earlier
+  // behaviour, which said so on screen and then published the stale 3 anyway.
+  test('taking the whole boot blocks publishing rather than sending the old number', async () => {
     await fillRoute();
 
     fireEvent.press(screen.getByTestId('boot-total-2'));
     fireEvent.press(screen.getByTestId('boot-own-2'));
 
     expect(screen.getByTestId('boot-nothing-left')).toBeTruthy();
+    expect(screen.getByTestId('publish-submit')).toBeDisabled();
+    fireEvent.press(screen.getByTestId('publish-submit'));
+    await waitFor(() => expect(api.publishRoute).not.toHaveBeenCalled());
+  });
+
+  // Freeing a place again has to re-open the form: a guard that latches is a
+  // driver stuck on a screen with no way forward and no message saying why.
+  test('leaving a place free again lets the route go out, with the real number', async () => {
+    await fillRoute();
+
+    fireEvent.press(screen.getByTestId('boot-total-2'));
+    fireEvent.press(screen.getByTestId('boot-own-2'));
+    fireEvent.press(screen.getByTestId('boot-own-1'));
+
     fireEvent.press(screen.getByTestId('publish-submit'));
     await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
-    const body = (api.publishRoute as jest.Mock).mock.calls[0][0];
-    expect(body.luggage_capacity).toBeGreaterThan(0);
+    expect((api.publishRoute as jest.Mock).mock.calls[0][0].luggage_capacity).toBe(1);
   });
 
   test('an untouched calculator changes nothing about what is sent', async () => {

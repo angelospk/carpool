@@ -475,6 +475,7 @@ export function AsyncState({
   onRetry,
   empty,
   emptyLabel,
+  emptySlot,
   children,
 }: {
   loading: boolean;
@@ -482,6 +483,8 @@ export function AsyncState({
   onRetry?: () => void;
   empty?: boolean;
   emptyLabel?: string;
+  /** Shown instead of `emptyLabel` when there is something to offer instead. */
+  emptySlot?: ReactNode;
   children: ReactNode;
 }) {
   if (loading) return <ActivityIndicator testID="loading" color={colors.primary} style={styles.centered} />;
@@ -498,6 +501,9 @@ export function AsyncState({
   }
 
   if (empty) {
+    // An empty screen is the first thing most people will see, so it is the
+    // one place worth handing a caller the whole space rather than a sentence.
+    if (emptySlot) return <>{emptySlot}</>;
     return (
       <View style={styles.centered}>
         <Text testID="empty" style={styles.hint}>
