@@ -41,9 +41,14 @@ func TestContactDetailsAreFound(t *testing.T) {
 		// Digits that are not ASCII digits.
 		{"６９４１２３４５６７", ContactPhone},
 
-		// Zero-width characters wedged into the middle.
-		{"giannis@gm​ail.com", ContactEmail},
-		{"694‍1234567", ContactPhone},
+		// Zero-width characters wedged into the middle. Written as escapes
+		// rather than as the characters themselves: pasted literally they are
+		// invisible in the source, so the two lines below looked like ordinary
+		// duplicates of cases above and the point of the test was unreadable.
+		// This is also what ST1018 asks for, which is how the file stopped
+		// being the reason `make check` failed.
+		{"giannis@gm\u200bail.com", ContactEmail},
+		{"694\u200d1234567", ContactPhone},
 	} {
 		got, kind := HasContactDetails(tt.in)
 		if !got {

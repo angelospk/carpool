@@ -34,16 +34,6 @@ func requestFor(t *testing.T, w *world, bookingID uuid.UUID) uuid.UUID {
 	return id
 }
 
-func requestStatus(t *testing.T, w *world, requestID uuid.UUID) string {
-	t.Helper()
-	var s string
-	if err := w.pool.QueryRow(context.Background(),
-		`SELECT status FROM ride_requests WHERE id = $1`, requestID).Scan(&s); err != nil {
-		t.Fatalf("reading the request: %v", err)
-	}
-	return s
-}
-
 // reopensQueuedFor counts the recovery events recorded for a request.
 //
 // The cancelling transaction records that a seat was lost; the dispatcher does
