@@ -431,6 +431,47 @@ resolution was chosen and logged here. Source: Codex plan review (high effort),
     could have done in one tap. This is the first thing the map should fix when
     there is one.
 
+18. **A clipped routing extract invents routes instead of refusing them —
+    MEASURED and fixed 2026-09-17.** This is the one on this list that was
+    quietly producing wrong data in the pricing path.
+
+    OSRM does not refuse a coordinate its extract does not cover. It snaps to
+    the nearest road it does have and answers `Ok`. Measured against
+    `evros-buffered`, the artifact production serves:
+
+    | Coordinate | Snapped | Result |
+    | --- | --- | --- |
+    | Αλεξανδρούπολη, Κομοτηνή | 0,0 km | correct |
+    | Ξάνθη (edge of the clip) | 6,5 km | correct enough |
+    | Θεσσαλονίκη | 173 km | fabricated |
+    | Αθήνα | 313 km | fabricated |
+    | Πάτρα | 408 km | fabricated |
+
+    Θεσσαλονίκη → Αθήνα returned `Ok` with a 186,6 km route drawn through
+    Thrace. Nothing downstream could tell that from a real answer: it is the
+    geometry stored in `route_templates.route_geom`, the line
+    `ST_LineLocatePoint` locates pickups along, and the distance the
+    contribution formula is applied to. A driver publishing a journey outside
+    the extract got a plausible number for a road in the wrong prefecture.
+
+    Why it survived: the only geographic gate is `RegionAt`, which asks whether
+    a point is in Greece, and the shipped region fixture is all 75 prefectures.
+    "In Greece" and "in the routing extract" had silently become different
+    questions the day the extract was clipped, and nothing asked the second one.
+
+    Fixed by sending a snapping bound on every routing call —
+    `geo.SnapRadiusMetres`, 20 km — chosen from the gap in the table above
+    rather than picked: an order of magnitude above the worst legitimate snap
+    and an order of magnitude below the best fabrication. OSRM then answers
+    `NoSegment`, which had a sentinel error and no handler and so surfaced as a
+    502; publishing and estimating now answer `400 outside_service_area`.
+
+    **Consequence for deployment.** The served area is whatever the deployed
+    extract covers, and that is now enforced rather than documented. Swapping
+    `OSRM_EXTRACT` changes which trips the app accepts, so the extract is a
+    product decision and not only a memory one. If the radius is ever widened
+    past the clip's buffer, the fabrication comes back.
+
 ## The legal premise is thinner than the code assumes (raised 2026-08-05)
 
 Every comment in the pricing path leans on the same sentence: άρθρο 18

@@ -13,7 +13,7 @@
 # which Go builds the product.
 STATICCHECK := go run honnef.co/go/tools/cmd/staticcheck@v0.8.1
 
-.PHONY: check vet staticcheck test test-race build clean
+.PHONY: check vet staticcheck test test-race test-routed build clean
 
 ## check: the full gate — everything CI runs
 check: vet staticcheck test
@@ -28,6 +28,23 @@ staticcheck:
 ## (integration tests skip themselves otherwise)
 test:
 	go test ./...
+
+## test-routed: the tests that need a real OSRM as well as a database.
+##
+## They skip without CARPOOL_TEST_OSRM, which means `make check` does not run
+## them and did not say so. What they cover is the one thing a handler test
+## cannot: whether the deployed routing extract actually holds the roads the
+## served area claims — a clipped extract answers Ok for a coordinate it does
+## not have, so this is not a question that fails loudly on its own.
+##
+## Point it at the extract you are about to ship:
+##   CARPOOL_TEST_OSRM=http://127.0.0.1:5000 make test-routed
+test-routed:
+	@test -n "$$CARPOOL_TEST_OSRM" || \
+		{ echo "set CARPOOL_TEST_OSRM to a running osrm-routed, e.g. http://127.0.0.1:5000"; exit 1; }
+	@test -n "$$CARPOOL_TEST_DSN" || \
+		{ echo "set CARPOOL_TEST_DSN as well: these tests need a database too"; exit 1; }
+	go test ./internal/api/ -run "AcrossAPrefectureBoundary|OutsideTheRoutedArea" -count=1 -v
 
 ## test-race: the same suite under the race detector
 test-race:

@@ -77,6 +77,23 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Both labels are what somebody else will read: on a trip card, and — since
+	// the demand count — aggregated into a line put in front of every driver in
+	// the area. They arrive from the client and nothing checked them, so the
+	// only ceiling was the 64 KiB body.
+	originLabel, err := domain.NormalisePlaceLabel(body.OriginLabel)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request",
+			"the pickup needs a name somebody can read")
+		return
+	}
+	destinationLabel, err := domain.NormalisePlaceLabel(body.DestinationLabel)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request",
+			"the destination needs a name somebody can read")
+		return
+	}
+
 	// Both ends have to be in the country. Nothing narrower.
 	//
 	// This used to require one end inside the passenger's own prefecture, which
@@ -109,7 +126,7 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var requestID uuid.UUID
-	err := d.Pool.QueryRow(r.Context(), `
+	err = d.Pool.QueryRow(r.Context(), `
 		INSERT INTO ride_requests (passenger_id, origin, destination, origin_label, destination_label,
 		                           window_start, window_end, seats, kind, status, luggage, luggage_count)
 		VALUES ($1,
@@ -118,7 +135,7 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		        $6, $7, $8, $9, $10, 'open', 'open', $11::luggage_size, $12)
 		RETURNING id`,
 		userID, body.OriginLon, body.OriginLat, body.DestinationLon, body.DestinationLat,
-		body.OriginLabel, body.DestinationLabel, body.WindowStart, body.WindowEnd, body.Seats,
+		originLabel, destinationLabel, body.WindowStart, body.WindowEnd, body.Seats,
 		string(luggage), count).Scan(&requestID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "the request was rejected")

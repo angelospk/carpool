@@ -63,8 +63,18 @@ func newCorridorWorld(t *testing.T) *corridorWorld {
 	return w
 }
 
-// route publishes a template along the given line for a new driver.
+// route publishes a template along the given line for a new driver, with an
+// open-ended recurring schedule on top of it — the ordinary case, and what a
+// completed publish leaves behind. Tests about schedules that have run out, or
+// about a template with none, use template() and schedule() directly.
 func (w *corridorWorld) route(t *testing.T, line string, active bool) uuid.UUID {
+	t.Helper()
+	id := w.template(t, line, active)
+	w.schedule(t, id, "recurring", nil, nil, nil)
+	return id
+}
+
+func (w *corridorWorld) template(t *testing.T, line string, active bool) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
 	w.drivers++
@@ -138,16 +148,19 @@ func TestTwoRoutesFromOneDriverAreOneDriver(t *testing.T) {
 		`SELECT driver_id FROM route_templates WHERE id = $1`, id).Scan(&driverID); err != nil {
 		t.Fatalf("reading the driver: %v", err)
 	}
-	if _, err := w.pool.Exec(context.Background(), `INSERT INTO route_templates
+	var second uuid.UUID
+	if err := w.pool.QueryRow(context.Background(), `INSERT INTO route_templates
 		(driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 		 route_geom, route_km, route_min, osrm_data_version)
 		VALUES ($1, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default),
 		        ST_SetSRID(ST_MakePoint(25.87, 40.85), 4326),
 		        ST_SetSRID(ST_MakePoint(26.17, 40.90), 4326), 'Από', 'Προς',
 		        ST_SetSRID(ST_GeomFromText('LINESTRING(25.87 40.85, 26.17 40.90)'), 4326),
-		        28.6, 25, 'test')`, driverID); err != nil {
+		        28.6, 25, 'test')
+		RETURNING id`, driverID).Scan(&second); err != nil {
 		t.Fatalf("seeding a second route: %v", err)
 	}
+	w.schedule(t, second, "recurring", nil, nil, nil)
 
 	if got := onlyRequest(t, w).DriversOnCorridor; got != 1 {
 		t.Errorf("drivers on corridor = %d, want 1", got)
@@ -211,16 +224,101 @@ func TestYourOwnRouteIsNotADriverForYourOwnRequest(t *testing.T) {
 		t.Fatalf("giving the passenger a driver profile: %v", err)
 	}
 	testdb.GiveEveryDriverACar(t, w.pool)
-	if _, err := w.pool.Exec(context.Background(), `INSERT INTO route_templates
+	var mine uuid.UUID
+	if err := w.pool.QueryRow(context.Background(), `INSERT INTO route_templates
 		(driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 		 route_geom, route_km, route_min, osrm_data_version)
 		VALUES ($1, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default),
 		        ST_SetSRID(ST_MakePoint(25.87, 40.85), 4326),
 		        ST_SetSRID(ST_MakePoint(26.17, 40.90), 4326), 'Από', 'Προς',
 		        ST_SetSRID(ST_GeomFromText('LINESTRING(25.87 40.85, 26.17 40.90)'), 4326),
-		        28.6, 25, 'test')`, w.passenger); err != nil {
+		        28.6, 25, 'test')
+		RETURNING id`, w.passenger).Scan(&mine); err != nil {
 		t.Fatalf("seeding the passenger's own route: %v", err)
 	}
+	w.schedule(t, mine, "recurring", nil, nil, nil)
+
+	if got := onlyRequest(t, w).DriversOnCorridor; got != 0 {
+		t.Errorf("drivers on corridor = %d, want 0", got)
+	}
+}
+
+// schedule attaches a schedule to a template, which is what decides whether the
+// route can ever run again.
+func (w *corridorWorld) schedule(t *testing.T, templateID uuid.UUID, kind string,
+	oneoffDate, from, until any) {
+	t.Helper()
+	var weekdays any
+	if kind == "recurring" {
+		weekdays = []int{1, 2, 3, 4, 5}
+	}
+	if _, err := w.pool.Exec(context.Background(), `
+		INSERT INTO route_schedules
+		(template_id, kind, oneoff_date, weekdays, depart_earliest, depart_latest,
+		 effective_from, effective_until)
+		VALUES ($1, $2, $3, $4, '07:30', '08:00', coalesce($5::date, current_date), $6)`,
+		templateID, kind, oneoffDate, weekdays, from, until); err != nil {
+		t.Fatalf("seeding schedule: %v", err)
+	}
+}
+
+// A route that cannot run again is not somebody to wait for.
+//
+// `active` is the retire flag, and nothing sets it when a schedule simply runs
+// out: a one-off whose date has passed, or a recurring route past its
+// effective_until, stays active for ever. Counting those suppressed the "nobody
+// drives this road" sentence on the strength of a route that will never produce
+// another departure, which is the one thing that sentence exists to say.
+func TestAScheduleThatCannotRunAgainIsNotADriverOnTheCorridor(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		kind               string
+		oneoff, from, till any
+	}{
+		{"a one-off whose day has gone", "oneoff", "2026-09-01", "2026-08-01", nil},
+		{"a recurring route past its last day", "recurring", nil, "2026-08-01", "2026-09-10"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newCorridorWorld(t)
+			id := w.template(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+			w.schedule(t, id, tc.kind, tc.oneoff, tc.from, tc.till)
+
+			if got := onlyRequest(t, w).DriversOnCorridor; got != 0 {
+				t.Errorf("drivers on corridor = %d, want 0", got)
+			}
+		})
+	}
+}
+
+// And the ordinary cases still count, so the exclusion above has not simply
+// turned the number off.
+func TestAScheduleThatStillRunsIsADriverOnTheCorridor(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		kind               string
+		oneoff, from, till any
+	}{
+		{"a one-off still to come", "oneoff", "2026-09-30", "2026-09-01", nil},
+		{"a recurring route with no end", "recurring", nil, "2026-08-01", nil},
+		{"a recurring route ending later", "recurring", nil, "2026-08-01", "2026-12-31"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newCorridorWorld(t)
+			id := w.template(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+			w.schedule(t, id, tc.kind, tc.oneoff, tc.from, tc.till)
+
+			if got := onlyRequest(t, w).DriversOnCorridor; got != 1 {
+				t.Errorf("drivers on corridor = %d, want 1", got)
+			}
+		})
+	}
+}
+
+// A template with no schedule row at all. It cannot produce a departure either,
+// and it is the state a half-finished publish leaves behind.
+func TestATemplateWithNoScheduleIsNotADriverOnTheCorridor(t *testing.T) {
+	w := newCorridorWorld(t)
+	w.template(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
 
 	if got := onlyRequest(t, w).DriversOnCorridor; got != 0 {
 		t.Errorf("drivers on corridor = %d, want 0", got)

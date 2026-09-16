@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -30,6 +31,27 @@ type Corridor struct {
 	People int
 }
 
+// DemandFloor is how many different people must be waiting on a corridor before
+// it is reported at all.
+//
+// A corridor is two settlement names, and in a region of villages "one person
+// wants Πέπλος → Ορεστιάδα this week" is close to naming them. Polling makes it
+// worse than a single disclosure: a count that moves from two to three tells a
+// watcher somebody new started travelling, and a corridor appearing at all
+// tells them it became busy this week. A count on its own protects nobody once
+// it can be watched over time.
+//
+// Three, and the number is on the safe side on purpose. It is also the number
+// that decides whether this feature says anything at all in a market with no
+// users yet — which is the honest answer in that case, because a road one
+// person wants is not yet evidence that publishing it will find passengers. A
+// driver told nothing has lost nothing; a passenger identified cannot be
+// un-identified.
+//
+// If this is ever lowered, docs/legal/privacy-el.md has to be revisited with
+// it: what is disclosed to other users is a promise, not a setting.
+const DemandFloor = 3
+
 // Demand lists the corridors people are waiting on, busiest first.
 //
 // It exists because a driver who has published nothing has no reason to publish
@@ -47,7 +69,8 @@ type Corridor struct {
 // this package: the period is a product decision the API states, and a test has
 // to be able to put the clock where it needs it.
 func Demand(
-	ctx context.Context, pool *pgxpool.Pool, now time.Time, within time.Duration, limit int,
+	ctx context.Context, pool *pgxpool.Pool, viewer uuid.UUID,
+	now time.Time, within time.Duration, limit int,
 ) ([]Corridor, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
@@ -61,6 +84,12 @@ func Demand(
 		-- nobody can be taken on.
 		JOIN users pu ON pu.id = r.passenger_id AND pu.status = 'active'
 		WHERE r.status IN ('open','asking')
+		  -- Not your own. "Three people are looking for this road" with yourself
+		  -- as one of the three is an encouragement built partly out of your own
+		  -- demand, and it is the one figure on that screen a reader would have
+		  -- to discount in their head. It also tells somebody with a single
+		  -- request on a quiet corridor exactly which of the numbers is theirs.
+		  AND r.passenger_id <> $4
 		  -- Read from the window rather than the status, because a request whose
 		  -- time has passed is only marked expired when the sweeper next runs.
 		  AND r.window_end   > $1
@@ -71,10 +100,14 @@ func Demand(
 		  AND coalesce(r.origin_label, '') <> ''
 		  AND coalesce(r.destination_label, '') <> ''
 		GROUP BY r.origin_label, r.destination_label
+		-- The privacy floor, applied after grouping and counted on the people
+		-- who would actually be reported — the caller is already excluded
+		-- above, so they cannot push a corridor over the line with themselves.
+		HAVING count(DISTINCT r.passenger_id) >= $5
 		-- Busiest first, then a stable tie-break. With a limit in play this
 		-- decides what a driver is told about at all.
 		ORDER BY count(DISTINCT r.passenger_id) DESC, r.origin_label, r.destination_label
-		LIMIT $3`, now, now.Add(within), limit)
+		LIMIT $3`, now, now.Add(within), limit, viewer, DemandFloor)
 	if err != nil {
 		return nil, fmt.Errorf("store: loading demand: %w", err)
 	}

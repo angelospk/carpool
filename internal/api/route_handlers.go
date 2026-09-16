@@ -184,6 +184,22 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The same check the request side makes. A route's labels are read by every
+	// passenger it is offered to, and they arrive from the client with nothing
+	// but the body size limit above them.
+	originLabel, err := domain.NormalisePlaceLabel(body.OriginLabel)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request",
+			"the start needs a name somebody can read")
+		return
+	}
+	destinationLabel, err := domain.NormalisePlaceLabel(body.DestinationLabel)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request",
+			"the destination needs a name somebody can read")
+		return
+	}
+
 	origin := geo.Point{Lon: body.OriginLon, Lat: body.OriginLat}
 	destination := geo.Point{Lon: body.DestinationLon, Lat: body.DestinationLat}
 
@@ -235,8 +251,8 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		VehicleID:         vehicle.ID,
 		Origin:            origin,
 		Destination:       destination,
-		OriginLabel:       body.OriginLabel,
-		DestinationLabel:  body.DestinationLabel,
+		OriginLabel:       originLabel,
+		DestinationLabel:  destinationLabel,
 		RouteWKT:          shaped.WKT(),
 		RouteKm:           shaped.DistanceMeters / 1000,
 		RouteMin:          int(shaped.Duration.Minutes()) + 1,

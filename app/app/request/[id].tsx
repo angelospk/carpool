@@ -65,14 +65,20 @@ export default function RequestScreen() {
       <Card>
         {loading ? (
           <Hint testID="request-loading">{t('common.loading')}</Hint>
-        ) : requests.isError ? (
-          // Reached only when the first fetch failed and there is nothing to
-          // show. A poll that fails later does not come through here: measured
-          // against react-query 5, a query holding data stays `success` when a
-          // refetch rejects, so the request a passenger is reading survives a
-          // bad moment of signal instead of being replaced by this and then
-          // restored. Guarding on `!requests.data` was tried and removed — it
-          // never fires, and dead code implying a hazard is worse than none.
+        ) : requests.isLoadingError ? (
+          // isLoadingError, not isError: the first load failed and there is
+          // nothing to show. A poll that fails later sets isError too — 5.101.4
+          // reports status 'error' with the data still in hand — and the list
+          // polls every thirty seconds, so on isError alone one bad moment of
+          // signal replaces the request a passenger is reading with this and
+          // then puts it back.
+          //
+          // Measured twice. The first measurement said a query holding data
+          // stays 'success' and this guard was removed as dead code; that
+          // reading came from asking the observer before react-query had
+          // notified it, which is also how the test for it passed. Waiting for
+          // the observer gives status='error', isError=true,
+          // isRefetchError=true, data intact.
           <Hint testID="request-failed">{t('home.requestsFailed')}</Hint>
         ) : mine ? (
           <>

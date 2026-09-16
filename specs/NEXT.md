@@ -168,6 +168,22 @@ Each of the four things this item expected to have to change:
   Ξάνθη, so the whole ΔΠΘ corridor is covered by the artifact already deployed.
   No osmium clip, no re-preprocessing, no new file to ship.
 
+  **But measuring the edge of that coverage is what found the real defect, and
+  it is worse than a missing corridor.** A clipped extract does not refuse a
+  coordinate it does not hold — it snaps it to the nearest road it does have and
+  answers `Ok`. Θεσσαλονίκη snapped 173 km away, Αθήνα 313 km, Πάτρα 408 km, and
+  Θεσσαλονίκη → Αθήνα came back as a confident 186,6 km line drawn through
+  Thrace. That line is what a published route is stored with, what the gross
+  match locates pickups along, and what a contribution is priced from, and
+  nothing downstream could tell it from a real answer.
+
+  Fixed by bounding the snap: `geo.SnapRadiusMetres`, 20 km, sitting in the
+  measured gap between legitimate places inside the corridor (≤ 6,5 km, Ξάνθη at
+  the edge of the clip) and the fabrications (≥ 173 km). OSRM then answers
+  `NoSegment`, which publishing and estimating surface as
+  `400 outside_service_area`. So the served area is now *defined by the extract*
+  and says so out loud, which is the thing this item was really asking for.
+
 **Done, and now asserted rather than incidental.**
 `internal/api/corridor_test.go` seeds two prefectures that meet at 25,6°E,
 proves Αλεξανδρούπολη and Κομοτηνή land in different ones, then publishes a

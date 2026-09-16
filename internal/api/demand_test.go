@@ -2,10 +2,13 @@ package api_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"carpool/internal/store"
 )
 
 // A driver with nothing published has no reason to publish, and the app had no
@@ -56,8 +59,11 @@ func TestDemandNamesTheCorridorAndCountsThePeople(t *testing.T) {
 	h := newHarness(t)
 	token, _ := h.signUp("+306900000301", "Οδηγός")
 
-	h.wanting("+306900000302", "Αλεξανδρούπολη", "Ορεστιάδα")
-	h.wanting("+306900000303", "Αλεξανδρούπολη", "Ορεστιάδα")
+	// store.DemandFloor different people, because a corridor below the privacy
+	// floor is not reported at all.
+	for i := 0; i < store.DemandFloor; i++ {
+		h.wanting(fmt.Sprintf("+30690000031%d", i), "Αλεξανδρούπολη", "Ορεστιάδα")
+	}
 
 	got, period := h.demand(token)
 	if len(got) != 1 {
@@ -66,8 +72,8 @@ func TestDemandNamesTheCorridorAndCountsThePeople(t *testing.T) {
 	if got[0].OriginLabel != "Αλεξανδρούπολη" || got[0].DestinationLabel != "Ορεστιάδα" {
 		t.Errorf("corridor = %q → %q", got[0].OriginLabel, got[0].DestinationLabel)
 	}
-	if got[0].People != 2 {
-		t.Errorf("people = %d, want 2", got[0].People)
+	if got[0].People != store.DemandFloor {
+		t.Errorf("people = %d, want %d", got[0].People, store.DemandFloor)
 	}
 	// The screen says "this week", so the server has to be the one that decides
 	// what a week is rather than the app guessing.
@@ -105,7 +111,9 @@ func TestDemandNeedsAToken(t *testing.T) {
 func TestDemandPutsNothingIdentifyingOnTheWire(t *testing.T) {
 	h := newHarness(t)
 	token, _ := h.signUp("+306900000306", "Οδηγός")
-	h.wanting("+306900000307", "Αλεξανδρούπολη", "Ορεστιάδα")
+	for i := 0; i < store.DemandFloor; i++ {
+		h.wanting(fmt.Sprintf("+30690000032%d", i), "Αλεξανδρούπολη", "Ορεστιάδα")
+	}
 
 	rec := h.do(http.MethodGet, "/v1/demand", nil, token)
 	if rec.Code != http.StatusOK {
@@ -129,7 +137,7 @@ func TestDemandPutsNothingIdentifyingOnTheWire(t *testing.T) {
 	// Belt and braces against a field being renamed into something that looks
 	// innocent: neither the passenger's name nor their phone may appear
 	// anywhere in the response at all.
-	for _, secret := range []string{"Επιβάτης", "+306900000307"} {
+	for _, secret := range []string{"Επιβάτης", "+306900000320", "+306900000321"} {
 		if strings.Contains(rec.Body.String(), secret) {
 			t.Errorf("demand response contains %q", secret)
 		}
@@ -173,5 +181,22 @@ func TestMyRequestsSaysWhetherAnybodyDrivesTheRoad(t *testing.T) {
 
 	if got := onCorridor(); got != 1 {
 		t.Fatalf("with one driver publishing the road, drivers_on_corridor = %d, want 1", got)
+	}
+}
+
+// The privacy floor at the boundary that matters. The store test covers the
+// threshold itself; this one is here because the promise is made to users in
+// docs/legal/privacy-el.md and it is the endpoint that keeps it.
+func TestDemandDoesNotReportACorridorBelowTheFloor(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000330", "Οδηγός")
+
+	for i := 0; i < store.DemandFloor-1; i++ {
+		h.wanting(fmt.Sprintf("+30690000033%d", i+1), "Πέπλος", "Ορεστιάδα")
+	}
+
+	got, _ := h.demand(token)
+	if len(got) != 0 {
+		t.Fatalf("got %+v, want nothing below a floor of %d", got, store.DemandFloor)
 	}
 }

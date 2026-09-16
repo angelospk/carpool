@@ -59,13 +59,14 @@ test('a list that failed to load says so rather than answering about drivers', a
 // meets a transient network failure sooner or later, and the request they are
 // reading must not be replaced by an error box and then restored.
 //
-// It is not, and the reason is subtle enough to be worth pinning down. When a
-// refetch rejects over data that is already there, react-query 5 records the
-// error in the cache but keeps reporting `success` to the consumer, data
-// intact. So `requests.isError` never becomes true here and the screen needs no
-// guard of its own — one was tried and removed. This asserts the behaviour
-// because it belongs to the library rather than to this file: an upgrade that
-// changed it would break this screen silently, and nothing else would notice.
+// react-query does not help here: on a failed refetch over good data it reports
+// status 'error' and isError true with the data still in hand, so the screen has
+// to ask isLoadingError instead — errored *and* nothing to show.
+//
+// This test has to wait for the observer to have been notified before it
+// asserts. An earlier version asserted straight after refetchQueries and passed
+// against rendered output that was one notification stale, which is also how
+// the guard it was meant to protect came to be deleted as dead code.
 //
 // The cache has to be the same across both fetches, which is why this holds the
 // QueryClient instead of calling wrap(). An earlier version re-wrapped on
@@ -107,12 +108,17 @@ test('a poll that fails leaves the request a passenger is reading alone', async 
     await client.refetchQueries({ queryKey: ['requests', 'mine'] });
   });
 
-  // The rejection really happened. The cache records it — getQueryState says
-  // 'error' — and the observer deliberately does not pass it on while it holds
-  // data, which is the distinction this screen depends on and the reason the
-  // assertions below are about what is drawn rather than about query state.
+  // The rejection really happened, and the query really is in error.
   expect(api.myRequests).toHaveBeenCalledTimes(2);
-  expect(client.getQueryState(['requests', 'mine'])?.status).toBe('error');
+  await waitFor(() =>
+    expect(client.getQueryState(['requests', 'mine'])?.status).toBe('error'),
+  );
+  // Give the observer the chance to notify and re-render. This is the window in
+  // which the bug this guards against would appear, so it has to be waited
+  // through rather than asserted across.
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 50));
+  });
 
   expect(screen.getByTestId('request-route')).toBeTruthy();
   expect(screen.getByTestId('request-progress')).toBeTruthy();

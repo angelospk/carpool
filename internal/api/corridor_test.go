@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -243,5 +244,64 @@ func TestEstimatingOutsideTheRoutedAreaIsRefusedAsSuch(t *testing.T) {
 	}
 	if got := h.errorCode(rec); got != "outside_service_area" {
 		t.Fatalf("error code = %q, want outside_service_area", got)
+	}
+}
+
+// Labels arrive from the client and are read back by people who were not there
+// -- on a trip card, and aggregated into the demand line every driver in the
+// area sees. Nothing checked them; the only ceiling was the 64 KiB body.
+func TestAPlaceLabelThatHidesItselfIsRefused(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000406", "Επιβάτης")
+
+	for _, tc := range []struct{ name, label string }{
+		{"a right-to-left override", "Αλεξ\u202eανδρούπολη"},
+		{"a control character", "Αλεξ\u0007ανδρούπολη"},
+		{"nothing at all", "   "},
+		{"a paragraph", strings.Repeat("α", 500)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := h.do(http.MethodPost, "/v1/requests", map[string]any{
+				"origin_lon": alexLon, "origin_lat": alexLat,
+				"destination_lon": komoLon, "destination_lat": komoLat,
+				"origin_label": tc.label, "destination_label": "Κομοτηνή",
+				"window_start": h.clock.Now().Add(2 * time.Hour).Format(time.RFC3339),
+				"window_end":   h.clock.Now().Add(4 * time.Hour).Format(time.RFC3339),
+				"seats":        1,
+			}, token)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("gave %d, want 400: %s", rec.Code, rec.Body.String())
+			}
+			if got := h.errorCode(rec); got != "invalid_request" {
+				t.Fatalf("error code = %q, want invalid_request", got)
+			}
+		})
+	}
+}
+
+// And the tidying, which the demand count depends on: a label that differs only
+// in whitespace must not become a second corridor and split one number in two.
+func TestAPlaceLabelIsStoredTidied(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000407", "Επιβάτης")
+
+	rec := h.do(http.MethodPost, "/v1/requests", map[string]any{
+		"origin_lon": alexLon, "origin_lat": alexLat,
+		"destination_lon": komoLon, "destination_lat": komoLat,
+		"origin_label": "  Αλεξανδρούπολη \t Λιμάνι ", "destination_label": " Κομοτηνή ",
+		"window_start": h.clock.Now().Add(2 * time.Hour).Format(time.RFC3339),
+		"window_end":   h.clock.Now().Add(4 * time.Hour).Format(time.RFC3339),
+		"seats":        1,
+	}, token)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("gave %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+
+	var origin, destination string
+	h.mustQuery(`SELECT origin_label, destination_label FROM ride_requests LIMIT 1`,
+		&origin, &destination)
+	if origin != "Αλεξανδρούπολη Λιμάνι" || destination != "Κομοτηνή" {
+		t.Fatalf("stored %q -> %q", origin, destination)
 	}
 }

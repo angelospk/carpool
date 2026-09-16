@@ -33,12 +33,13 @@ const demandCorridors = 5
 // wired without the matcher still answers rather than 404ing a screen that
 // exists.
 func (d Deps) handleDemand(w http.ResponseWriter, r *http.Request) {
-	if _, ok := callerID(r.Context()); !ok {
+	userID, ok := callerID(r.Context())
+	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
 		return
 	}
 
-	corridors, err := store.Demand(r.Context(), d.Pool, d.now(), demandPeriod, demandCorridors)
+	corridors, err := store.Demand(r.Context(), d.Pool, userID, d.now(), demandPeriod, demandCorridors)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load who is waiting")
 		return

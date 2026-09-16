@@ -77,6 +77,15 @@ func (h *harness) occurrenceOf(phone, name string) string {
 		        31.2, 28, 3, 'formula', 'test')
 		RETURNING id::text`, &templateID, driverID)
 
+	// A schedule as well as a departure. A published route has one, and the
+	// corridor count reads it to tell a route that can still run from one that
+	// merely was never retired.
+	h.mustExec(`
+		INSERT INTO route_schedules
+		(template_id, kind, weekdays, depart_earliest, depart_latest, effective_from)
+		VALUES ($1::uuid, 'recurring', '{1,2,3,4,5}', '07:30', '08:00', current_date)`,
+		templateID)
+
 	depart := h.clock.Now().Add(24 * time.Hour)
 	h.mustQuery(`
 		INSERT INTO trip_occurrences (
