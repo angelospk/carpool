@@ -111,8 +111,11 @@ func TestDemandNeedsAToken(t *testing.T) {
 func TestDemandPutsNothingIdentifyingOnTheWire(t *testing.T) {
 	h := newHarness(t)
 	token, _ := h.signUp("+306900000306", "Οδηγός")
+	var phones []string
 	for i := 0; i < store.DemandFloor; i++ {
-		h.wanting(fmt.Sprintf("+30690000032%d", i), "Αλεξανδρούπολη", "Ορεστιάδα")
+		phone := fmt.Sprintf("+30690000032%d", i)
+		phones = append(phones, phone)
+		h.wanting(phone, "Αλεξανδρούπολη", "Ορεστιάδα")
 	}
 
 	rec := h.do(http.MethodGet, "/v1/demand", nil, token)
@@ -137,7 +140,9 @@ func TestDemandPutsNothingIdentifyingOnTheWire(t *testing.T) {
 	// Belt and braces against a field being renamed into something that looks
 	// innocent: neither the passenger's name nor their phone may appear
 	// anywhere in the response at all.
-	for _, secret := range []string{"Επιβάτης", "+306900000320", "+306900000321"} {
+	// Every phone that was seeded, not the first couple: a leak of the third
+	// person is a leak.
+	for _, secret := range append([]string{"Επιβάτης"}, phones...) {
 		if strings.Contains(rec.Body.String(), secret) {
 			t.Errorf("demand response contains %q", secret)
 		}

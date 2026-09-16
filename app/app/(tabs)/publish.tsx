@@ -130,7 +130,13 @@ export default function PublishScreen() {
     // press onwards. What this button means is "the route you just published",
     // and the moment that stops being the earlier one is the moment a new
     // attempt begins — including while it is still in flight.
-    onMutate: () => setPublished(null),
+    onMutate: () => {
+      // The outcome goes with it. Otherwise a second attempt runs underneath
+      // "Η διαδρομή δημοσιεύτηκε · 62,4 km" from the first one, which reads as
+      // a result for the request still in flight.
+      setOutcome(null);
+      setPublished(null);
+    },
     onSuccess: (r, snap) => {
       setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`);
       setPublished(snap);

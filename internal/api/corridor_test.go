@@ -1,13 +1,17 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"carpool/internal/store"
 )
 
 // Αλεξανδρούπολη → Κομοτηνή, which is two prefectures.
@@ -45,6 +49,21 @@ func twoPrefectures(h *harness) {
 	h.mustExec(`INSERT INTO regions (name, boundary) VALUES
 		('Έβρου',   ST_Multi(ST_GeomFromText('POLYGON((25.6 40.3, 26.7 40.3, 26.7 41.8, 25.6 41.8, 25.6 40.3))', 4326))),
 		('Ροδόπης', ST_Multi(ST_GeomFromText('POLYGON((25.3 40.3, 25.6 40.3, 25.6 41.8, 25.3 41.8, 25.3 40.3))', 4326)))`)
+}
+
+// realGreece replaces the harness's region with the shipped fixture: all 75
+// περιφερειακές ενότητες, with the boundaries the country actually has. Slower
+// than a rectangle and the only honest way to ask a question about the border.
+func realGreece(h *harness) {
+	h.t.Helper()
+	path, err := filepath.Abs(filepath.Join("..", "..", "fixtures", "regions", "greece.geojson"))
+	if err != nil {
+		h.t.Fatalf("resolving the region fixture: %v", err)
+	}
+	h.mustExec(`DELETE FROM regions`)
+	if err := store.SeedRegionsFromFile(context.Background(), h.pool, path); err != nil {
+		h.t.Fatalf("SeedRegionsFromFile: %v", err)
+	}
 }
 
 // The fixture has to actually straddle the boundary, or this passes for the
@@ -204,11 +223,14 @@ func TestPublishingOutsideTheRoutedAreaIsRefusedAsSuch(t *testing.T) {
 		t.Fatalf("driver profile: %d %s", rec.Code, rec.Body.String())
 	}
 
+	// Both ends inside the harness's regions, so the country check passes and
+	// what is being tested is the routing answer. The stub says NoSegment
+	// whatever it is asked, which is what a real extract does for a coordinate
+	// it does not hold once a snapping bound is sent.
 	rec := h.do(http.MethodPost, "/v1/routes", map[string]any{
 		"origin_lon": alexLon, "origin_lat": alexLat,
-		// Athens: inside Greece, outside anything this extract can route.
-		"destination_lon": 23.7275, "destination_lat": 37.9838,
-		"origin_label": "Αλεξανδρούπολη", "destination_label": "Αθήνα",
+		"destination_lon": 26.5310, "destination_lat": 41.5010,
+		"origin_label": "Αλεξανδρούπολη", "destination_label": "Ορεστιάδα",
 		"seats": 3, "kind": "recurring", "weekdays": []int{1, 2, 3, 4, 5},
 		"depart_earliest": "07:30", "depart_latest": "08:00",
 	}, token)
@@ -303,5 +325,85 @@ func TestAPlaceLabelIsStoredTidied(t *testing.T) {
 		&origin, &destination)
 	if origin != "Αλεξανδρούπολη Λιμάνι" || destination != "Κομοτηνή" {
 		t.Fatalf("stored %q -> %q", origin, destination)
+	}
+}
+
+// The border runs through this prefecture, and the publish path never asked
+// which side of it a pin was on.
+//
+// Requests and estimates both call store.RegionAt and refuse what is outside
+// Greece. Publishing did not, and it mattered more once the snapping bound went
+// in: a pin a few kilometres into Turkey or Bulgaria near Ορεστιάδα is well
+// within SnapRadiusMetres of a Greek road, so it snaps, routes, and stores —
+// priced with Greek fuel and Greek tolls for a journey that does not begin in
+// Greece.
+func TestPublishingFromOutsideGreeceIsRefused(t *testing.T) {
+	if os.Getenv(OSRMEnv) == "" {
+		t.Skipf("%s is not set; skipping the routing test", OSRMEnv)
+	}
+	h := newHarnessRoutedBy(t, os.Getenv(OSRMEnv))
+	// The real boundaries, not a rectangle. Any rectangle drawn round Έβρος
+	// contains Αδριανούπολη — the border is a river, and the point of this test
+	// is which side of it a pin is on, so a square fixture would have been the
+	// thing under test rather than the check.
+	realGreece(h)
+
+	token, _ := h.signUp("+306900000408", "Οδηγός")
+	if rec := h.do(http.MethodPut, "/v1/me/driver", map[string]any{
+		"make": "Toyota", "model": "Yaris", "fuel": "petrol_hybrid",
+		"engine_cc": 1490, "plate": "ΑΒΓ-1234", "colour": "λευκό",
+	}, token); rec.Code != http.StatusOK {
+		t.Fatalf("driver profile: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Edirne, about 20 km from Ορεστιάδα and on the other side of the river.
+	rec := h.do(http.MethodPost, "/v1/routes", map[string]any{
+		"origin_lon": 26.5557, "origin_lat": 41.6771,
+		"destination_lon": komoLon, "destination_lat": komoLat,
+		"origin_label": "Αδριανούπολη", "destination_label": "Κομοτηνή",
+		"seats": 3, "kind": "recurring", "weekdays": []int{1, 2, 3, 4, 5},
+		"depart_earliest": "07:30", "depart_latest": "08:00",
+	}, token)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("publishing from outside Greece gave %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if got := h.errorCode(rec); got != "outside_country" {
+		t.Fatalf("error code = %q, want outside_country", got)
+	}
+
+	var routes int
+	h.mustQuery(`SELECT count(*)::int FROM route_templates`, &routes)
+	if routes != 0 {
+		t.Fatalf("stored %d route templates for a refused publish", routes)
+	}
+}
+
+// And the ordinary in-country publish still works, so the check has not simply
+// closed the door.
+func TestPublishingFromInsideGreeceStillWorks(t *testing.T) {
+	if os.Getenv(OSRMEnv) == "" {
+		t.Skipf("%s is not set; skipping the routing test", OSRMEnv)
+	}
+	h := newHarnessRoutedBy(t, os.Getenv(OSRMEnv))
+	realGreece(h)
+
+	token, _ := h.signUp("+306900000409", "Οδηγός")
+	if rec := h.do(http.MethodPut, "/v1/me/driver", map[string]any{
+		"make": "Toyota", "model": "Yaris", "fuel": "petrol_hybrid",
+		"engine_cc": 1490, "plate": "ΑΒΓ-1234", "colour": "λευκό",
+	}, token); rec.Code != http.StatusOK {
+		t.Fatalf("driver profile: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec := h.do(http.MethodPost, "/v1/routes", map[string]any{
+		"origin_lon": alexLon, "origin_lat": alexLat,
+		"destination_lon": komoLon, "destination_lat": komoLat,
+		"origin_label": "Αλεξανδρούπολη", "destination_label": "Κομοτηνή",
+		"seats": 3, "kind": "recurring", "weekdays": []int{1, 2, 3, 4, 5},
+		"depart_earliest": "07:30", "depart_latest": "08:00",
+	}, token)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("publishing inside Greece gave %d, want 201: %s", rec.Code, rec.Body.String())
 	}
 }

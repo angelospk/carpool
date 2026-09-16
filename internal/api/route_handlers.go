@@ -203,6 +203,32 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 	origin := geo.Point{Lon: body.OriginLon, Lat: body.OriginLat}
 	destination := geo.Point{Lon: body.DestinationLon, Lat: body.DestinationLat}
 
+	// Both ends have to be in the country, which the request and estimate paths
+	// have always checked and this one never did. The border runs through this
+	// prefecture, and it matters more now that a snapping bound exists: a pin a
+	// few kilometres into Turkey or Bulgaria near Ορεστιάδα is well inside
+	// SnapRadiusMetres of a Greek road, so it snapped, routed and stored — a
+	// journey beginning in another country, priced with Greek fuel and Greek
+	// tolls. Measured: Αδριανούπολη → Κομοτηνή published at 184,2 km.
+	for _, end := range []struct {
+		what string
+		at   geo.Point
+	}{
+		{"start", origin},
+		{"destination", destination},
+	} {
+		_, err := store.RegionAt(r.Context(), d.Pool, end.at.Lon, end.at.Lat)
+		if errors.Is(err, store.ErrOutsideGreece) {
+			writeError(w, http.StatusBadRequest, "outside_country",
+				"the "+end.what+" is outside Greece, which is as far as this app goes")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not locate the route")
+			return
+		}
+	}
+
 	// Snap the route to the road network now: the stored geometry is what the
 	// gross match locates pickups along, so it must be a real road line rather
 	// than the straight line between two pins.
