@@ -3,6 +3,7 @@ package api_test
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -167,5 +168,80 @@ func TestARouteMayBePublishedAcrossAPrefectureBoundary(t *testing.T) {
 	// moves when the map data is refreshed.
 	if body.RouteKm < 40 || body.RouteKm > 90 {
 		t.Fatalf("route_km = %.1f, want the road between the two towns (~58 km)", body.RouteKm)
+	}
+}
+
+// A clipped routing extract does not refuse what it does not cover: it snaps
+// the coordinate to the nearest road it does have and answers Ok. Measured
+// against the extract this deployment serves, Θεσσαλονίκη → Αθήνα came back as
+// a confident 186,6 km line drawn through Thrace, and there was nothing
+// downstream to tell that from a real answer — it is the geometry a published
+// route is stored with and the distance a contribution is priced from.
+//
+// geo.SnapRadiusMetres now bounds the snap, so OSRM answers NoSegment instead.
+// These two tests are about what the caller is then told: a place the app does
+// not yet serve is a fact about the request, so it is a 400 somebody can act on
+// rather than a 502 that reads as "our fault, try again".
+func noSegmentRouter(t *testing.T) *harness {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(
+			`{"code":"NoSegment","message":"Could not find a matching segment for coordinate 1"}`))
+	}))
+	t.Cleanup(srv.Close)
+	return newHarnessRoutedBy(t, srv.URL)
+}
+
+func TestPublishingOutsideTheRoutedAreaIsRefusedAsSuch(t *testing.T) {
+	h := noSegmentRouter(t)
+	token, _ := h.signUp("+306900000404", "Οδηγός")
+	if rec := h.do(http.MethodPut, "/v1/me/driver", map[string]any{
+		"make": "Toyota", "model": "Yaris", "fuel": "petrol_hybrid",
+		"engine_cc": 1490, "plate": "ΑΒΓ-1234", "colour": "λευκό",
+	}, token); rec.Code != http.StatusOK {
+		t.Fatalf("driver profile: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec := h.do(http.MethodPost, "/v1/routes", map[string]any{
+		"origin_lon": alexLon, "origin_lat": alexLat,
+		// Athens: inside Greece, outside anything this extract can route.
+		"destination_lon": 23.7275, "destination_lat": 37.9838,
+		"origin_label": "Αλεξανδρούπολη", "destination_label": "Αθήνα",
+		"seats": 3, "kind": "recurring", "weekdays": []int{1, 2, 3, 4, 5},
+		"depart_earliest": "07:30", "depart_latest": "08:00",
+	}, token)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("publishing outside the routed area gave %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if got := h.errorCode(rec); got != "outside_service_area" {
+		t.Fatalf("error code = %q, want outside_service_area", got)
+	}
+	// And nothing was stored: a fabricated line is exactly what this prevents.
+	var routes int
+	h.mustQuery(`SELECT count(*)::int FROM route_templates`, &routes)
+	if routes != 0 {
+		t.Fatalf("stored %d route templates for a refused publish", routes)
+	}
+}
+
+func TestEstimatingOutsideTheRoutedAreaIsRefusedAsSuch(t *testing.T) {
+	h := noSegmentRouter(t)
+	token, _ := h.signUp("+306900000405", "Επιβάτης")
+
+	// Both ends inside the harness's region, so the country check passes and
+	// what is being tested is the routing answer rather than the geofence. The
+	// stub says NoSegment whatever it is asked.
+	rec := h.do(http.MethodPost, "/v1/estimates", map[string]any{
+		"origin_lon": alexLon, "origin_lat": alexLat,
+		"destination_lon": 26.5310, "destination_lat": 41.5010,
+	}, token)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("estimating outside the routed area gave %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if got := h.errorCode(rec); got != "outside_service_area" {
+		t.Fatalf("error code = %q, want outside_service_area", got)
 	}
 }

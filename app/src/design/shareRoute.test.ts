@@ -18,6 +18,16 @@ const weekdayRoute: ShareableRoute = {
 // The sentence a driver pastes into the village's Viber group. It has to say
 // the four things somebody decides on without opening anything: where from,
 // where to, when, and whether there is room.
+// The whole sentence, exactly, once. Every other test here checks one part;
+// this is the one that would catch a separator, an order or a line break
+// changing underneath all of them.
+test('the message is exactly this', () => {
+  expect(shareRouteMessage(weekdayRoute, t)).toBe(
+    'Αλεξανδρούπολη → Σουφλί · καθημερινές 07:30 · έχω 2 θέσεις\n' +
+      'Αν σε ενδιαφέρει, στείλε μου μήνυμα.',
+  );
+});
+
 test('a weekday route reads as a route, a schedule with its time, and the seats', () => {
   const message = shareRouteMessage(weekdayRoute, t);
 
@@ -119,6 +129,40 @@ test('a route with no schedule at all still reads as a sentence', () => {
   }
 });
 
+// A date or a time that arrived as spaces is absent, not present-and-blank.
+// Untrimmed they passed the filter and left a gap between two separators, which
+// is the shape this formatter exists to avoid.
+test('a schedule or a time made of spaces is treated as missing', () => {
+  const blankDate = shareRouteMessage(
+    { ...weekdayRoute, kind: 'oneoff', weekdays: [], oneoff_date: '   ' },
+    t,
+  );
+  expect(blankDate).not.toMatch(/· *·/);
+  expect(blankDate).toBe(
+    'Αλεξανδρούπολη → Σουφλί · 07:30 · έχω 2 θέσεις\nΑν σε ενδιαφέρει, στείλε μου μήνυμα.',
+  );
+
+  const blankTime = shareRouteMessage({ ...weekdayRoute, depart_earliest: '  ' }, t);
+  expect(blankTime).not.toMatch(/· *·/);
+  expect(blankTime).toBe(
+    'Αλεξανδρούπολη → Σουφλί · καθημερινές · έχω 2 θέσεις\nΑν σε ενδιαφέρει, στείλε μου μήνυμα.',
+  );
+});
+
+// Nothing usable at all. The call to action is still worth sending — somebody
+// pasting this is asking to be contacted — but it must not arrive under a blank
+// first line.
+test('a route with nothing to say about itself does not lead with an empty line', () => {
+  const message = shareRouteMessage(
+    { origin_label: ' ', destination_label: '', kind: 'recurring', weekdays: [],
+      depart_earliest: '', seats: 0 },
+    t,
+  );
+
+  expect(message.startsWith('\n')).toBe(false);
+  expect(message).toBe(el.share.callToAction);
+});
+
 test('one seat is one seat', () => {
   expect(shareRouteMessage({ ...weekdayRoute, seats: 1 }, t)).toContain(
     (el.share.seats_one as string).replace('{{count}}', '1'),
@@ -151,6 +195,13 @@ test('every string the message needs exists in both languages', () => {
   for (const k of keys) {
     expect(el.share).toHaveProperty(k);
     expect(en.share).toHaveProperty(k);
+  }
+
+  // The day names are reached for by key when the days are not a preset, so a
+  // missing one would put "weekdaysShort.3" in the middle of a shared message.
+  for (const day of [1, 2, 3, 4, 5, 6, 7]) {
+    expect(el.weekdaysShort).toHaveProperty(String(day));
+    expect(en.weekdaysShort).toHaveProperty(String(day));
   }
 });
 

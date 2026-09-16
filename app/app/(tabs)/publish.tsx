@@ -124,6 +124,13 @@ export default function PublishScreen() {
         // the request that the receipt could not later explain.
         ...(pricing === 'formula' ? { contribution_share: share } : {}),
       }),
+    // Cleared when an attempt starts, not when one fails. The route published a
+    // minute ago still exists after a second attempt goes wrong, so "a publish
+    // that failed leaves nothing published" was simply untrue from the second
+    // press onwards. What this button means is "the route you just published",
+    // and the moment that stops being the earlier one is the moment a new
+    // attempt begins — including while it is still in flight.
+    onMutate: () => setPublished(null),
     onSuccess: (r, snap) => {
       setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`);
       setPublished(snap);
@@ -135,11 +142,13 @@ export default function PublishScreen() {
         // publishing a route". The code is the contract; the sentence is ours.
         e instanceof ApiError && (e.code === 'no_driver_profile' || e.code === 'no_vehicle')
           ? t('publish.noDriverProfile')
-          : t('common.error'),
+          : // A place the routing extract does not reach. Its own sentence,
+            // because "something went wrong" sends the driver back to press the
+            // same button on the same two pins.
+            e instanceof ApiError && e.code === 'outside_service_area'
+            ? t('publish.outsideServiceArea')
+            : t('common.error'),
       );
-      // A publish that failed leaves nothing published, so there is nothing
-      // to share.
-      setPublished(null);
     },
   });
 

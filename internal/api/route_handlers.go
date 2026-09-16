@@ -202,6 +202,17 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 			"that journey is a ferry crossing, so there is no drive to share")
 		return
 	}
+	if errors.Is(err, geo.ErrNoSegment) {
+		// A point too far from any road the routing extract holds. That is a
+		// fact about where the trip goes, not a failure of this service, and it
+		// is the difference between a fabricated route and none: without the
+		// snapping bound OSRM answered Ok for Θεσσαλονίκη → Αθήνα with a
+		// 186,6 km line drawn through Thrace, and that line would have been
+		// stored and priced.
+		writeError(w, http.StatusBadRequest, "outside_service_area",
+			"one of those places is outside the area this app can route yet")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "routing_failed",
 			"could not compute a driving route between those points")

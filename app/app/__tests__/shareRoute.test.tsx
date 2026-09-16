@@ -122,3 +122,50 @@ test('two routes share two different messages', async () => {
   expect(message).toContain('09:00');
   expect(message).not.toContain('Σουφλί');
 });
+
+// Two presses inside one tick. `setSharing(true)` does not take effect until
+// React re-renders, so a state flag alone lets both presses through and two
+// native sheets are queued. The guard has to be a ref, set before the await.
+//
+// The share promise is held open deliberately: that is the window in which the
+// second press lands, and resolving it first would test nothing.
+test('a second press while the sheet is open is ignored', async () => {
+  (api.myRoutes as jest.Mock).mockResolvedValue({ routes: [route()] });
+  let release: (v: unknown) => void = () => {};
+  share.mockReturnValue(new Promise((r) => (release = r)));
+
+  render(wrap(<MyRoutesScreen />));
+  const button = await screen.findByTestId('share-r1');
+
+  fireEvent.press(button);
+  fireEvent.press(button);
+  fireEvent.press(button);
+
+  expect(share).toHaveBeenCalledTimes(1);
+
+  // Once it closes, sharing again is allowed.
+  release({ action: 'sharedAction' });
+  await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+  fireEvent.press(button);
+  await waitFor(() => expect(share).toHaveBeenCalledTimes(2));
+});
+
+// A sheet that failed must not leave the button dead. The ref has to be
+// released on the error path as surely as on the happy one.
+test('a failed share can be retried', async () => {
+  (api.myRoutes as jest.Mock).mockResolvedValue({ routes: [route()] });
+  share.mockRejectedValue(new Error('no activity'));
+
+  render(wrap(<MyRoutesScreen />));
+  const button = await screen.findByTestId('share-r1');
+
+  fireEvent.press(button);
+  expect(await screen.findByTestId('share-failed-r1')).toBeTruthy();
+
+  share.mockResolvedValue({ action: 'sharedAction' });
+  fireEvent.press(button);
+
+  await waitFor(() => expect(share).toHaveBeenCalledTimes(2));
+  // The hint from the failed attempt does not survive a successful one.
+  await waitFor(() => expect(screen.queryByTestId('share-failed-r1')).toBeNull());
+});

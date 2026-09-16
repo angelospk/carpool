@@ -264,6 +264,7 @@
     "detourHint": "Extra kilometres over your own journey. There is a time limit too, because 15 km on the motorway is not 15 km on a mountain road.",
     "detourKm": "Detour up to",
     "from": "From",
+    "outsideServiceArea": "That destination is outside the area we can route to yet. Try somewhere closer.",
     "noStopsHint": "You will not be offered anyone who is not already on your route.",
     "oneoff": "One-off",
     "publish": "Publish",

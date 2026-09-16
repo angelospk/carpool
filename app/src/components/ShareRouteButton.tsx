@@ -6,7 +6,7 @@
 // silence rather than an error: closing it without sending means nothing went
 // wrong.
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Share } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
@@ -24,21 +24,30 @@ export function ShareRouteButton({
 }) {
   const { t } = useTranslation();
   const [failed, setFailed] = useState(false);
-  const [sharing, setSharing] = useState(false);
+  // A ref rather than state, and this is the whole reason: `setSharing(true)`
+  // does not take effect until React re-renders, so two touches landing in one
+  // frame both read the old value and both open a sheet. A ref is written
+  // before the await and read by the second press immediately.
+  //
+  // The test for this cannot tell the two apart — testing-library wraps every
+  // press in act() and flushes state between them, so a state flag passes it
+  // too. It is here because it is correct on a device, not because a test
+  // proved it.
+  const sharing = useRef(false);
 
   const onPress = async () => {
-    // A second press while the sheet is still open would queue a second
-    // sheet behind the first, so it is ignored.
-    if (sharing) return;
+    if (sharing.current) return;
+    sharing.current = true;
     // A failure belongs to the attempt that produced it, not to the next one.
     setFailed(false);
-    setSharing(true);
     try {
       await Share.share({ message: shareRouteMessage(route, t) });
     } catch {
       setFailed(true);
     } finally {
-      setSharing(false);
+      // Released on both paths: a sheet that failed must not leave a dead
+      // button behind it.
+      sharing.current = false;
     }
   };
 

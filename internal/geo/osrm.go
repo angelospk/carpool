@@ -23,6 +23,39 @@ var (
 	ErrNoSegment = errors.New("osrm: point does not snap to any road segment")
 )
 
+// SnapRadiusMetres bounds how far a coordinate may be dragged to reach a road.
+//
+// It exists because a clipped extract does not refuse what it does not cover —
+// it snaps to the nearest road it does have and answers Ok. Measured against
+// the extract this deployment serves, Evros plus a ~30 km buffer: Θεσσαλονίκη
+// snapped 173 km away, Αθήνα 313 km, Πάτρα 408 km, and Θεσσαλονίκη → Αθήνα came
+// back as a confident 186,6 km line drawn through Thrace. Nothing downstream
+// could tell that from a real answer — it is the geometry a published route is
+// stored with and the distance a contribution is priced from.
+//
+// Twenty kilometres sits in the measured gap. Legitimate places inside the
+// served corridor snapped within 6,5 km (Ξάνθη, at the edge of the clip), and
+// the fabrications start at 173 km, so there is an order of magnitude either
+// side of this number. It is generous on purpose: a hamlet whose nearest mapped
+// road is a few kilometres of track away is a real place somebody lives in, and
+// refusing it costs a pickup the app could have served.
+const SnapRadiusMetres = 20_000
+
+// radiuses is the per-coordinate snapping bound OSRM expects, one value per
+// waypoint. Sent on every routing call rather than checked after the fact,
+// because OSRM answers NoSegment for it and that already has an error path.
+func radiuses(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	one := strconv.Itoa(SnapRadiusMetres)
+	out := make([]string, n)
+	for i := range out {
+		out[i] = one
+	}
+	return strings.Join(out, ";")
+}
+
 // Point is a WGS84 coordinate. Longitude first, matching OSRM's and PostGIS's
 // axis order.
 type Point struct {
@@ -116,8 +149,8 @@ func (c *OSRM) Route(ctx context.Context, waypoints []Point) (Route, error) {
 	}
 	// steps=true is what makes a ferry visible. Without it OSRM will happily
 	// route a car across the Aegean and report it as driving.
-	url := fmt.Sprintf("%s/route/v1/driving/%s?overview=full&geometries=polyline6&steps=true",
-		c.baseURL, strings.Join(coords, ";"))
+	url := fmt.Sprintf("%s/route/v1/driving/%s?overview=full&geometries=polyline6&steps=true&radiuses=%s",
+		c.baseURL, strings.Join(coords, ";"), radiuses(len(waypoints)))
 
 	body, err := c.getBody(ctx, url)
 	if err != nil {
@@ -215,8 +248,8 @@ func (c *OSRM) routeWithoutFerryCheck(ctx context.Context, waypoints []Point) (R
 	for i, p := range waypoints {
 		coords[i] = formatPoint(p)
 	}
-	url := fmt.Sprintf("%s/route/v1/driving/%s?overview=full&geometries=polyline6",
-		c.baseURL, strings.Join(coords, ";"))
+	url := fmt.Sprintf("%s/route/v1/driving/%s?overview=full&geometries=polyline6&radiuses=%s",
+		c.baseURL, strings.Join(coords, ";"), radiuses(len(coords)))
 
 	resp, err := c.get(ctx, url)
 	if err != nil {
@@ -239,7 +272,8 @@ func (c *OSRM) routeWithoutFerryCheck(ctx context.Context, waypoints []Point) (R
 
 // Nearest snaps a point to the nearest routable road segment.
 func (c *OSRM) Nearest(ctx context.Context, p Point) (Snap, error) {
-	url := fmt.Sprintf("%s/nearest/v1/driving/%s?number=1", c.baseURL, formatPoint(p))
+	url := fmt.Sprintf("%s/nearest/v1/driving/%s?number=1&radiuses=%s",
+		c.baseURL, formatPoint(p), radiuses(1))
 
 	resp, err := c.get(ctx, url)
 	if err != nil {
@@ -394,8 +428,8 @@ func (c *OSRM) fetchShape(ctx context.Context, waypoints []Point, withSteps bool
 	for i, p := range waypoints {
 		coords[i] = formatPoint(p)
 	}
-	url := fmt.Sprintf("%s/route/v1/driving/%s?overview=full&geometries=geojson",
-		c.baseURL, strings.Join(coords, ";"))
+	url := fmt.Sprintf("%s/route/v1/driving/%s?overview=full&geometries=geojson&radiuses=%s",
+		c.baseURL, strings.Join(coords, ";"), radiuses(len(coords)))
 	if withSteps {
 		url += "&steps=true"
 	}

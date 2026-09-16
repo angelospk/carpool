@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -222,5 +223,111 @@ func TestRouteWithShapeRejectsADegenerateShape(t *testing.T) {
 	// depends on having a real line to locate points along.
 	if err == nil {
 		t.Fatal("expected an error for a route whose geometry has fewer than 2 points")
+	}
+}
+
+// A clipped routing extract does not refuse a coordinate it does not cover. It
+// snaps it to the nearest road it does have and answers Ok.
+//
+// Measured against the extract production serves — Evros plus a ~30 km buffer —
+// Θεσσαλονίκη snapped 173 km away, Αθήνα 313 km and Πάτρα 408 km, and a
+// Θεσσαλονίκη → Αθήνα route came back as a confident 186.6 km line through
+// Thrace. Nothing downstream could tell that apart from a real answer: it is
+// the geometry a published route is stored with and the distance a contribution
+// is priced from. Legitimate places inside the corridor snapped within 6.5 km,
+// so the two cases are separated by an order of magnitude and a radius can tell
+// them apart.
+//
+// The radius is sent on every routing call rather than checked afterwards,
+// because OSRM answers NoSegment for it and that error already has a path here.
+func TestEveryRoutingCallBoundsHowFarAPointMaySnap(t *testing.T) {
+	// Each call wants a different shape back, so each brings its own body.
+	const okPolyline = `{"code":"Ok","routes":[{"distance":1,"duration":1,"geometry":"a"}]}`
+	const okGeoJSON = `{"code":"Ok","routes":[{"distance":1,"duration":1,` +
+		`"geometry":{"coordinates":[[26.5,41.1],[26.6,41.2]]},"legs":[]}]}`
+	const okNearest = `{"code":"Ok","waypoints":[{"location":[26.5,41.1],"distance":3}]}`
+
+	for _, tc := range []struct {
+		name string
+		body string
+		want int
+		call func(c *OSRM) error
+	}{
+		{"Route", okPolyline, 2, func(c *OSRM) error {
+			_, err := c.Route(context.Background(), []Point{{Lon: 26.5, Lat: 41.1}, {Lon: 26.6, Lat: 41.2}})
+			return err
+		}},
+		{"RouteWithShape", okGeoJSON, 2, func(c *OSRM) error {
+			_, err := c.RouteWithShape(context.Background(), []Point{{Lon: 26.5, Lat: 41.1}, {Lon: 26.6, Lat: 41.2}})
+			return err
+		}},
+		{"Nearest", okNearest, 1, func(c *OSRM) error {
+			_, err := c.Nearest(context.Background(), Point{Lon: 26.5, Lat: 41.1})
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got string
+			c := osrmStub(t, func(w http.ResponseWriter, r *http.Request) {
+				// Read from RawQuery rather than Query(): OSRM separates
+				// radiuses with ';', and Go has refused to parse a semicolon as
+				// a query separator since 1.17, so Query() hands back nothing
+				// at all. The wire format is OSRM's to define.
+				for _, kv := range strings.Split(r.URL.RawQuery, "&") {
+					if rest, ok := strings.CutPrefix(kv, "radiuses="); ok {
+						got = rest
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			})
+
+			if err := tc.call(c); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if got == "" {
+				t.Fatal("no radiuses sent: an uncovered point would snap silently instead of being refused")
+			}
+			// One radius per coordinate, which is what OSRM requires.
+			parts := strings.Split(got, ";")
+			if len(parts) != tc.want {
+				t.Errorf("sent %d radiuses for %d coordinates: %q", len(parts), tc.want, got)
+			}
+			for _, r := range parts {
+				if r != strconv.Itoa(SnapRadiusMetres) {
+					t.Errorf("radius = %q, want %d", r, SnapRadiusMetres)
+				}
+			}
+		})
+	}
+}
+
+// The radius has to be wide enough for a real Greek hamlet whose nearest mapped
+// road is some way off, and narrow enough that a city outside the extract is
+// refused rather than dragged inside it. The measurements above put the gap
+// between 6.5 km and 173 km.
+func TestTheSnapRadiusSitsInsideTheMeasuredGap(t *testing.T) {
+	if SnapRadiusMetres <= 6_500 {
+		t.Errorf("SnapRadiusMetres = %d: Ξάνθη snapped 6.5 km out on the served extract and would be refused",
+			SnapRadiusMetres)
+	}
+	if SnapRadiusMetres >= 173_000 {
+		t.Errorf("SnapRadiusMetres = %d: Θεσσαλονίκη snapped 173 km out and would still be accepted",
+			SnapRadiusMetres)
+	}
+}
+
+// What the caller gets when a point is outside the extract, which is the whole
+// point of sending the radius: a named error rather than a plausible number.
+func TestAPointOutsideTheExtractIsRefusedRatherThanSnapped(t *testing.T) {
+	c := osrmStub(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"NoSegment","message":"Could not find a matching segment for coordinate 1"}`))
+	})
+
+	_, err := c.RouteWithShape(context.Background(),
+		[]Point{{Lon: 26.5, Lat: 41.1}, {Lon: 23.7275, Lat: 37.9838}})
+	if !errors.Is(err, ErrNoSegment) {
+		t.Fatalf("error = %v, want ErrNoSegment", err)
 	}
 }

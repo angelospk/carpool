@@ -76,6 +76,14 @@ func (d Deps) handleEstimate(w http.ResponseWriter, r *http.Request) {
 			"that journey is a ferry crossing, so there is no drive to share")
 		return
 	}
+	if errors.Is(err, geo.ErrNoSegment) {
+		// Outside what the routing extract covers. Said as a 400 because it is
+		// about the places asked for, and quoting a number OSRM invented by
+		// snapping hundreds of kilometres is the alternative.
+		writeError(w, http.StatusBadRequest, "outside_service_area",
+			"one of those places is outside the area this app can route yet")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "routing_failed",
 			"could not compute a driving route between those points")

@@ -13,7 +13,7 @@
 # which Go builds the product.
 STATICCHECK := go run honnef.co/go/tools/cmd/staticcheck@v0.8.1
 
-.PHONY: check vet staticcheck test build tools clean
+.PHONY: check vet staticcheck test test-race build clean
 
 ## check: the full gate — everything CI runs
 check: vet staticcheck test

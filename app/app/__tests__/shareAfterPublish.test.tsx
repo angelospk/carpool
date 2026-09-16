@@ -4,6 +4,8 @@ import type { ReactNode } from 'react';
 import { Share } from 'react-native';
 
 import PublishScreen from '../(tabs)/publish';
+import { ApiError } from '../../src/api/client';
+import el from '../../src/i18n/el.json';
 import { api } from '../../src/api/endpoints';
 
 jest.mock('expo-router', () => ({
@@ -107,8 +109,10 @@ test('the shared message describes what was published, not the form afterwards',
   fireEvent.press(screen.getByTestId('publish-submit'));
   await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
 
-  // Two edits after the fact: a different schedule and a different time.
+  // Two edits after the fact, so a regression that read either field live is
+  // caught: a different schedule and a different departure time.
   fireEvent.press(screen.getByTestId('preset-presetWeekend'));
+  fireEvent.changeText(screen.getByTestId('depart-earliest'), '18:45');
 
   fireEvent.press(await screen.findByTestId('publish-share-route'));
 
@@ -116,6 +120,8 @@ test('the shared message describes what was published, not the form afterwards',
   const message = share.mock.calls[0][0].message as string;
   expect(message).toContain('καθημερινές');
   expect(message).not.toContain('Σαββατοκύριακα');
+  expect(message).toContain('07:30');
+  expect(message).not.toContain('18:45');
 });
 
 // Publishing twice must not leave the first route's message behind the second
@@ -123,8 +129,12 @@ test('the shared message describes what was published, not the form afterwards',
 test('a second publish replaces what is offered for sharing', async () => {
   await pickBothEnds();
 
+  // Waits for the first publish to have *settled*, not just to have been
+  // called: the submit button is disabled while the mutation is in flight, so
+  // pressing again too early is a press that does nothing and a test that
+  // passes on timing.
   fireEvent.press(screen.getByTestId('publish-submit'));
-  await waitFor(() => expect(api.publishRoute).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.getByTestId('publish-share-route')).toBeTruthy());
 
   fireEvent.press(screen.getByTestId('preset-presetWeekend'));
   fireEvent.press(screen.getByTestId('publish-submit'));
@@ -147,13 +157,56 @@ test('an unpublished form offers no share', async () => {
 
 // A publish that failed leaves nothing published. Offering to share it would
 // be offering a route that does not exist.
+//
+// Waits for the failure to be *reported* rather than merely for the request to
+// have gone out: an earlier version asserted straight after the call and so
+// passed before any error handling ran, which means it would have kept passing
+// if that handling stopped working.
 test('a failed publish offers no share', async () => {
   (api.publishRoute as jest.Mock).mockRejectedValue(new Error('nope'));
 
   await pickBothEnds();
 
   fireEvent.press(screen.getByTestId('publish-submit'));
-  await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
 
+  await waitFor(() => expect(screen.getByText(el.common.error)).toBeTruthy());
+  expect(screen.queryByTestId('publish-share-route')).toBeNull();
+});
+
+// The route published a minute ago still exists when a second attempt fails, so
+// clearing the share on error was wrong twice over: it withdrew a truthful
+// offer, and it left the button next to an error message when it did not.
+// Clearing happens when a new attempt *starts* instead, which is the only
+// moment at which "what you just published" stops being the earlier route.
+test('a failed second publish does not leave a stale share behind an error', async () => {
+  await pickBothEnds();
+
+  fireEvent.press(screen.getByTestId('publish-submit'));
+  await waitFor(() => expect(screen.getByTestId('publish-share-route')).toBeTruthy());
+
+  (api.publishRoute as jest.Mock).mockRejectedValue(new Error('nope'));
+  fireEvent.press(screen.getByTestId('preset-presetWeekend'));
+  fireEvent.press(screen.getByTestId('publish-submit'));
+
+  await waitFor(() => expect(screen.getByText(el.common.error)).toBeTruthy());
+  // No share at all, rather than one describing the first route under a
+  // sentence saying the second one failed.
+  expect(screen.queryByTestId('publish-share-route')).toBeNull();
+});
+
+// A place the routing extract does not cover comes back as its own code, and
+// the driver needs to be told that rather than "something went wrong". Without
+// the snapping bound in geo.SnapRadiusMetres this was not even an error: OSRM
+// snapped the far end hundreds of kilometres and answered with a route.
+test('a place outside the routed area says so in its own words', async () => {
+  (api.publishRoute as jest.Mock).mockRejectedValue(
+    new ApiError(400, 'outside_service_area', 'one of those places is outside the area'),
+  );
+
+  await pickBothEnds();
+
+  fireEvent.press(screen.getByTestId('publish-submit'));
+
+  await waitFor(() => expect(screen.getByText(el.publish.outsideServiceArea)).toBeTruthy());
   expect(screen.queryByTestId('publish-share-route')).toBeNull();
 });
