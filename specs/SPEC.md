@@ -2,9 +2,11 @@
 
 ## Concept
 
-Local carpooling for one region (νομός / prefecture). At least one endpoint of every
-trip must lie inside the home region — this keeps the community local and the data
-small. Drivers declare routes they already drive (commutes, errands); passengers ask
+Local carpooling. Both ends of a trip must be inside Greece, which is as far as the
+map, the toll data and the routing go; there is no narrower geographic rule. The
+first sentence of this spec used to require at least one endpoint inside the
+caller's home region, and that rule is gone — see "Region model" below for what
+replaced it and why. Drivers declare routes they already drive (commutes, errands); passengers ask
 for rides; the system finds drivers whose route passes near the passenger's origin
 and destination with an acceptable detour, and *asks the driver* via notification.
 The driver always explicitly accepts. No dispatching, no obligation.
@@ -111,10 +113,26 @@ Three boundaries the formula above does not show:
 ## Region model
 
 - An instance hosts one or more regions (polygon per region, seeded from admin
-  GeoJSON, e.g. prefecture boundaries from OSM).
-- Rule: a trip or request is admissible if origin OR destination is inside the
-  user's home region.
+  GeoJSON, e.g. prefecture boundaries from OSM). The shipped fixture is
+  `fixtures/regions/greece.geojson`: all 75 περιφερειακές ενότητες, so every
+  coordinate in the country resolves to one.
+- Rule: a trip or request is admissible if **both** ends resolve to a region,
+  which in practice means both ends are in Greece. Refused otherwise, with
+  `outside_country`.
+- The home region is not an authorisation boundary. It once was — origin OR
+  destination had to be inside it — and the rule was removed because it stopped
+  describing anything real: it refused Θεσσαλονίκη → Αθήνα to somebody living in
+  Ξάνθη, which is exactly the journey a carpool is for, and it turned a profile
+  field into a permission. `internal/api/request_handlers.go` carries the
+  reasoning at the site.
+- What the region is still for: naming the fuel price to use, and telling
+  somebody where they are. Not gating.
 - Users pick a home region at sign-up; can change it.
+- The corridor this matters for is Αλεξανδρούπολη ↔ Κομοτηνή, two prefectures
+  and the spine of a ΔΠΘ pilot (NEXT.md §2). It is asserted end to end in
+  `internal/api/corridor_test.go` rather than left working by the absence of a
+  check, because a well-meant re-addition of a home-region guard would close it
+  again silently.
 
 ## Explicitly deferred (post-MVP)
 

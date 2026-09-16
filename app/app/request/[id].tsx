@@ -66,6 +66,13 @@ export default function RequestScreen() {
         {loading ? (
           <Hint testID="request-loading">{t('common.loading')}</Hint>
         ) : requests.isError ? (
+          // Reached only when the first fetch failed and there is nothing to
+          // show. A poll that fails later does not come through here: measured
+          // against react-query 5, a query holding data stays `success` when a
+          // refetch rejects, so the request a passenger is reading survives a
+          // bad moment of signal instead of being replaced by this and then
+          // restored. Guarding on `!requests.data` was tried and removed — it
+          // never fires, and dead code implying a hazard is worse than none.
           <Hint testID="request-failed">{t('home.requestsFailed')}</Hint>
         ) : mine ? (
           <>

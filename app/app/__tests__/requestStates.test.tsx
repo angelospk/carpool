@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react-native';
+import { act, render, screen, waitFor } from '@testing-library/react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
@@ -53,6 +53,72 @@ test('a list that failed to load says so rather than answering about drivers', a
 
   expect(await screen.findByTestId('request-failed')).toBeTruthy();
   expect(screen.queryByTestId('request-no-drivers')).toBeNull();
+});
+
+// The list polls every thirty seconds, so a passenger sitting on this screen
+// meets a transient network failure sooner or later, and the request they are
+// reading must not be replaced by an error box and then restored.
+//
+// It is not, and the reason is subtle enough to be worth pinning down. When a
+// refetch rejects over data that is already there, react-query 5 records the
+// error in the cache but keeps reporting `success` to the consumer, data
+// intact. So `requests.isError` never becomes true here and the screen needs no
+// guard of its own — one was tried and removed. This asserts the behaviour
+// because it belongs to the library rather than to this file: an upgrade that
+// changed it would break this screen silently, and nothing else would notice.
+//
+// The cache has to be the same across both fetches, which is why this holds the
+// QueryClient instead of calling wrap(). An earlier version re-wrapped on
+// rerender, handed the screen a brand new cache, and asserted nothing at all
+// while passing.
+test('a poll that fails leaves the request a passenger is reading alone', async () => {
+  const client = new QueryClient({
+    defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+  });
+  (api.myRequests as jest.Mock).mockResolvedValueOnce({
+    requests: [
+      {
+        id: 'req-1',
+        origin_label: 'Αλεξανδρούπολη',
+        destination_label: 'Ορεστιάδα',
+        window_start: '2026-09-17T04:30:00Z',
+        window_end: '2026-09-17T06:30:00Z',
+        seats: 1,
+        status: 'asking',
+        drivers_asked: 1,
+        drivers_declined: 0,
+        asking_now: true,
+        drivers_on_corridor: 1,
+        created_at: '2026-09-16T06:00:00Z',
+      },
+    ],
+  });
+
+  render(
+    <QueryClientProvider client={client}>
+      <RequestScreen />
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(screen.getByTestId('request-route')).toBeTruthy());
+
+  // The next poll fails, against the answer already in the cache.
+  (api.myRequests as jest.Mock).mockRejectedValue(new Error('offline'));
+  await act(async () => {
+    await client.refetchQueries({ queryKey: ['requests', 'mine'] });
+  });
+
+  // The rejection really happened. The cache records it — getQueryState says
+  // 'error' — and the observer deliberately does not pass it on while it holds
+  // data, which is the distinction this screen depends on and the reason the
+  // assertions below are about what is drawn rather than about query state.
+  expect(api.myRequests).toHaveBeenCalledTimes(2);
+  expect(client.getQueryState(['requests', 'mine'])?.status).toBe('error');
+
+  expect(screen.getByTestId('request-route')).toBeTruthy();
+  expect(screen.getByTestId('request-progress')).toBeTruthy();
+  expect(screen.queryByTestId('request-failed')).toBeNull();
+  // And cancelling is still offered, because there is still something to cancel.
+  expect(screen.getByTestId('cancel-request')).toBeTruthy();
 });
 
 // Matched, cancelled or expired: it left the open list on purpose, and the

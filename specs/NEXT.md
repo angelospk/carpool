@@ -140,22 +140,46 @@ fixed destination, poor bus coverage at shift-change hours), then Δήμος
 **Done when:** one institution has agreed to email its own people, or all four
 have said no in a way that says what would change their mind.
 
-### 2. Make the region a corridor, not a prefecture
+### 2. Make the region a corridor, not a prefecture — ALREADY TRUE
 
-Blocked by nothing; enables step 1's most likely partner. Today the region is one
-νομός. The change is to make the served area a configured set of places with the
-routing extract clipped to their bounding box — Evros plus Ροδόπη plus Ξάνθη for a
-ΔΠΘ pilot, or one town pair for a workplace pilot.
+**Measured 16 September 2026. Nothing was built, because every layer already
+allowed it and the documents had not been told.** Kept here rather than deleted,
+because the reasoning below is what somebody will re-derive otherwise.
 
-Watch the boundary rule, which is the part with teeth: `internal/places` stops at
-the Evros boundary deliberately, and REGION_FIXTURE seeds regions from a GeoJSON.
-The work is to let the fixture describe a multi-prefecture service area without
-turning "local" into "everywhere", since the whole-Greece extract costs 1.15 GB
-resident and that number is the reason the constraint exists.
+Each of the four things this item expected to have to change:
 
-**Done when:** an Αλεξανδρούπολη → Κομοτηνή route publishes and matches, the
-routing container is still under ~100 MiB, and a trip with neither endpoint in the
-service area is still refused.
+- **The places list.** Already the whole country: 12.442 settlements, Κομοτηνή
+  and Ξάνθη among them, asserted in `internal/places/national_test.go`. The
+  sentence above claiming `internal/places` stops at the Evros boundary was
+  stale, and so was the paragraph in README.md that repeated it. Both corrected.
+- **The regions.** `REGION_FIXTURE` already defaults to
+  `fixtures/regions/greece.geojson` in both compose files — all 75 περιφερειακές
+  ενότητες. Κομοτηνή resolves to Ροδόπης, not to nothing.
+- **The boundary rule.** Already gone from the code. `request_handlers.go`
+  refuses only what is outside Greece, and carries the reasoning at the site:
+  the home-region rule refused Θεσσαλονίκη → Αθήνα to somebody living in Ξάνθη
+  and had quietly turned a profile field into a permission. SPEC.md still
+  described the old rule as if it were live; corrected.
+- **The routing extract.** This was the one expected to need a rebuild, and it
+  does not. Measured against the *clipped* Evros extract — the one production
+  serves, 39 MiB resident — Αλεξανδρούπολη routes to Κομοτηνή in 58,3 km, to
+  Ξάνθη in 99,9 km, to Ορεστιάδα in 114,4 km and to Καβάλα in 104,2 km. The
+  ~30 km buffer around the prefecture already reaches across Ροδόπη and into
+  Ξάνθη, so the whole ΔΠΘ corridor is covered by the artifact already deployed.
+  No osmium clip, no re-preprocessing, no new file to ship.
+
+**Done, and now asserted rather than incidental.**
+`internal/api/corridor_test.go` seeds two prefectures that meet at 25,6°E,
+proves Αλεξανδρούπολη and Κομοτηνή land in different ones, then publishes a
+route and posts a request across the boundary through the real router and a real
+database — and checks that Σόφια → Φιλιππούπολη is still refused with
+`outside_country`. The corridor had been working by the *absence* of a check,
+which is the state in which a well-meant re-addition of a home-region guard
+closes it again silently, months after anybody remembers why it was open.
+
+The 1.15 GB figure for the whole-Greece extract still stands and is still the
+reason not to serve it. It simply was never what stood between this app and
+Κομοτηνή.
 
 ### 3. Verified trips, so somebody else can pay for them
 

@@ -59,8 +59,11 @@ again, because the app collects the name and region before it calls verify
 rather than after.
 
 Pickup points are typed as town names now, in Greek or Latin letters, with or
-without accents. The list covers the Evros prefecture and stops at its boundary,
-which is a real limit rather than a rounding: Κομοτηνή is in Ροδόπη. RISKS 15.
+without accents. The list is every city, town, village and hamlet in Greece —
+12.442 of them — so Κομοτηνή and Ξάνθη are findable, and so is Ηράκλειο. This
+paragraph used to say the list stopped at the Evros boundary; that stopped being
+true when the dataset went national, and the tests that prove it are in
+`internal/places/national_test.go`.
 
 To stop everything:
 
