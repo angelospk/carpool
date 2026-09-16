@@ -15,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api, type MyRoute } from '../../src/api/endpoints';
 import { Button, Card, Hint, Screen, SectionHeader, Title } from '../../src/components/ui';
+import { ShareRouteButton } from '../../src/components/ShareRouteButton';
 import { colors, space, type } from '../../src/design/tokens';
 
 export default function MyRoutesScreen() {
@@ -96,6 +97,7 @@ export default function MyRoutesScreen() {
               </Text>
             ) : null}
 
+            <ShareRouteButton route={r} testID={`share-${r.id}`} failedTestID={`share-failed-${r.id}`} />
             <Button
               testID={`retire-${r.id}`}
               label={t('profile.retire')}

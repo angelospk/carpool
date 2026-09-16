@@ -302,6 +302,15 @@
     "when": "When",
     "whatHappens": "We ask drivers heading that way, one at a time, and tell you as soon as somebody says yes. Nothing is charged."
   },
+  "share": {
+    "button": "Share this route",
+    "callToAction": "Message me if you want a seat.",
+    "everyday": "every day",
+    "seats_one": "I have 1 seat",
+    "seats_other": "I have {{count}} seats",
+    "weekdays": "weekdays",
+    "weekend": "weekends"
+  },
   "trip": {
     "cancel": "Cancel trip",
     "cancelConfirm": "This trip will not happen.",

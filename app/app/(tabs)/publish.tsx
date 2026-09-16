@@ -29,6 +29,8 @@ import { colors, space, type } from '../../src/design/tokens';
 import { type Pin } from '../../src/design/pin';
 import { PlaceField } from '../../src/components/PlaceField';
 import { MeetingPointField } from '../../src/components/MeetingPointField';
+import { ShareRouteButton } from '../../src/components/ShareRouteButton';
+import type { ShareableRoute } from '../../src/design/shareRoute';
 
 // The three answers that cover almost every published route. They replace the
 // set rather than adding to it: "καθημερινές" is a whole schedule, not five
@@ -90,10 +92,11 @@ export default function PublishScreen() {
   const garage = useQuery({ queryKey: ['vehicles'], queryFn: api.vehicles });
   const noCar = garage.isSuccess && garage.data.length === 0;
   const [outcome, setOutcome] = useState<string | null>(null);
+  const [published, setPublished] = useState<ShareableRoute | null>(null);
 
 
   const publish = useMutation({
-    mutationFn: () =>
+    mutationFn: (snap: ShareableRoute) =>
       api.publishRoute({
         // The landmark when one was chosen, the settlement otherwise. This is
         // the whole point of offering them: "Φέρες" is a town and "Φέρες, στο
@@ -102,12 +105,12 @@ export default function PublishScreen() {
         origin_lat: fromPoint?.lat ?? (from as Pin).lat,
         destination_lon: toPoint?.lon ?? (to as Pin).lon,
         destination_lat: toPoint?.lat ?? (to as Pin).lat,
-        origin_label: label(from as Pin, fromPoint),
-        destination_label: label(to as Pin, toPoint),
-        seats,
+        origin_label: snap.origin_label,
+        destination_label: snap.destination_label,
+        seats: snap.seats,
         kind: 'recurring',
-        weekdays,
-        depart_earliest: earliest,
+        weekdays: snap.weekdays,
+        depart_earliest: snap.depart_earliest,
         depart_latest: latest,
         ...(allowStops !== null ? { allow_stops: allowStops } : {}),
         ...(detourKm !== null ? { detour_km: detourKm } : {}),
@@ -120,8 +123,11 @@ export default function PublishScreen() {
         // the request that the receipt could not later explain.
         ...(pricing === 'formula' ? { contribution_share: share } : {}),
       }),
-    onSuccess: (r) => setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`),
-    onError: (e) =>
+    onSuccess: (r, snap) => {
+      setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`);
+      setPublished(snap);
+    },
+    onError: (e) => {
       setOutcome(
         // The server's own wording is English, and it reached the screen
         // verbatim: a Greek pilot user was told "add your car details before
@@ -129,7 +135,11 @@ export default function PublishScreen() {
         e instanceof ApiError && (e.code === 'no_driver_profile' || e.code === 'no_vehicle')
           ? t('publish.noDriverProfile')
           : t('common.error'),
-      ),
+      );
+      // A publish that failed leaves nothing published, so there is nothing
+      // to share.
+      setPublished(null);
+    },
   });
 
   const toggle = (iso: number) =>
@@ -329,6 +339,13 @@ export default function PublishScreen() {
         </Card>
 
         {outcome ? <Hint>{outcome}</Hint> : null}
+        {published !== null ? (
+          <ShareRouteButton
+            route={published}
+            testID="publish-share-route"
+            failedTestID="publish-share-failed"
+          />
+        ) : null}
         {noCar ? <Hint>{t('publish.noDriverProfile')}</Hint> : null}
         {/* A boot with nothing left in it and a luggage size still chosen is a
             pair the database refuses. Saying so here is better than a 400 after
@@ -338,7 +355,19 @@ export default function PublishScreen() {
         <Button
           testID="publish-submit"
           label={t('publish.publish')}
-          onPress={() => publish.mutate()}
+          // The snapshot is what was sent, not what the form says later: the
+          // form stays editable after publishing, and sharing the edited
+          // fields would send a schedule nobody can be picked up on.
+          onPress={() =>
+            publish.mutate({
+              origin_label: label(from as Pin, fromPoint),
+              destination_label: label(to as Pin, toPoint),
+              kind: 'recurring',
+              weekdays: [...weekdays],
+              depart_earliest: earliest,
+              seats,
+            })
+          }
           disabled={!from || !to || !weekdays.length || noCar || noBootLeft || publish.isPending}
         />
       </ScrollView>

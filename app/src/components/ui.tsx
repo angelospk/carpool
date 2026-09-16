@@ -72,8 +72,12 @@ export function SectionHeader({ title, action }: { title: string; action?: React
   );
 }
 
-export function Hint({ children }: { children: ReactNode }) {
-  return <Text style={styles.hint}>{children}</Text>;
+export function Hint({ children, testID }: { children: ReactNode; testID?: string }) {
+  return (
+    <Text testID={testID} style={styles.hint}>
+      {children}
+    </Text>
+  );
 }
 
 /** The floating white surface everything else sits in. */
