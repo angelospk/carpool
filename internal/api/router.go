@@ -156,6 +156,11 @@ func NewRouter(deps Deps) http.Handler {
 			// What the caller is still waiting on. Read-only over the pool, so
 			// it sits outside the matcher's guard below — see the handler.
 			r.Get("/requests/mine", deps.handleMyRequests)
+
+			// The other direction: which roads people are waiting on, for a
+			// driver deciding whether publishing is worth it. Counts only, and
+			// behind auth because it is other people's journeys.
+			r.Get("/demand", deps.handleDemand)
 			r.Delete("/me/routes/{id}", deps.handleRetireRoute)
 
 			if deps.PhoneChange != nil {

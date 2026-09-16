@@ -36,7 +36,16 @@ type OpenRequest struct {
 	// until the sweeper moves it on, and claiming otherwise would leave the
 	// screen saying "we are asking someone" at a driver who stopped reading.
 	AskingNow bool
-	CreatedAt time.Time
+	// DriversOnCorridor counts drivers with a published route that could ever
+	// serve this corridor, so the app can tell "nobody drives this road" apart
+	// from "nobody has been asked yet".
+	//
+	// It deliberately ignores dates, seats, luggage, blocks and
+	// notifications_muted, unlike the matcher in waiting.go: the question is
+	// whether anybody drives this road, not whether they can take this
+	// particular trip.
+	DriversOnCorridor int
+	CreatedAt         time.Time
 }
 
 // OpenRequests lists what the caller is still waiting on, newest first.
@@ -61,15 +70,37 @@ func OpenRequests(
 		       count(DISTINCT t.driver_id),
 		       count(DISTINCT t.driver_id) FILTER (WHERE a.status IN ('declined','expired')),
 		       coalesce(bool_or(a.status = 'pending' AND a.expires_at > $2), false),
+		       corridor.drivers,
 		       r.created_at
 		FROM ride_requests r
 		LEFT JOIN asks a             ON a.request_id = r.id
 		LEFT JOIN trip_occurrences o ON o.id = a.occurrence_id
 		LEFT JOIN route_templates t  ON t.id = o.template_id
+		-- One row per request: whether anybody drives this road at all. The
+		-- corridor join is deliberately wider than the matcher in waiting.go —
+		-- no dates, seats, luggage, blocks or muted checks — because a driver
+		-- who exists but cannot take this trip is still somebody to wait for.
+		-- ct rather than t: the outer query already has route_templates as t for
+		-- the asks join. Postgres resolves the inner alias, but a reader who
+		-- misses the shadowing reads this as counting the drivers already asked.
+		LEFT JOIN LATERAL (
+			SELECT count(DISTINCT ct.driver_id) AS drivers
+			FROM route_templates ct
+			JOIN driver_profiles d ON d.user_id = ct.driver_id
+			JOIN users du ON du.id = ct.driver_id AND du.status = 'active'
+			WHERE ct.active
+			  AND ct.driver_id <> r.passenger_id
+			  AND ST_DWithin(ct.route_geom::geography, r.origin::geography,
+			                 d.notify_radius_km * 1000)
+			  AND ST_DWithin(ct.route_geom::geography, r.destination::geography,
+			                 d.notify_radius_km * 1000)
+			  AND ST_LineLocatePoint(ct.route_geom, ST_ClosestPoint(ct.route_geom, r.origin))
+			    < ST_LineLocatePoint(ct.route_geom, ST_ClosestPoint(ct.route_geom, r.destination))
+		) corridor ON true
 		WHERE r.passenger_id = $1
 		  AND r.status IN ('open','asking')
 		  AND r.window_end > $2
-		GROUP BY r.id
+		GROUP BY r.id, corridor.drivers
 		ORDER BY r.created_at DESC, r.id DESC
 		LIMIT $3`, userID, now, limit)
 	if err != nil {
@@ -82,7 +113,7 @@ func OpenRequests(
 		var q OpenRequest
 		if err := rows.Scan(&q.ID, &q.OriginLabel, &q.DestinationLabel,
 			&q.WindowStart, &q.WindowEnd, &q.Seats, &q.Status,
-			&q.DriversAsked, &q.DriversDeclined, &q.AskingNow, &q.CreatedAt); err != nil {
+			&q.DriversAsked, &q.DriversDeclined, &q.AskingNow, &q.DriversOnCorridor, &q.CreatedAt); err != nil {
 			return nil, fmt.Errorf("store: scanning an open request: %w", err)
 		}
 		out = append(out, q)

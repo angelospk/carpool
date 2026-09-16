@@ -31,6 +31,24 @@ beforeEach(() => {
   (api.myRequests as jest.Mock).mockResolvedValue({ requests: [] });
 });
 
+// The request the cancel tests are about. Cancelling is only offered once the
+// screen knows what it is cancelling, so these three have to start from a
+// request that is actually in the open list.
+const asking = {
+  id: 'req-1',
+  origin_label: 'Αλεξανδρούπολη',
+  destination_label: 'Κομοτηνή',
+  window_start: '2026-07-29T04:30:00Z',
+  window_end: '2026-07-29T06:30:00Z',
+  seats: 1,
+  status: 'asking',
+  drivers_asked: 2,
+  drivers_declined: 1,
+  asking_now: true,
+  drivers_on_corridor: 1,
+  created_at: '2026-07-29T04:00:00Z',
+};
+
 // The card on the home screen says how far the search has got. Opening it used
 // to show a pulsing dot over a raw uuid, which is less than the card said.
 test('the screen says the same thing the card that led here said', async () => {
@@ -71,8 +89,10 @@ test('a request that is not in the list falls back to the general wording', asyn
 test('cancelling a request that is still asking takes them home', async () => {
   (api.cancelRequest as jest.Mock).mockResolvedValue(undefined);
 
+  (api.myRequests as jest.Mock).mockResolvedValue({ requests: [asking] });
+
   render(wrap(<RequestScreen />));
-  fireEvent.press(screen.getByTestId('cancel-request'));
+  fireEvent.press(await screen.findByTestId('cancel-request'));
 
   await waitFor(() => expect(mockReplace).toHaveBeenCalled());
 });
@@ -86,8 +106,10 @@ test('a driver taking the ride keeps them on the screen and says so', async () =
     new ApiError(409, 'already_matched', 'a driver has taken this ride'),
   );
 
+  (api.myRequests as jest.Mock).mockResolvedValue({ requests: [asking] });
+
   render(wrap(<RequestScreen />));
-  fireEvent.press(screen.getByTestId('cancel-request'));
+  fireEvent.press(await screen.findByTestId('cancel-request'));
 
   await waitFor(() => expect(screen.getByTestId('request-outcome')).toBeTruthy());
   expect(mockReplace).not.toHaveBeenCalled();
@@ -96,8 +118,10 @@ test('a driver taking the ride keeps them on the screen and says so', async () =
 test('a failure to cancel is not read as a cancellation', async () => {
   (api.cancelRequest as jest.Mock).mockRejectedValue(new ApiError(500, 'internal', 'boom'));
 
+  (api.myRequests as jest.Mock).mockResolvedValue({ requests: [asking] });
+
   render(wrap(<RequestScreen />));
-  fireEvent.press(screen.getByTestId('cancel-request'));
+  fireEvent.press(await screen.findByTestId('cancel-request'));
 
   await waitFor(() => expect(screen.getByTestId('request-outcome')).toBeTruthy());
   expect(mockReplace).not.toHaveBeenCalled();

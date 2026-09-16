@@ -102,6 +102,8 @@ export function OpenRequests() {
  * οδηγοί δεν μπορούσαν" on its own reads as a refusal rather than as progress.
  */
 export function requestProgress(request: OpenRequest, t: TFunction): string {
+  if (request.drivers_asked === 0 && request.drivers_on_corridor === 0)
+    return t('home.requestNoDrivers');
   const declined =
     request.drivers_declined > 0
       ? ` ${t('home.requestDeclined', { count: request.drivers_declined })}`

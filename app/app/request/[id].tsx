@@ -26,10 +26,12 @@ export default function RequestScreen() {
   // than the card said, which made opening it a step backwards.
   //
   // It polls, so the count of drivers who could not climbs while somebody sits
-  // here. Not found means matched, cancelled, expired, or simply not loaded
-  // yet, and none of those is worth guessing at out loud.
+  // here. A missing list and a missing request are different news from a road
+  // nobody drives: loading, failure and closed each get their own sentence, and
+  // only a request on an empty road may claim anything about supply.
   const requests = useOpenRequests();
   const mine = requests.data?.requests.find((q) => q.id === id) ?? null;
+  const loading = requests.isLoading || (requests.isPending && !requests.data);
 
   const cancel = useMutation({
     mutationFn: () => api.cancelRequest(id),
@@ -61,7 +63,11 @@ export default function RequestScreen() {
       <Title>{t('request.title')}</Title>
 
       <Card>
-        {mine ? (
+        {loading ? (
+          <Hint testID="request-loading">{t('common.loading')}</Hint>
+        ) : requests.isError ? (
+          <Hint testID="request-failed">{t('home.requestsFailed')}</Hint>
+        ) : mine ? (
           <>
             <Text testID="request-route" style={styles.route}>
               {mine.origin_label} → {mine.destination_label}
@@ -80,10 +86,9 @@ export default function RequestScreen() {
             </View>
           </>
         ) : (
-          // Not in the open list means matched, cancelled, expired, or simply
-          // not loaded yet. None of those is "nobody is driving", so this must
-          // not be read as an answer about supply.
-          <Hint>{t('search.noDrivers')}</Hint>
+          // Matched, cancelled or expired: it left the open list on purpose,
+          // and it is no longer being waited on.
+          <Hint testID="request-closed">{t('request.closed')}</Hint>
         )}
       </Card>
 
@@ -114,13 +119,20 @@ export default function RequestScreen() {
             label={t('request.backHome')}
             onPress={() => router.replace('/(tabs)')}
           />
-          <Button
-            testID="cancel-request"
-            label={t('request.cancel')}
-            variant="secondary"
-            onPress={() => cancel.mutate()}
-            disabled={cancel.isPending}
-          />
+          {/* Cancelling needs something to cancel. The button used to be drawn
+              whatever state the screen was in, so a request that had already
+              been matched or called off still offered to cancel itself — a
+              DELETE against something that is not open — and while the list was
+              still loading it offered to cancel a request nobody could see. */}
+          {mine ? (
+            <Button
+              testID="cancel-request"
+              label={t('request.cancel')}
+              variant="secondary"
+              onPress={() => cancel.mutate()}
+              disabled={cancel.isPending}
+            />
+          ) : null}
         </View>
       )}
     </Screen>

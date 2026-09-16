@@ -60,6 +60,11 @@
     "freeHint": "No figure is suggested. Whatever the passenger gives is between the two of you.",
     "less": "I ask for less than my share"
   },
+  "demand": {
+    "title": "Who is looking this week",
+    "people_one": "{{count}} person is looking for {{from}} → {{to}}",
+    "people_other": "{{count}} people are looking for {{from}} → {{to}}"
+  },
   "estimate": {
     "about": "Estimated share of the fuel: about {{amount}}",
     "basis": "For {{km}} km, with a typical car and {{seats}} seats offered.",
@@ -109,6 +114,7 @@
     "againNone": "No next trip with a free seat",
     "requests": "What you are waiting on",
     "requestNobody": "No driver has been asked yet.",
+    "requestNoDrivers": "Nobody has published this road yet. Your request stays open and you will be told as soon as somebody does.",
     "requestAsking": "A driver is being asked right now.",
     "requestSearching": "Looking for the next driver.",
     "requestWaiting": "Waiting for an answer.",
@@ -288,6 +294,7 @@
     "title": "Your request",
     "backHome": "Back to home",
     "cancel": "Cancel request",
+    "closed": "This request is no longer open.",
     "leaveOk": "You can close the app. We will notify you as soon as a driver accepts."
   },
   "search": {

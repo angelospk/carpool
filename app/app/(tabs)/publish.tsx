@@ -30,6 +30,7 @@ import { type Pin } from '../../src/design/pin';
 import { PlaceField } from '../../src/components/PlaceField';
 import { MeetingPointField } from '../../src/components/MeetingPointField';
 import { ShareRouteButton } from '../../src/components/ShareRouteButton';
+import { Demand } from '../../src/components/Demand';
 import type { ShareableRoute } from '../../src/design/shareRoute';
 
 // The three answers that cover almost every published route. They replace the
@@ -153,6 +154,11 @@ export default function PublishScreen() {
     <Screen topInset>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Title>{t('publish.title')}</Title>
+
+        {/* Whoever is already looking for a lift, before the form asks for
+            anything. A driver deciding whether this is worth ninety seconds is
+            deciding it here. */}
+        <Demand />
 
         <SectionHeader title={t('publish.route')} />
         <Card>

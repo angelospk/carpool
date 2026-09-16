@@ -20,6 +20,13 @@ export type MyRoute = {
   upcoming_trips: number;
 };
 
+/** A road somebody is waiting on, and how many people are. Never who. */
+export type Corridor = {
+  origin_label: string;
+  destination_label: string;
+  people: number;
+};
+
 export type Place = {
   id: string;
   kind: 'city' | 'town' | 'village' | 'hamlet';
@@ -258,6 +265,8 @@ export type OpenRequest = {
   drivers_declined: number;
   /** Somebody is looking at it this minute. An ask that has lapsed is not. */
   asking_now: boolean;
+  /** Absent from a server that predates the field. Absent is not zero. */
+  drivers_on_corridor?: number;
   created_at: string;
 };
 
@@ -378,6 +387,13 @@ export const api = {
 
   /** A driver calling off one departure. Retiring a route is the other act. */
   cancelTrip: (id: string) => request<void>(`/v1/trips/${id}`, { method: 'DELETE' }),
+
+  /**
+   * Which roads people are waiting on, for a driver deciding whether to
+   * publish. Counts only: the server sends a corridor and a number, and that
+   * is the whole of what it is allowed to send.
+   */
+  demand: () => request<{ corridors: Corridor[]; period_days: number }>('/v1/demand'),
 
   myRoutes: () => request<{ routes: MyRoute[] }>('/v1/me/routes'),
 

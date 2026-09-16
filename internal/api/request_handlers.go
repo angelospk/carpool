@@ -165,17 +165,18 @@ func (d Deps) handleMyRequests(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0, len(list))
 	for _, q := range list {
 		out = append(out, map[string]any{
-			"id":                q.ID,
-			"origin_label":      q.OriginLabel,
-			"destination_label": q.DestinationLabel,
-			"window_start":      q.WindowStart,
-			"window_end":        q.WindowEnd,
-			"seats":             q.Seats,
-			"status":            q.Status,
-			"drivers_asked":     q.DriversAsked,
-			"drivers_declined":  q.DriversDeclined,
-			"asking_now":        q.AskingNow,
-			"created_at":        q.CreatedAt,
+			"id":                  q.ID,
+			"origin_label":        q.OriginLabel,
+			"destination_label":   q.DestinationLabel,
+			"window_start":        q.WindowStart,
+			"window_end":          q.WindowEnd,
+			"seats":               q.Seats,
+			"status":              q.Status,
+			"drivers_asked":       q.DriversAsked,
+			"drivers_declined":    q.DriversDeclined,
+			"asking_now":          q.AskingNow,
+			"drivers_on_corridor": q.DriversOnCorridor,
+			"created_at":          q.CreatedAt,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"requests": out})
