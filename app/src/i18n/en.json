@@ -131,7 +131,7 @@
     "seatsFree_other": "{{count}} seats free",
     "seatsFull": "Full",
     "contribution": "Suggested contribution",
-    "requestStranded": "Your driver cancelled and we are already looking for another."
+    "requestStranded": "Your driver cancelled. Your request stands and we are looking for another."
   },
   "luggage": {
     "bulky": "A bicycle, skis, a pushchair",
@@ -303,7 +303,9 @@
     "noAlternatives": "No other car on your road for now. The request stays open.",
     "seatsFree_one": "{{count}} seat",
     "seatsFree_other": "{{count}} seats",
-    "busFallback": "KTEL Evros timetables"
+    "busFallback": "KTEL Evros timetables",
+    "strandedNobody": "Your driver cancelled. Your request stays open and we will ask any driver who appears on your road.",
+    "alternativesFailed": "The other cars did not load."
   },
   "search": {
     "asking": "Asking a driver…",
@@ -324,7 +326,8 @@
     "seats_one": "I have 1 seat",
     "seats_other": "I have {{count}} seats",
     "weekdays": "weekdays",
-    "weekend": "weekends"
+    "weekend": "weekends",
+    "copied": "Copied. Paste it into the chat."
   },
   "trip": {
     "cancel": "Cancel trip",
@@ -455,7 +458,11 @@
     "ago": "{{name}} · {{minutes}}′ ago",
     "openMap": "Map",
     "denied": "Without location permission your location cannot be shared.",
-    "who": "Only the driver and their passengers see it. Passengers do not see each other."
+    "who": "Only the driver and their passengers see it. Passengers do not see each other.",
+    "now": "{{name}} · now",
+    "failed": "Location did not load.",
+    "sendFailed": "Your location is not being sent. Check your connection.",
+    "stopFailed": "Your location was not removed. Try again."
   },
   "sharedRoute": {
     "title": "Route",

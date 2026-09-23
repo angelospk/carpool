@@ -48,6 +48,7 @@ go build -o bin/api ./cmd/api
 DATABASE_URL="postgres://carpool:carpool@localhost:5433/$DB?sslmode=disable" \
 JWT_SECRET="lan-dev-secret-that-is-long-enough-32b" \
 DEV_MODE=true HTTP_ADDR="0.0.0.0:$API_PORT" \
+PUBLIC_BASE_URL="http://$IP:$API_PORT" \
 REGION_FIXTURE=fixtures/regions/greece.geojson \
   setsid ./bin/api < /dev/null > /tmp/api-lan.log 2>&1 &
 disown

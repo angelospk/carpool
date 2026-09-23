@@ -125,6 +125,8 @@ func NewRouter(deps Deps) http.Handler {
 		// A route link, as tapped in a chat. Outside /v1 because it is a page
 		// for a person, not an API for the app.
 		r.With(public.middleware).Get("/r/{token}", deps.handleRoutePage)
+		// Some chat apps ask with HEAD before they fetch a preview.
+		r.With(public.middleware).Head("/r/{token}", deps.handleRoutePage)
 	}
 
 	r.Route("/v1", func(r chi.Router) {

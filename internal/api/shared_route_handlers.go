@@ -143,6 +143,8 @@ var routePage = template.Must(template.New("route").Parse(`<!doctype html>
 <html lang="el"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
+{{if .Route}}<meta property="og:title" content="{{.Route.OriginLabel}} → {{.Route.DestinationLabel}}">
+<meta property="og:description" content="{{.Schedule}} · {{.Route.DepartEarliest}}–{{.Route.DepartLatest}} · {{.Route.Seats}} θέσεις">{{end}}
 <title>{{if .Route}}{{.Route.OriginLabel}} → {{.Route.DestinationLabel}}{{else}}Διαδρομή{{end}}</title>
 <style>
 body{font-family:system-ui,sans-serif;background:#f6f5f1;color:#1d2521;margin:0;padding:24px;line-height:1.5}

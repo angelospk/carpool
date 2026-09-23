@@ -188,3 +188,24 @@ describe('PlaceField', () => {
     expect(within(screen.getByTestId('from-node/11')).getByText(/Γρεβενών/)).toBeTruthy();
   });
 });
+
+// QA found this: a place handed down after the field was drawn — a suggestion
+// on the home screen, or a route link — was held but never shown, so the form
+// looked empty while it was about to search for two towns.
+describe('PlaceField given a place from outside', () => {
+  it('shows a place its parent sets after it was drawn', () => {
+    const onChange = jest.fn();
+    const { rerender } = render(<PlaceField testID="from" label="Από" value={null} onChange={onChange} />);
+    rerender(
+      <PlaceField
+        testID="from"
+        label="Από"
+        value={{ label: 'Φέρες', lon: 26.17, lat: 40.89 }}
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByTestId('from-input').props.value).toBe('Φέρες');
+    // Showing it is not a change the field made, so nothing goes back up.
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});

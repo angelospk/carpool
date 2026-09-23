@@ -9,13 +9,14 @@
 // time from the trip itself.
 
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api, type MyRoute } from '../../src/api/endpoints';
 import { Button, Card, Hint, Screen, SectionHeader, Title } from '../../src/components/ui';
 import { ShareRouteButton } from '../../src/components/ShareRouteButton';
+import { confirm } from '../../src/components/confirm';
 import { colors, space, type } from '../../src/design/tokens';
 
 export default function MyRoutesScreen() {
@@ -45,10 +46,14 @@ export default function MyRoutesScreen() {
       route.upcoming_trips > 0
         ? t('profile.retireWithTrips', { count: route.upcoming_trips })
         : t('profile.retireConfirm');
-    Alert.alert(t('profile.retire'), ask, [
-      { text: t('common.cancel'), style: 'cancel' },
-      { text: t('profile.retire'), style: 'destructive', onPress: () => retire.mutate(route.id) },
-    ]);
+    confirm({
+      title: t('profile.retire'),
+      message: ask,
+      confirmLabel: t('profile.retire'),
+      cancelLabel: t('common.cancel'),
+      destructive: true,
+      onConfirm: () => retire.mutate(route.id),
+    });
   };
 
   return (

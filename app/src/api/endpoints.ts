@@ -602,7 +602,8 @@ export const api = {
     request<{ opens: string; closes: string; positions: LivePosition[] }>(`/v1/trips/${id}/live`),
   putPosition: (id: string, lat: number, lon: number) =>
     request<void>(`/v1/trips/${id}/position`, { method: 'PUT', body: { lat, lon } }),
-  stopPosition: (id: string) => request<void>(`/v1/trips/${id}/position`, { method: 'DELETE' }),
+  stopPosition: (id: string, keepalive = false) =>
+    request<void>(`/v1/trips/${id}/position`, { method: 'DELETE', keepalive }),
 
   messages: (id: string) => request<{ messages: Message[] }>(`/v1/trips/${id}/messages`),
   postMessage: (id: string, body: string) =>

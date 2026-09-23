@@ -30,3 +30,13 @@ export function exportMonths(now: Date): [string, string] {
   const current = monthOf(now);
   return [previousMonth(current), current];
 }
+
+/** "Αύγουστος 2026" for 2026-08, in the app's language. */
+export function monthName(month: string, locale = 'el-GR'): string {
+  const [y, m] = month.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString(locale, {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}

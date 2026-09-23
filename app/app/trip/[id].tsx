@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, FlatList, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -26,6 +26,8 @@ import { PreferenceChips } from '../../src/components/Preferences';
 import { SharedGroups } from '../../src/components/SharedGroups';
 import { LiveCard } from '../../src/components/LiveCard';
 import { tripShareMessage } from '../../src/design/tripShare';
+import { confirm as askFirst } from '../../src/components/confirm';
+import { shareText } from '../../src/components/shareText';
 import { Map } from '../../src/map/Map';
 import polyline from '@mapbox/polyline';
 import { haveTiles } from '../../src/map/tiles';
@@ -247,9 +249,9 @@ export default function TripScreen() {
                   label={t('tripShare.button')}
                   variant="secondary"
                   onPress={() =>
-                    void Share.share({ message: tripShareMessage(trip.data, t) }).catch(() =>
-                      setNotice(t('common.error')),
-                    )
+                    void shareText(tripShareMessage(trip.data, t))
+                      .then((how) => how === 'copied' && setNotice(t('share.copied')))
+                      .catch(() => setNotice(t('common.error')))
                   }
                 />
 
@@ -298,20 +300,17 @@ export default function TripScreen() {
                     variant="danger"
                     disabled={cancel.isPending}
                     onPress={() =>
-                      Alert.alert(
-                        t('trip.cancel'),
-                        trip.data.passengers.length > 0
-                          ? t('trip.cancelWithPassengers', { count: trip.data.passengers.length })
-                          : t('trip.cancelConfirm'),
-                        [
-                          { text: t('common.cancel'), style: 'cancel' },
-                          {
-                            text: t('trip.cancel'),
-                            style: 'destructive',
-                            onPress: () => cancel.mutate(),
-                          },
-                        ],
-                      )
+                      askFirst({
+                        title: t('trip.cancel'),
+                        message:
+                          trip.data.passengers.length > 0
+                            ? t('trip.cancelWithPassengers', { count: trip.data.passengers.length })
+                            : t('trip.cancelConfirm'),
+                        confirmLabel: t('trip.cancel'),
+                        cancelLabel: t('common.cancel'),
+                        destructive: true,
+                        onConfirm: () => cancel.mutate(),
+                      })
                     }
                   />
                 ) : null}

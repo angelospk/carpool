@@ -105,8 +105,12 @@ export function requestProgress(request: OpenRequest, t: TFunction): string {
   // Somebody whose driver took the seat back has to hear that first, and that
   // the search started again without them doing anything. Otherwise the card
   // reads exactly like a request nobody ever answered.
-  const progress = progressOf(request, t);
-  return request.stranded ? `${t('home.requestStranded')} ${progress}` : progress;
+  if (!request.stranded) return progressOf(request, t);
+  // The driver who cancelled was asked, so "waiting for an answer" would be
+  // about them. Only a live ask to somebody new is worth adding.
+  return request.asking_now
+    ? `${t('home.requestStranded')} ${t('home.requestAsking')}`
+    : t('home.requestStranded');
 }
 
 function progressOf(request: OpenRequest, t: TFunction): string {

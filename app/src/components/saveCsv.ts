@@ -9,14 +9,19 @@ import { Platform, Share } from 'react-native';
 
 export async function saveCsv(filename: string, csv: string): Promise<void> {
   if (Platform.OS === 'web' && typeof document !== 'undefined') {
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    // The server sends a byte-order mark so a spreadsheet reads Greek as Greek;
+    // kept, or added if something upstream stripped it.
+    const body = csv.startsWith('\uFEFF') ? csv : '\uFEFF' + csv;
+    const url = URL.createObjectURL(new Blob([body], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    // Revoked on the next tick: some browsers start the download after click()
+    // returns, and a URL revoked first downloads nothing.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
     return;
   }
   await Share.share({ title: filename, message: csv });

@@ -54,6 +54,19 @@ export function PlaceField({
   // has to hold on the keystroke itself, not one render later.
   const selected = useRef<string | null>(value?.label ?? null);
 
+  // A place handed down from outside — a suggestion, a route link — after the
+  // field was drawn. useState only reads its initial value once, so without
+  // this the field held the place and showed an empty box. Marked as selected
+  // first, so the search the new text would start is not asked, and nothing
+  // is handed back up: the parent already knows.
+  const outside = value?.label ?? null;
+  useEffect(() => {
+    if (outside !== null && outside !== selected.current) {
+      selected.current = outside;
+      setText(outside);
+    }
+  }, [outside]);
+
   const edit = (next: string) => {
     setText(next);
     // Cleared on the first keystroke rather than on blur. In between, the field

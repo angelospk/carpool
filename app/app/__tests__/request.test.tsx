@@ -22,7 +22,9 @@ jest.mock('../../src/state/session', () => ({
 }));
 
 function wrap(node: ReactNode) {
-  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+  const client = new QueryClient({
+    defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+  });
   return <QueryClientProvider client={client}>{node}</QueryClientProvider>;
 }
 
@@ -165,4 +167,26 @@ test('an ordinary request does not look for alternatives', async () => {
   await waitFor(() => expect(screen.getByTestId('request-progress')).toBeTruthy());
   expect(screen.queryByTestId('request-stranded')).toBeNull();
   expect(api.requestAlternatives).not.toHaveBeenCalled();
+});
+
+// QA found this: "we are asking the next one" and "waiting for an answer"
+// directly above "there is no other car on your road".
+test('a stranded request with nobody left says so without claiming a search', async () => {
+  (api.myRequests as jest.Mock).mockResolvedValue({
+    requests: [{ ...asking, stranded: true, asking_now: false }],
+  });
+  (api.requestAlternatives as jest.Mock).mockResolvedValue({ alternatives: [] });
+  render(wrap(<RequestScreen />));
+  await waitFor(() => expect(screen.getByTestId('request-no-alternatives')).toBeTruthy());
+  const title = String(screen.getByTestId('request-stranded-title').props.children);
+  expect(title).not.toContain('ρωτάμε ήδη');
+  expect(String(screen.getByTestId('request-progress').props.children)).not.toContain('Περιμένουμε');
+});
+
+test('alternatives that fail to load say so and can be retried', async () => {
+  (api.myRequests as jest.Mock).mockResolvedValue({ requests: [{ ...asking, stranded: true }] });
+  (api.requestAlternatives as jest.Mock).mockRejectedValue(new Error('offline'));
+  render(wrap(<RequestScreen />));
+  await waitFor(() => expect(screen.getByTestId('request-alternatives-failed')).toBeTruthy());
+  expect(screen.getByTestId('request-alternatives-retry')).toBeTruthy();
 });

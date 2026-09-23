@@ -10,8 +10,9 @@
 // answer, offers the button inside the window, and stops cleanly outside it.
 
 import { useEffect, useRef, useState } from 'react';
-import { Linking, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { useQuery } from '@tanstack/react-query';
 import * as Location from 'expo-location';
 
@@ -33,48 +34,120 @@ export function LiveCard({ tripId, now = () => Date.now() }: { tripId: string; n
   const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const watch = useRef<Location.LocationSubscription | null>(null);
+  // Bumped by every start and every stop. A callback, a permission prompt or a
+  // watch that resolves under an older generation belongs to sharing that has
+  // already ended, and does nothing — including the watch that finishes being
+  // created after the screen was closed, which is removed on arrival.
+  const generation = useRef(0);
+  const starting = useRef(false);
+  // The last upload still in flight. Stopping waits for it before deleting, or
+  // a PUT that left before the DELETE can land after it and put the position
+  // back — which is what QA saw when leaving the screen.
+  const inFlight = useRef<Promise<unknown>>(Promise.resolve());
+  const failures = useRef(0);
+
+  const forget = () => {
+    const done = inFlight.current;
+    return done.catch(() => undefined).then(() => api.stopPosition(tripId));
+  };
 
   const stop = async () => {
+    generation.current++;
     watch.current?.remove();
     watch.current = null;
     setSharing(false);
-    await api.stopPosition(tripId).catch(() => undefined);
+    try {
+      await forget();
+    } catch {
+      setError(t('live.stopFailed'));
+    }
   };
 
   // Leaving the screen stops sharing, which is what the hint promised.
   useEffect(
     () => () => {
+      generation.current++;
       if (watch.current) {
         watch.current.remove();
         watch.current = null;
-        void api.stopPosition(tripId).catch(() => undefined);
+        void forget().catch(() => undefined);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [tripId],
   );
 
+  // A browser tab closing, or going to another page, unloads without
+  // unmounting anything, so the cleanup above never runs. pagehide does, and a
+  // keepalive request is allowed to finish after the page is gone.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !sharing) return;
+    const onHide = () => void api.stopPosition(tripId, true).catch(() => undefined);
+    window.addEventListener('pagehide', onHide);
+    return () => window.removeEventListener('pagehide', onHide);
+  }, [sharing, tripId]);
+
   const start = async () => {
+    if (starting.current || watch.current) return;
+    starting.current = true;
     setError(null);
-    const permission = await Location.requestForegroundPermissionsAsync();
-    if (!permission.granted) {
-      setError(t('live.denied'));
-      return;
+    failures.current = 0;
+    const mine = ++generation.current;
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (mine !== generation.current) return;
+      if (!permission.granted) {
+        setError(t('live.denied'));
+        return;
+      }
+      const sub = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, timeInterval: POLL_MS, distanceInterval: 30 },
+        (pos) => {
+          if (mine !== generation.current) return;
+          const put = api.putPosition(tripId, pos.coords.latitude, pos.coords.longitude);
+          inFlight.current = put;
+          put.then(
+            () => {
+              failures.current = 0;
+            },
+            (e: unknown) => {
+              if (mine !== generation.current) return;
+              // The window closed, or the trip was called off: stop rather than
+              // keep sending into a refusal.
+              if (e instanceof ApiError && (e.code === 'not_sharing_now' || e.code === 'not_found')) {
+                void stop();
+                return;
+              }
+              // Anything else may be a moment without signal. Three in a row is
+              // not, and the screen must stop claiming the position is shared.
+              failures.current += 1;
+              if (failures.current >= 3) setError(t('live.sendFailed'));
+            },
+          );
+        },
+      );
+      if (mine !== generation.current) {
+        sub.remove();
+        return;
+      }
+      watch.current = sub;
+      setSharing(true);
+    } catch {
+      if (mine === generation.current) setError(t('common.error'));
+    } finally {
+      starting.current = false;
     }
-    setSharing(true);
-    watch.current = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.Balanced, timeInterval: POLL_MS, distanceInterval: 30 },
-      (pos) => {
-        api.putPosition(tripId, pos.coords.latitude, pos.coords.longitude).catch((e: unknown) => {
-          // The window closed, or the trip was called off: stop rather than
-          // keep sending into a refusal.
-          if (e instanceof ApiError && (e.code === 'not_sharing_now' || e.code === 'not_found')) {
-            void stop();
-          }
-        });
-      },
-    );
   };
 
+  if (live.isError && !live.data) {
+    return (
+      <Card testID="live-card">
+        <Text style={styles.title}>{t('live.title')}</Text>
+        <Hint testID="live-failed">{t('live.failed')}</Hint>
+        <Button testID="live-retry" label={t('common.retry')} variant="secondary" onPress={() => void live.refetch()} />
+      </Card>
+    );
+  }
   if (!live.data) return null;
   const opens = new Date(live.data.opens).getTime();
   const closes = new Date(live.data.closes).getTime();
@@ -94,12 +167,7 @@ export function LiveCard({ tripId, now = () => Date.now() }: { tripId: string; n
           ) : (
             live.data.positions.map((p) => (
               <View key={p.user_id} testID={`live-${p.user_id}`} style={styles.row}>
-                <Text style={styles.who}>
-                  {t('live.ago', {
-                    name: p.name,
-                    minutes: Math.max(0, Math.round((at - new Date(p.updated_at).getTime()) / 60_000)),
-                  })}
-                </Text>
+                <Text style={styles.who}>{ageLine(p.name, p.updated_at, at, t)}</Text>
                 <Button
                   testID={`live-map-${p.user_id}`}
                   label={t('live.openMap')}
@@ -107,7 +175,7 @@ export function LiveCard({ tripId, now = () => Date.now() }: { tripId: string; n
                   onPress={() =>
                     void Linking.openURL(
                       `https://www.openstreetmap.org/?mlat=${p.lat}&mlon=${p.lon}#map=16/${p.lat}/${p.lon}`,
-                    )
+                    ).catch(() => setError(t('common.error')))
                   }
                 />
               </View>
@@ -131,6 +199,12 @@ export function LiveCard({ tripId, now = () => Date.now() }: { tripId: string; n
       ) : null}
     </Card>
   );
+}
+
+// "πριν 0′" reads like a clock that stopped. Under a minute is now.
+function ageLine(name: string, updatedAt: string, at: number, t: TFunction) {
+  const minutes = Math.max(0, Math.round((at - new Date(updatedAt).getTime()) / 60_000));
+  return minutes === 0 ? t('live.now', { name }) : t('live.ago', { name, minutes });
 }
 
 const styles = StyleSheet.create({

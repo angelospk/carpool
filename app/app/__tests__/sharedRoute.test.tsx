@@ -10,7 +10,7 @@ const mockPush = jest.fn();
 let mockStatus = 'signedIn';
 
 jest.mock('expo-router', () => ({
-  useLocalSearchParams: () => ({ token: 'tok' }),
+  useLocalSearchParams: () => ({ token: 'tokABCDEFGHIJKLMNOP' }),
   useRouter: () => ({ push: mockPush, replace: jest.fn() }),
 }));
 jest.mock('../../src/state/session', () => ({
@@ -81,4 +81,35 @@ test('a retired route says so rather than advertising a trip that will not run',
   await waitFor(() =>
     expect(screen.getByTestId('shared-route-gone').props.children).toBe('Αυτή η διαδρομή δεν προσφέρεται πια.'),
   );
+});
+
+// Two villages share a name more often than not in Greece. A name that means
+// more than one place fills nothing in rather than the wrong one.
+test('a place name that means two places is not guessed', async () => {
+  (api.sharedRoute as jest.Mock).mockResolvedValue(shared);
+  (api.places as jest.Mock).mockImplementation(async (q: string) => ({
+    places:
+      q === 'Φέρες'
+        ? [{ id: 'a', name: 'Φέρες', lon: 26.17, lat: 40.9 }, { id: 'b', name: 'Φέρες', lon: 22, lat: 39 }]
+        : [{ id: 'c', name: q, lon: 25.87, lat: 40.85 }],
+  }));
+  render(wrap(<SharedRouteScreen />));
+  fireEvent.press(await screen.findByTestId('shared-route-search'));
+  await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/(tabs)/search'));
+});
+
+test('a server that did not answer is not told as a link that does not exist', async () => {
+  (api.sharedRoute as jest.Mock).mockRejectedValue(new ApiError(500, 'internal', 'boom'));
+  render(wrap(<SharedRouteScreen />));
+  await waitFor(() => expect(screen.getByTestId('shared-route-retry')).toBeTruthy());
+  expect(screen.queryByTestId('shared-route-gone')).toBeNull();
+});
+
+// Somebody who makes an account from the link comes back to it.
+test('signing up from the link remembers to come back to it', async () => {
+  mockStatus = 'signedOut';
+  (api.sharedRoute as jest.Mock).mockResolvedValue(shared);
+  render(wrap(<SharedRouteScreen />));
+  fireEvent.press(await screen.findByTestId('shared-route-join'));
+  expect(require('../../src/state/returnTo').takeReturn()).toBe('/r/tokABCDEFGHIJKLMNOP');
 });

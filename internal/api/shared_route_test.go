@@ -80,6 +80,12 @@ func TestALinkShowsTheRouteAndNothingAboutTheDriver(t *testing.T) {
 			t.Errorf("page missing %q", want)
 		}
 	}
+	if !strings.Contains(html, `<meta property="og:title" content="Αλεξανδρούπολη → Φέρες">`) {
+		t.Errorf("no preview title for a chat app")
+	}
+	if head := h.do(http.MethodHead, "/r/"+link.Token, nil, ""); head.Code != http.StatusOK {
+		t.Errorf("HEAD: %d", head.Code)
+	}
 	if csp := page.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") {
 		t.Errorf("CSP = %q", csp)
 	}

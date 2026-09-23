@@ -7,10 +7,10 @@
 // wrong.
 
 import { useRef, useState } from 'react';
-import { Share } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
 import { api } from '../api/endpoints';
+import { shareText } from './shareText';
 import { shareRouteMessage, type ShareableRoute } from '../design/shareRoute';
 import { Button, Hint } from './ui';
 
@@ -25,6 +25,9 @@ export function ShareRouteButton({
 }) {
   const { t } = useTranslation();
   const [failed, setFailed] = useState(false);
+  // In a browser with no share sheet the message is copied instead, and the
+  // button has to say so or the press looks like it did nothing.
+  const [copied, setCopied] = useState(false);
   // A ref rather than state, and this is the whole reason: `setSharing(true)`
   // does not take effect until React re-renders, so two touches landing in one
   // frame both read the old value and both open a sheet. A ref is written
@@ -41,6 +44,7 @@ export function ShareRouteButton({
     sharing.current = true;
     // A failure belongs to the attempt that produced it, not to the next one.
     setFailed(false);
+    setCopied(false);
     try {
       // A link when the route has one to make, and the sentence alone when it
       // cannot: a failed link is not a reason to send nothing.
@@ -51,7 +55,7 @@ export function ShareRouteButton({
           .then((r) => r.url || undefined)
           .catch(() => undefined);
       }
-      await Share.share({ message: shareRouteMessage(route, t, link) });
+      setCopied((await shareText(shareRouteMessage(route, t, link))) === 'copied');
     } catch {
       setFailed(true);
     } finally {
@@ -70,6 +74,7 @@ export function ShareRouteButton({
         onPress={() => void onPress()}
       />
       {failed ? <Hint testID={failedTestID}>{t('common.error')}</Hint> : null}
+      {copied ? <Hint>{t('share.copied')}</Hint> : null}
     </>
   );
 }

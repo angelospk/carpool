@@ -7,6 +7,7 @@ import Constants from 'expo-constants';
 
 import { configure } from '../src/api/client';
 import { resolveBaseUrl } from '../src/api/baseUrl';
+import { takeReturn } from '../src/state/returnTo';
 import { useSession } from '../src/state/session';
 import { usePushRegistration } from '../src/push/usePushRegistration';
 import '../src/i18n';
@@ -75,7 +76,8 @@ function AuthGate() {
     if (status === 'signedOut' && !inAuthFlow && !onPublicLink) {
       router.replace('/(auth)/phone');
     } else if (status === 'signedIn' && inAuthFlow) {
-      router.replace('/(tabs)');
+      // Back to the route link that brought them here, if one did.
+      router.replace((takeReturn() ?? '/(tabs)') as '/(tabs)');
     }
   }, [status, segments, router]);
 

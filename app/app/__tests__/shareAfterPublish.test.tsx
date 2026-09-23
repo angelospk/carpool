@@ -219,3 +219,15 @@ test('a place outside the routed area says so in its own words', async () => {
   await waitFor(() => expect(screen.getByText(el.publish.outsideServiceArea)).toBeTruthy());
   expect(screen.queryByTestId('publish-share-route')).toBeNull();
 });
+
+// Review found this: while the groups were loading, or if they failed, the
+// "who sees it" choice was not on screen and publishing went out to everybody.
+// A driver who meant "only the hospital" never saw the question.
+test('publishing waits until the groups have loaded, and stays shut if they failed', async () => {
+  (api.myGroups as jest.Mock).mockRejectedValue(new Error('offline'));
+  await pickBothEnds();
+
+  await waitFor(() => expect(screen.getByTestId('audience-retry')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('publish-submit'));
+  expect(api.publishRoute).not.toHaveBeenCalled();
+});

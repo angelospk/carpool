@@ -118,8 +118,25 @@ export default function RequestScreen() {
 
       {stranded ? (
         <Card testID="request-stranded">
-          <Text style={styles.strandedTitle}>{t('request.strandedTitle')}</Text>
-          {alternatives.data && alternatives.data.alternatives.length > 0 ? (
+          {/* What is true depends on whether there is anybody left to ask.
+              "We are asking the next one" above "there is no other car" was
+              the same screen contradicting itself. */}
+          <Text testID="request-stranded-title" style={styles.strandedTitle}>
+            {alternatives.data && alternatives.data.alternatives.length === 0
+              ? t('request.strandedNobody')
+              : t('request.strandedTitle')}
+          </Text>
+          {alternatives.isError ? (
+            <>
+              <Hint testID="request-alternatives-failed">{t('request.alternativesFailed')}</Hint>
+              <Button
+                testID="request-alternatives-retry"
+                label={t('common.retry')}
+                variant="secondary"
+                onPress={() => void alternatives.refetch()}
+              />
+            </>
+          ) : alternatives.data && alternatives.data.alternatives.length > 0 ? (
             <>
               <Hint>{t('request.alternativesIntro')}</Hint>
               {alternatives.data.alternatives.map((a, i) => (
@@ -139,7 +156,7 @@ export default function RequestScreen() {
             testID="request-bus"
             label={t('request.busFallback')}
             variant="secondary"
-            onPress={() => void Linking.openURL(KTEL_URL)}
+            onPress={() => void Linking.openURL(KTEL_URL).catch(() => setOutcome(t('common.error')))}
           />
         </Card>
       ) : null}

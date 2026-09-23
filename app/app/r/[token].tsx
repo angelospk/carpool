@@ -17,6 +17,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, type SharedRoute } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import { useSession } from '../../src/state/session';
+import { rememberReturn } from '../../src/state/returnTo';
 import { Button, Card, Hint, RouteSpine, Screen, Title } from '../../src/components/ui';
 import { shareRouteMessage } from '../../src/design/shareRoute';
 import { colors, space, type } from '../../src/design/tokens';
@@ -25,7 +26,8 @@ export default function SharedRouteScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const { token } = useLocalSearchParams<{ token: string }>();
-  const signedIn = useSession((s) => s.status) === 'signedIn';
+  const status = useSession((s) => s.status);
+  const signedIn = status === 'signedIn';
   const [error, setError] = useState<string | null>(null);
 
   const route = useQuery({
@@ -37,10 +39,15 @@ export default function SharedRouteScreen() {
   const search = async (r: SharedRoute) => {
     setError(null);
     try {
-      const [from, to] = await Promise.all([
-        api.places(r.origin_label).then((p) => p.places[0]),
-        api.places(r.destination_label).then((p) => p.places[0]),
-      ]);
+      // Only a name that means one place. Two villages share many names in
+      // Greece, and filling in the wrong Άγιος Γεώργιος would search a road
+      // nobody offered; an end left empty is one the person fills in.
+      const only = (label: string) =>
+        api.places(label).then((p) => {
+          const same = p.places.filter((x) => x.name.toLocaleLowerCase('el') === label.toLocaleLowerCase('el'));
+          return same.length === 1 ? same[0] : undefined;
+        });
+      const [from, to] = await Promise.all([only(r.origin_label), only(r.destination_label)]);
       if (!from || !to) {
         router.push('/(tabs)/search');
         return;
@@ -63,13 +70,21 @@ export default function SharedRouteScreen() {
   };
 
   const gone = route.error instanceof ApiError && route.error.status === 410;
+  // A link that does not exist and a server that did not answer are different
+  // news, and only the second is worth trying again.
+  const missing = route.error instanceof ApiError && route.error.status === 404;
 
   return (
     <Screen>
       <Title>{t('sharedRoute.title')}</Title>
       {route.isLoading ? <Hint>{t('common.loading')}</Hint> : null}
-      {route.isError ? (
+      {route.isError && (gone || missing) ? (
         <Hint testID="shared-route-gone">{gone ? t('sharedRoute.retired') : t('sharedRoute.notFound')}</Hint>
+      ) : route.isError ? (
+        <>
+          <Hint testID="shared-route-failed">{t('common.error')}</Hint>
+          <Button testID="shared-route-retry" label={t('common.retry')} onPress={() => void route.refetch()} />
+        </>
       ) : null}
       {route.data ? (
         <Card testID="shared-route">
@@ -87,13 +102,19 @@ export default function SharedRouteScreen() {
           </Text>
           {route.data.for_group ? <Hint>{t('sharedRoute.forGroup')}</Hint> : null}
           <Hint>{t('sharedRoute.howItWorks')}</Hint>
-          {signedIn ? (
+          {status === 'loading' ? (
+            <Hint>{t('common.loading')}</Hint>
+          ) : signedIn ? (
             <Button testID="shared-route-search" label={t('sharedRoute.search')} onPress={() => void search(route.data)} />
           ) : (
             <Button
               testID="shared-route-join"
               label={t('sharedRoute.join')}
-              onPress={() => router.push('/(auth)/phone')}
+              onPress={() => {
+                // Back here once the account exists, rather than at home.
+                rememberReturn(`/r/${token}`);
+                router.push('/(auth)/phone');
+              }}
             />
           )}
         </Card>

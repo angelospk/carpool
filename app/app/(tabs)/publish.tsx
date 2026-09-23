@@ -266,11 +266,22 @@ export default function PublishScreen() {
           </View>
         </Card>
 
+        {myGroups.isError ? (
+          <>
+            <Hint testID="audience-failed">{t('common.error')}</Hint>
+            <Button
+              testID="audience-retry"
+              label={t('common.retry')}
+              variant="secondary"
+              onPress={() => void myGroups.refetch()}
+            />
+          </>
+        ) : null}
         {myGroups.data && myGroups.data.groups.length > 0 ? (
           <>
             <SectionHeader title={t('groups.audience')} />
             <Card>
-              <View style={styles.days}>
+              <View style={[styles.days, styles.wrap]}>
                 <Chip
                   testID="audience-everybody"
                   label={t('groups.everybody')}
@@ -420,7 +431,13 @@ export default function PublishScreen() {
               seats,
             })
           }
-          disabled={!from || !to || !weekdays.length || noCar || noBootLeft || publish.isPending}
+          // Not until the groups have loaded: while they are loading, or if
+          // they failed, the "who sees it" choice is not on screen and the
+          // route would go out to everybody without the driver having seen
+          // the question.
+          disabled={
+            !from || !to || !weekdays.length || noCar || noBootLeft || publish.isPending || !myGroups.isSuccess
+          }
         />
       </ScrollView>
     </Screen>
@@ -431,6 +448,8 @@ const styles = StyleSheet.create({
   body: { gap: space.md, paddingBottom: 140 },
   label: { ...type.caption, color: colors.muted },
   days: { flexDirection: 'row', gap: 6 },
+  // Group names are long, and a row of them runs off the screen otherwise.
+  wrap: { flexWrap: 'wrap' },
   times: { flexDirection: 'row', gap: space.sm },
   seats: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   seatsLabel: { ...type.body, color: colors.ink },

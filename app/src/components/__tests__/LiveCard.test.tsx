@@ -94,3 +94,39 @@ test('without permission it says so and sends nothing', async () => {
   await waitFor(() => expect(screen.getByTestId('live-error')).toBeTruthy());
   expect(Location.watchPositionAsync).not.toHaveBeenCalled();
 });
+
+// QA found this: a PUT that left before the screen closed landed after the
+// DELETE and put the position back on the server for up to an hour.
+test('stopping waits for the last upload before forgetting the position', async () => {
+  (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [] });
+  let land: () => void = () => {};
+  (api.putPosition as jest.Mock).mockReturnValue(new Promise<void>((r) => (land = r)));
+  const order: string[] = [];
+  (api.stopPosition as jest.Mock).mockImplementation(async () => void order.push('delete'));
+
+  render(wrap(<LiveCard tripId="occ-1" now={() => at} />));
+  fireEvent.press(await screen.findByTestId('live-start'));
+  await waitFor(() => expect(mockOnPosition).not.toBeNull());
+  act(() => mockOnPosition!({ coords: { latitude: 40.85, longitude: 25.87 } }));
+
+  fireEvent.press(await screen.findByTestId('live-stop'));
+  await new Promise((r) => setTimeout(r, 20));
+  expect(order).toEqual([]);
+  order.push('put');
+  land();
+  await waitFor(() => expect(order).toEqual(['put', 'delete']));
+
+  // And a position that arrives after stopping is not sent at all.
+  (api.putPosition as jest.Mock).mockClear();
+  act(() => mockOnPosition!({ coords: { latitude: 41, longitude: 26 } }));
+  expect(api.putPosition).not.toHaveBeenCalled();
+});
+
+test('under a minute old reads as now', async () => {
+  (api.live as jest.Mock).mockResolvedValue({
+    ...window,
+    positions: [{ user_id: 'd', name: 'Γιώργος', lat: 40.85, lon: 25.87, updated_at: '2026-07-30T04:19:50Z' }],
+  });
+  render(wrap(<LiveCard tripId="occ-1" now={() => at} />));
+  expect(await screen.findByText('Γιώργος · τώρα')).toBeTruthy();
+});

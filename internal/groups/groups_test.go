@@ -275,3 +275,42 @@ func lower(s string) string {
 	}
 	return string(out)
 }
+
+// A group everybody left still has a code, and whoever uses it next becomes
+// the one who can see it and replace it.
+func TestJoiningAGroupWithNobodyLeftMakesYouItsAdmin(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	admin := w.person(t)
+	g, _ := w.svc.Create(ctx, admin, "ΔΠΘ")
+	if err := w.svc.Leave(ctx, admin, g.ID); err != nil {
+		t.Fatalf("Leave: %v", err)
+	}
+	joined, err := w.svc.Join(ctx, w.person(t), g.Code)
+	if err != nil || joined.Role != "admin" || joined.Code != g.Code {
+		t.Fatalf("Join = %+v, %v; want admin with the code", joined, err)
+	}
+}
+
+// The last admin leaving while somebody joins: whichever order they land in,
+// the group ends with an admin.
+func TestAJoinRacingTheLastAdminLeavingStillLeavesAnAdmin(t *testing.T) {
+	for i := 0; i < 5; i++ {
+		w := newWorld(t)
+		ctx := context.Background()
+		admin := w.person(t)
+		g, _ := w.svc.Create(ctx, admin, "ΔΠΘ")
+		joiner := w.person(t)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); _ = w.svc.Leave(ctx, admin, g.ID) }()
+		go func() { defer wg.Done(); _, _ = w.svc.Join(ctx, joiner, g.Code) }()
+		wg.Wait()
+
+		mine, _ := w.svc.Mine(ctx, joiner)
+		if len(mine) != 1 || mine[0].Role != "admin" {
+			t.Fatalf("run %d: the joiner is %+v, want the group's admin", i, mine)
+		}
+	}
+}

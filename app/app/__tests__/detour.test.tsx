@@ -12,7 +12,9 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { publishRoute: jest.fn(), places: jest.fn(), meetingPoints: jest.fn(), vehicles: jest.fn() },
+  api: {
+    myGroups: jest.fn(async () => ({ groups: [] })),
+    publishRoute: jest.fn(), places: jest.fn(), meetingPoints: jest.fn(), vehicles: jest.fn() },
   // The screen renders pickers built from these, so a mock that omits them
   // takes the screen down before the test reaches what it is about.
   LUGGAGE_SIZES: ['none', 'cabin', 'suitcase', 'bulky'],

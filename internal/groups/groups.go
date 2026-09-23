@@ -191,8 +191,12 @@ func (s *Service) Join(ctx context.Context, userID uuid.UUID, code string) (Grou
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// FOR SHARE: Leave takes the group row FOR UPDATE, so a join and the last
+	// admin leaving cannot interleave. Without it the admin could leave an
+	// empty-looking group while the joiner's row was still uncommitted, and the
+	// joiner would end up in a group nobody administers.
 	var groupID uuid.UUID
-	err = tx.QueryRow(ctx, `SELECT id FROM groups WHERE join_code = $1`, code).Scan(&groupID)
+	err = tx.QueryRow(ctx, `SELECT id FROM groups WHERE join_code = $1 FOR SHARE`, code).Scan(&groupID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Recorded outside the transaction, which is about to roll back.
 		if _, err := s.pool.Exec(ctx,
@@ -218,9 +222,16 @@ func (s *Service) Join(ctx context.Context, userID uuid.UUID, code string) (Grou
 		}
 		// ON CONFLICT on the partial unique index: two taps on "join" racing
 		// each other are one membership, not an error.
+		// Somebody joining a group with no admin left — everyone else has gone —
+		// becomes its admin, so the code they just used is still somebody's to
+		// see and replace.
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO group_members (group_id, user_id, role, joined_at)
-			VALUES ($1, $2, 'member', $3)
+			VALUES ($1, $2,
+			        CASE WHEN EXISTS (SELECT 1 FROM group_members
+			                          WHERE group_id = $1 AND left_at IS NULL AND role = 'admin')
+			             THEN 'member' ELSE 'admin' END,
+			        $3)
 			ON CONFLICT (group_id, user_id) WHERE left_at IS NULL DO NOTHING`,
 			groupID, userID, now); err != nil {
 			return Group{}, fmt.Errorf("groups: joining: %w", err)

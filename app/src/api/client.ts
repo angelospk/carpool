@@ -40,6 +40,8 @@ type Options = {
   /** Skip the Authorization header, for the auth endpoints themselves. */
   anonymous?: boolean;
   signal?: AbortSignal;
+  /** Let the request outlive the page, for the one sent as a tab closes. */
+  keepalive?: boolean;
   /**
    * Return the body as text instead of parsing it. For the one response that
    * is a file rather than JSON; an error is still read as the JSON envelope.
@@ -216,6 +218,7 @@ export async function request<T>(path: string, options: Options = {}): Promise<T
         headers,
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
         signal: options.signal,
+        keepalive: options.keepalive,
       });
     } catch (cause) {
       throw new NetworkError(cause);

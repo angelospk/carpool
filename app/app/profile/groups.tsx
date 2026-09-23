@@ -6,7 +6,7 @@
 // it can be replaced when it has travelled somewhere it should not have.
 
 import { useState } from 'react';
-import { Alert, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -14,8 +14,10 @@ import { api, type Group } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import { Badge, Button, Card, Field, Hint, Screen, SectionHeader, Title } from '../../src/components/ui';
 import { colors, radius, space, type } from '../../src/design/tokens';
-import { exportMonths } from '../../src/design/months';
+import { exportMonths, monthName } from '../../src/design/months';
 import { saveCsv } from '../../src/components/saveCsv';
+import { confirm } from '../../src/components/confirm';
+import { shareText } from '../../src/components/shareText';
 
 export default function GroupsScreen() {
   const { t } = useTranslation();
@@ -43,7 +45,7 @@ export default function GroupsScreen() {
   };
 
   const create = useMutation({
-    mutationFn: () => api.createGroup(name),
+    mutationFn: () => api.createGroup(name.trim()),
     onSuccess: () => {
       setName('');
       setError(null);
@@ -52,7 +54,7 @@ export default function GroupsScreen() {
     onError: explain,
   });
   const join = useMutation({
-    mutationFn: () => api.joinGroup(code),
+    mutationFn: () => api.joinGroup(code.trim()),
     onSuccess: () => {
       setCode('');
       setError(null);
@@ -65,9 +67,16 @@ export default function GroupsScreen() {
     onSuccess: refresh,
     onError: explain,
   });
+  // The new code goes into the cache from the answer itself, so the old one is
+  // never on screen to be shared after it stopped working.
   const rotate = useMutation({
     mutationFn: (id: string) => api.rotateGroupCode(id),
-    onSuccess: refresh,
+    onSuccess: ({ code }, id) => {
+      queryClient.setQueryData<{ groups: Group[] }>(['groups'], (old) =>
+        old ? { groups: old.groups.map((g) => (g.id === id ? { ...g, code } : g)) } : old,
+      );
+      refresh();
+    },
     onError: explain,
   });
 
@@ -80,19 +89,29 @@ export default function GroupsScreen() {
   });
 
   const confirmLeave = (g: Group) =>
-    Alert.alert(t('groups.leave'), t('groups.leaveConfirm', { name: g.name }), [
-      { text: t('common.cancel'), style: 'cancel' },
-      { text: t('groups.leave'), style: 'destructive', onPress: () => leave.mutate(g.id) },
-    ]);
+    confirm({
+      title: t('groups.leave'),
+      message: t('groups.leaveConfirm', { name: g.name }),
+      confirmLabel: t('groups.leave'),
+      cancelLabel: t('common.cancel'),
+      destructive: true,
+      onConfirm: () => leave.mutate(g.id),
+    });
   const confirmRotate = (g: Group) =>
-    Alert.alert(t('groups.newCode'), t('groups.newCodeConfirm'), [
-      { text: t('common.cancel'), style: 'cancel' },
-      { text: t('groups.newCode'), onPress: () => rotate.mutate(g.id) },
-    ]);
+    confirm({
+      title: t('groups.newCode'),
+      message: t('groups.newCodeConfirm'),
+      confirmLabel: t('groups.newCode'),
+      cancelLabel: t('common.cancel'),
+      onConfirm: () => rotate.mutate(g.id),
+    });
 
+  const [notice, setNotice] = useState<string | null>(null);
   const shareCode = async (g: Group) => {
+    setNotice(null);
     try {
-      await Share.share({ message: t('groups.shareMessage', { name: g.name, code: g.code }) });
+      const how = await shareText(t('groups.shareMessage', { name: g.name, code: g.code }));
+      if (how === 'copied') setNotice(t('share.copied'));
     } catch {
       setError(t('common.error'));
     }
@@ -104,6 +123,7 @@ export default function GroupsScreen() {
         <Title>{t('groups.title')}</Title>
         <Hint>{t('groups.intro')}</Hint>
 
+        {notice ? <Hint testID="groups-notice">{notice}</Hint> : null}
         {error ? (
           <Text testID="groups-error" style={styles.error}>
             {error}
@@ -140,6 +160,7 @@ export default function GroupsScreen() {
                     testID={`group-share-${g.id}`}
                     label={t('groups.shareCode')}
                     variant="secondary"
+                    disabled={rotate.isPending}
                     onPress={() => void shareCode(g)}
                   />
                   <Button
@@ -156,7 +177,7 @@ export default function GroupsScreen() {
                     <Button
                       key={month}
                       testID={`group-export-${g.id}-${month}`}
-                      label={t('groups.export', { month })}
+                      label={t('groups.export', { month: monthName(month) })}
                       variant="secondary"
                       disabled={exportTrips.isPending}
                       onPress={() => exportTrips.mutate({ g, month })}

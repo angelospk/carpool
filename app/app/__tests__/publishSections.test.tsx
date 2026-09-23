@@ -10,7 +10,9 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { publishRoute: jest.fn(), places: jest.fn(), meetingPoints: jest.fn(), vehicles: jest.fn() },
+  api: {
+    myGroups: jest.fn(async () => ({ groups: [] })),
+    publishRoute: jest.fn(), places: jest.fn(), meetingPoints: jest.fn(), vehicles: jest.fn() },
   LUGGAGE_SIZES: ['none', 'cabin', 'suitcase', 'bulky'],
 }));
 
