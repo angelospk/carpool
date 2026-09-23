@@ -263,15 +263,24 @@ article, and `docs/legal/terms-el.md` answers it in a sentence a passenger reads
 
 ## Two cheap distribution experiments, on the share that already exists
 
-Added 2026-09-23. The share button (GAPS 1) is the only distribution the app
-has, and nobody knows yet whether it distributes anything. What it sends is a
-sentence and no link: "Αλεξανδρούπολη → Κομοτηνή · καθημερινές 07:30 · έχω 2
-θέσεις", then "Αν σε ενδιαφέρει, στείλε μου μήνυμα." The reply comes back in the
-chat where the message was pasted. The recipient has no way to install the app
-from it. Both experiments below answer a question to bring to the ΔΠΘ meeting
-(item 1) instead of an opinion. Neither one is a feature.
+Added 2026-09-23, rewritten the same day once the route link existed. The share
+button (GAPS 1) is the only distribution the app has, and nobody knows yet
+whether it distributes anything. What it sends, with `PUBLIC_BASE_URL` set, is a
+sentence and a link: "Αλεξανδρούπολη → Κομοτηνή · καθημερινές 07:30 · έχω 2
+θέσεις", then "Αν σε ενδιαφέρει, στείλε μου μήνυμα.", then
+`https://{$DOMAIN}/r/<token>`. The link opens a page with the same sentence, an
+"open in the app" button, and "Κατέβασε την εφαρμογή" when `INSTALL_URL` is set.
+Replies still come back in the chat where the message was pasted.
+
+Both experiments run with the link, because that is the version that ships: a
+sentence-only baseline would measure a message nobody will send. Both answer a
+question to bring to the ΔΠΘ meeting (item 1) instead of an opinion. Neither one
+is a feature.
 
 ### A. One corridor, posted by hand, counted by hand — no code
+
+Set `PUBLIC_BASE_URL` and `INSTALL_URL` on the server first (B says what
+`INSTALL_URL` should be, and it costs nothing to set it from the start).
 
 Take the corridor with the most reason to exist, Αλεξανδρούπολη ↔ Κομοτηνή (ΔΠΘ
 has departments at both ends, 58,3 km, inside the deployed extract). Publish one
@@ -288,35 +297,40 @@ Count, in a notebook:
 
 Cost: about 30 minutes a week. Nothing to build and nothing to review.
 
-**What it decides.** If nobody replies in three weeks, the problem is supply
-meeting demand in these groups, and neither the app nor its text is at fault. Stop
-there, and say so at the meeting. If people reply "is there a seat?", the
-sentence works and the demand is real. If they reply "which app?", the missing
-piece is B.
+**What it decides.** If nobody replies and nobody opens the link in three weeks,
+the problem is supply meeting demand in these groups, and neither the app nor its
+text is at fault. Stop there, and say so at the meeting. If people reply "is
+there a seat?", the sentence works and the demand is real. If they reply "which
+app?", the link page is not doing its job, and B says where people drop off.
 
-### B. An install line and one counted URL — about an hour of code
+### B. Count the funnel from the Caddy log — config, no app code
 
-Only worth doing if A produces "which app?" replies. Add a third line to
-`shareRouteMessage`: a short URL on the domain Caddy already serves, e.g.
-`https://{$DOMAIN}/get`. The Caddyfile gets one `redir` from that path to the
-APK or TestFlight link. Caddy already writes every request to its log, so
-counting the hits needs no analytics and stores no identity beyond what the log
-already holds.
+Caddy already writes every request to its log, so the funnel needs no analytics
+and stores no identity beyond what the log already holds. One piece is missing:
+the page's install button goes straight to the store, so those taps never reach
+Caddy. Set `INSTALL_URL=https://{$DOMAIN}/get` and give the Caddyfile one
+`redir /get <APK or TestFlight link>` above the `reverse_proxy`. About 15
+minutes, and it can be done before A starts.
 
-Run it as a before-and-after on the same groups as A. Keep the same post, the
-same weekday and the same time, and add only the line. Count `/get` hits per post
-from the Caddy log. Then count new accounts that file a request on that corridor
-within a week, from `ride_requests` grouped by `passenger_id`.
+Then, per post, from the time it went up to the next post:
 
-Keep the message honest. The URL installs the app. It does not open a listing,
-because no listing exists. The line must say "κατέβασε την εφαρμογή", not "δες τη
-διαδρομή", and the test in `shareRoute.test.ts` should pin that down.
+1. `GET /r/<token>` hits: people who opened the link;
+2. `GET /get` hits: people who tapped install on its page;
+3. new accounts that file a request on that corridor within a week, from
+   `ride_requests` grouped by `passenger_id`.
 
-**What it decides.** If installs rise and requests follow, the share becomes a
-loop, and GAPS 4's demand line gets the three distinct people its floor needs
-before it can say anything. If installs rise and requests do not, the app loses
-people between install and first request, and that becomes the next thing to
-look at. If nothing moves, the one-line text was never the problem.
+The token belongs to the route, not to the post, so posts are told apart by
+time. Link-preview bots from Viber, Facebook and WhatsApp also fetch `/r/`;
+leave out hits whose user agent names one, or count a `HEAD` and the `GET` that
+follows it within a second as one preview.
+
+**What it decides.** If opens are high and installs low, the page loses people,
+and its text is the next thing to change. If installs rise and requests follow,
+the share becomes a loop, and GAPS 4's demand line gets the three distinct people
+its floor needs before it can say anything. If installs rise and requests do not,
+the app loses people between install and first request, and that becomes the
+next thing to look at. If nobody opens the link, the one-line text was never the
+problem.
 
 ### Not these, yet
 
