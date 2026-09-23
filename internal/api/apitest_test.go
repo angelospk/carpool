@@ -21,6 +21,7 @@ import (
 	"carpool/internal/clock"
 	"carpool/internal/drivers"
 	"carpool/internal/geo"
+	"carpool/internal/groups"
 	"carpool/internal/invites"
 	"carpool/internal/moderation"
 	"carpool/internal/standing"
@@ -94,6 +95,7 @@ func newHarnessWith(t *testing.T, devMode bool) *harness {
 		Standing:    standing.NewService(pool, c),
 		Bookings:    bookings.NewService(pool, c),
 		Invites:     invites.NewService(pool, c, false),
+		Groups:      groups.NewService(pool, c),
 		Account:     account.NewService(pool, c),
 		Drivers:     drivers.NewService(pool, c),
 		Moderation:  moderation.NewService(pool, c),
@@ -271,6 +273,7 @@ func newHarnessRoutedBy(t *testing.T, base string) *harness {
 		Signup:   auth.NewSignupService(h.pool, h.clock),
 		Sessions: auth.NewSessionService(h.pool, h.clock, auth.NewTokenIssuer(testSecret, h.clock)),
 		Invites:  invites.NewService(h.pool, h.clock, false),
+		Groups:   groups.NewService(h.pool, h.clock),
 		Drivers:  drivers.NewService(h.pool, h.clock),
 		Router:   geo.NewOSRM(base, nil),
 	})

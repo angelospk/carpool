@@ -180,7 +180,7 @@ func (s *Service) Mine(ctx context.Context, userID uuid.UUID) (Code, error) {
 	// Retried rather than failed on a collision: the space is large, but a
 	// duplicate must not cost somebody their invite.
 	for attempt := 0; attempt < 5; attempt++ {
-		candidate, err := newCode()
+		candidate, err := NewCode()
 		if err != nil {
 			return Code{}, err
 		}
@@ -201,8 +201,11 @@ func (s *Service) Mine(ctx context.Context, userID uuid.UUID) (Code, error) {
 	return Code{}, errors.New("invites: could not find a free code")
 }
 
-// newCode returns a random code from the unambiguous alphabet.
-func newCode() (string, error) {
+// NewCode returns a random code from the unambiguous alphabet.
+//
+// Exported because a group's join code travels the same way an invite does —
+// read out, retyped, pasted into a chat — and should survive it the same way.
+func NewCode() (string, error) {
 	out := make([]byte, codeLength)
 	for i := range out {
 		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))

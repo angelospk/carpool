@@ -89,6 +89,7 @@ function AuthGate() {
       <Stack.Screen name="profile/phone" options={{ title: t('phone.title') }} />
       <Stack.Screen name="profile/routes" options={{ title: t('profile.routes') }} />
       <Stack.Screen name="profile/vehicles" options={{ title: t('garage.title') }} />
+      <Stack.Screen name="profile/groups" options={{ title: t('groups.title') }} />
     </Stack>
   );
 }

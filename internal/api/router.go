@@ -17,6 +17,7 @@ import (
 	"carpool/internal/clock"
 	"carpool/internal/drivers"
 	"carpool/internal/geo"
+	"carpool/internal/groups"
 	"carpool/internal/invites"
 	"carpool/internal/jobs"
 	"carpool/internal/moderation"
@@ -51,6 +52,9 @@ type Deps struct {
 	Bookings *bookings.Service
 	// Invites admits new accounts, and decides whether a code is needed at all.
 	Invites *invites.Service
+	// Groups keeps the circles people already belong to — a school, an
+	// employer — and what membership lets them do.
+	Groups *groups.Service
 	// Account answers the two requests a person can make about their own data.
 	Account *account.Service
 	// Drivers records a driver's car, and works out what it drinks so that the
@@ -247,6 +251,13 @@ func NewRouter(deps Deps) http.Handler {
 			r.Get("/trips/upcoming", deps.handleUpcomingTrips)
 			r.Get("/trips/past", deps.handlePastTrips)
 			r.Get("/invites/mine", deps.handleMyInvite)
+			if deps.Groups != nil {
+				r.Get("/groups/mine", deps.handleMyGroups)
+				r.Post("/groups", deps.handleCreateGroup)
+				r.Post("/groups/join", deps.handleJoinGroup)
+				r.Delete("/groups/{id}/membership", deps.handleLeaveGroup)
+				r.Post("/groups/{id}/code", deps.handleRotateGroupCode)
+			}
 			r.Route("/trips/{id}", func(r chi.Router) {
 				r.Get("/", deps.handleGetTrip)
 				r.Post("/confirm", deps.handleConfirmTrip)

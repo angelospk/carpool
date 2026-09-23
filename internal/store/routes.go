@@ -74,6 +74,9 @@ type CreateRouteTemplateParams struct {
 	// Zero is only meaningful alongside a Luggage of 'none', which the schema
 	// enforces.
 	LuggageCapacity int
+	// GroupID, when set, offers the route to that group's members only. The
+	// caller has already checked that the driver is one of them.
+	GroupID *uuid.UUID
 	// ContributionShare is how much of the computed cost share this driver asks
 	// for. The app caps; the driver chooses. Zero means they did not say, which
 	// is read as all of it.
@@ -96,12 +99,12 @@ func CreateRouteTemplate(ctx context.Context, pool *pgxpool.Pool, p CreateRouteT
 		INSERT INTO route_templates (
 			driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 			route_geom, route_km, route_min, seats, pricing_mode, osrm_data_version, ends_at_port,
-			allow_stops, detour_km, detour_min, luggage, luggage_capacity, contribution_share)
+			allow_stops, detour_km, detour_min, luggage, luggage_capacity, contribution_share, group_id)
 		VALUES ($1, $18,
 			ST_SetSRID(ST_MakePoint($2, $3), 4326),
 			ST_SetSRID(ST_MakePoint($4, $5), 4326),
 			$6, $7,
-			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13, $14, $15, $16, $17, $19::luggage_size, $20, $21)
+			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13, $14, $15, $16, $17, $19::luggage_size, $20, $21, $22)
 		RETURNING id`,
 		p.DriverID,
 		p.Origin.Lon, p.Origin.Lat,
@@ -109,6 +112,7 @@ func CreateRouteTemplate(ctx context.Context, pool *pgxpool.Pool, p CreateRouteT
 		p.OriginLabel, p.DestinationLabel,
 		p.RouteWKT, p.RouteKm, p.RouteMin, p.Seats, string(p.PricingMode), p.OSRMDataVersion, p.EndsAtPort,
 		p.Detour.AllowStops, p.Detour.Km, p.Detour.Min, p.VehicleID, luggageOr(p.Luggage), capacityOr(p.LuggageCapacity, p.Luggage), shareOr(p.ContributionShare),
+		p.GroupID,
 	).Scan(&templateID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("store: inserting route template: %w", err)

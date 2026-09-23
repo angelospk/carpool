@@ -196,6 +196,12 @@ WITH cand AS (
 	        SELECT 1 FROM blocks b
 	        WHERE (b.blocker_id = t.driver_id AND b.blocked_id = $7::uuid)
 	           OR (b.blocker_id = $7::uuid    AND b.blocked_id = t.driver_id)))
+	  -- A route offered to one group is offered to its live members and nobody
+	  -- else. Without a passenger there is nobody to be a member, so it is not
+	  -- offered at all. Inside the filter for the same reason as the two below.
+	  AND (t.group_id IS NULL OR ($7::uuid IS NOT NULL AND EXISTS (
+	        SELECT 1 FROM group_members gm
+	        WHERE gm.group_id = t.group_id AND gm.user_id = $7::uuid AND gm.left_at IS NULL)))
 	  -- Both of these are inside the filter rather than applied to its results,
 	  -- so that a spent or unwanted occurrence never occupies a place under the
 	  -- LIMIT that a reachable one needed.

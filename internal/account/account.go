@@ -271,6 +271,31 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 		return fmt.Errorf("account: anonymising: %w", err)
 	}
 
+	// Out of every group. The rows stay, ended, because they are what a past
+	// month's export was built from; what goes is being counted as a member
+	// from here on, and being shown to the rest of the group as one.
+	// An admin going hands each group to its longest-standing member, as
+	// leaving one does (groups.Leave), rather than leaving a group nobody can
+	// administer.
+	if _, err := tx.Exec(ctx, `
+		WITH ended AS (
+			UPDATE group_members SET left_at = $2
+			WHERE user_id = $1 AND left_at IS NULL
+			RETURNING group_id, role
+		)
+		UPDATE group_members SET role = 'admin'
+		WHERE id IN (
+			SELECT DISTINCT ON (m.group_id) m.id
+			FROM group_members m
+			JOIN ended e ON e.group_id = m.group_id AND e.role = 'admin'
+			WHERE m.left_at IS NULL AND m.user_id <> $1
+			  AND NOT EXISTS (SELECT 1 FROM group_members a
+			                  WHERE a.group_id = m.group_id AND a.left_at IS NULL
+			                    AND a.role = 'admin' AND a.user_id <> $1)
+			ORDER BY m.group_id, m.joined_at, m.id)`, userID, now); err != nil {
+		return fmt.Errorf("account: leaving groups: %w", err)
+	}
+
 	// The car identifies the driver as surely as the phone does, so the plate
 	// and the model go. The row itself stays: route_templates points at
 	// driver_profiles with ON DELETE CASCADE, so deleting it would take every

@@ -12,6 +12,7 @@ import (
 
 	"carpool/internal/drivers"
 	"carpool/internal/geo"
+	"carpool/internal/groups"
 	"carpool/internal/match"
 	"carpool/internal/store"
 )
@@ -61,6 +62,12 @@ type routeBody struct {
 	// Absent means their default, which is what somebody with one car sends and
 	// what the app sends until the driver has a second.
 	VehicleID string `json:"vehicle_id"`
+
+	// GroupID offers the route to one group's members only. Absent is
+	// everybody. The driver has to be a member themselves: offering a route to
+	// a group you are not in would be a way to reach its members without them
+	// having let you in.
+	GroupID string `json:"group_id"`
 
 	Kind           string   `json:"kind"` // oneoff | recurring
 	OneOffDate     string   `json:"oneoff_date"`
@@ -155,6 +162,25 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 	// nobody could later explain — see the receipt in domain.Basis.
 	if mode != domain.PricingFormula {
 		share = 1
+	}
+
+	var groupID *uuid.UUID
+	if body.GroupID != "" {
+		id, err := uuid.Parse(body.GroupID)
+		member := false
+		if err == nil {
+			member, err = groups.IsMember(r.Context(), d.Pool, userID, id)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal", "could not check the group")
+				return
+			}
+		}
+		if !member {
+			writeError(w, http.StatusForbidden, "not_in_group",
+				"you can offer a route only to a group you belong to")
+			return
+		}
+		groupID = &id
 	}
 
 	// A driver profile is what makes someone publishable; without one there is
@@ -290,6 +316,7 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		Luggage:           luggage,
 		LuggageCapacity:   capacity,
 		ContributionShare: share,
+		GroupID:           groupID,
 		Schedule:          schedule,
 	})
 	if err != nil {

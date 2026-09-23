@@ -9,6 +9,7 @@ import (
 
 	"carpool/internal/bookings"
 	"carpool/internal/domain"
+	"carpool/internal/groups"
 	"carpool/internal/moderation"
 	"carpool/internal/store"
 )
@@ -90,15 +91,39 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The groups the caller shares with each person on the trip. Always with
+	// the caller, never between two others: it answers "why should I trust
+	// this person", which is a question only the one asking it has.
+	shared := func(other uuid.UUID) ([]string, bool) {
+		if other == userID {
+			return []string{}, true
+		}
+		names, err := groups.SharedNames(r.Context(), d.Pool, userID, other)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not load the trip")
+			return nil, false
+		}
+		return names, true
+	}
+
 	passengers := make([]map[string]any, 0, len(trip.Passengers))
 	for _, p := range trip.Passengers {
+		sharedGroups, ok := shared(p.UserID)
+		if !ok {
+			return
+		}
 		passengers = append(passengers, map[string]any{
 			"id": p.UserID, "name": p.Name, "photo_url": avatarURL(p.UserID, p.PhotoVersion),
 			"facebook_url":  socialURL(domain.FacebookURL, p.FacebookHandle),
 			"instagram_url": socialURL(domain.InstagramURL, p.InstagramHandle),
 			"rating":        p.Rating, "price_eur": p.PriceEUR, "seats": p.Seats,
 			"bio": p.Bio, "preferences": nonNil(p.Preferences),
+			"shared_groups": sharedGroups,
 		})
+	}
+	driverGroups, ok := shared(trip.Driver.UserID)
+	if !ok {
+		return
 	}
 
 	out := map[string]any{
@@ -124,7 +149,8 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 			"preferences":   nonNil(trip.Driver.Preferences),
 			"car_model":     trip.Driver.CarModel, "car_color": trip.Driver.CarColor,
 			// Revealed only here, and only to people already on the trip.
-			"car_plate": trip.Driver.CarPlate,
+			"car_plate":     trip.Driver.CarPlate,
+			"shared_groups": driverGroups,
 		},
 		"passengers": passengers,
 	}

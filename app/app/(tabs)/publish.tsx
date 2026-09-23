@@ -92,6 +92,11 @@ export default function PublishScreen() {
   // about to fail, and the button should say so before it is pressed.
   const garage = useQuery({ queryKey: ['vehicles'], queryFn: api.vehicles });
   const noCar = garage.isSuccess && garage.data.length === 0;
+
+  // Who the route is offered to. Null is everybody, and it is the only choice
+  // for somebody in no group, so the section is not shown to them at all.
+  const myGroups = useQuery({ queryKey: ['groups'], queryFn: () => api.myGroups() });
+  const [groupID, setGroupID] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
   const [published, setPublished] = useState<ShareableRoute | null>(null);
 
@@ -116,6 +121,7 @@ export default function PublishScreen() {
         ...(allowStops !== null ? { allow_stops: allowStops } : {}),
         ...(detourKm !== null ? { detour_km: detourKm } : {}),
         ...(vehicleID !== null ? { vehicle_id: vehicleID } : {}),
+        ...(groupID !== null ? { group_id: groupID } : {}),
         luggage,
         luggage_capacity: luggageCapacity,
         pricing_mode: pricing,
@@ -259,6 +265,31 @@ export default function PublishScreen() {
             />
           </View>
         </Card>
+
+        {myGroups.data && myGroups.data.groups.length > 0 ? (
+          <>
+            <SectionHeader title={t('groups.audience')} />
+            <Card>
+              <View style={styles.days}>
+                <Chip
+                  testID="audience-everybody"
+                  label={t('groups.everybody')}
+                  selected={groupID === null}
+                  onPress={() => setGroupID(null)}
+                />
+                {myGroups.data.groups.map((g) => (
+                  <Chip
+                    key={g.id}
+                    testID={`audience-${g.id}`}
+                    label={t('groups.onlyGroup', { name: g.name })}
+                    selected={groupID === g.id}
+                    onPress={() => setGroupID(g.id)}
+                  />
+                ))}
+              </View>
+            </Card>
+          </>
+        ) : null}
 
         <SectionHeader title={t('publish.carSection')} />
         <Card>

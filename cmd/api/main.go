@@ -26,6 +26,7 @@ import (
 	"carpool/internal/dispatch"
 	"carpool/internal/drivers"
 	"carpool/internal/geo"
+	"carpool/internal/groups"
 	"carpool/internal/invites"
 	"carpool/internal/jobs"
 	"carpool/internal/moderation"
@@ -200,6 +201,7 @@ func run() error {
 		Standing:   standing.NewService(pool, clk),
 		Bookings:   bookings.NewService(pool, clk),
 		Invites:    invites.NewService(pool, clk, cfg.InviteOnly),
+		Groups:     groups.NewService(pool, clk),
 		DevMode:    cfg.DevMode,
 		Account:    account.NewService(pool, clk),
 		Drivers:    drivers.NewService(pool, clk),

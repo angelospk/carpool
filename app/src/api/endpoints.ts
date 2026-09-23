@@ -186,6 +186,22 @@ export type Participant = {
   /** Their own words, and what their rides are like. */
   bio?: string | null;
   preferences?: PreferenceTag[];
+  /**
+   * The groups the caller and this person are both in. Empty for the caller
+   * themselves. It answers "why trust this person", so it is only ever
+   * reckoned from the caller's side.
+   */
+  shared_groups?: string[];
+};
+
+/** A group the caller belongs to. */
+export type Group = {
+  id: string;
+  name: string;
+  role: 'admin' | 'member';
+  members: number;
+  /** The join code, for admins only. Absent means you may not see it. */
+  code?: string;
 };
 
 /**
@@ -462,6 +478,8 @@ export const api = {
     detour_km?: number;
     /** Which car. Omitted means the default, which is what a driver with one sends. */
     vehicle_id?: string;
+    /** Offer the route to this group's members only. Absent is everybody. */
+    group_id?: string;
     /** The largest thing this route will take. Omitted means a suitcase. */
     luggage?: LuggageSize;
     /** How many of that size the boot holds. Absent means three. */
@@ -560,6 +578,13 @@ export const api = {
     request<void>(`/v1/arrangements/${id}/decline`, { method: 'POST' }),
   cancelArrangement: (id: string) =>
     request<void>(`/v1/arrangements/${id}`, { method: 'DELETE' }),
+
+  myGroups: () => request<{ groups: Group[] }>('/v1/groups/mine'),
+  createGroup: (name: string) => request<Group>('/v1/groups', { method: 'POST', body: { name } }),
+  joinGroup: (code: string) => request<Group>('/v1/groups/join', { method: 'POST', body: { code } }),
+  leaveGroup: (id: string) => request<void>(`/v1/groups/${id}/membership`, { method: 'DELETE' }),
+  rotateGroupCode: (id: string) =>
+    request<{ code: string }>(`/v1/groups/${id}/code`, { method: 'POST' }),
 
   blockUser: (id: string) => request<void>(`/v1/users/${id}/block`, { method: 'POST' }),
   reportUser: (id: string, reason: string) =>

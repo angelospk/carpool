@@ -241,6 +241,13 @@ export default function ProfileScreen() {
           />
           <View style={styles.divider} />
           <Row
+            testID="my-groups"
+            label={t('groups.title')}
+            value=""
+            onPress={() => router.push('/profile/groups')}
+          />
+          <View style={styles.divider} />
+          <Row
             testID="my-vehicles"
             label={t('garage.title')}
             value=""

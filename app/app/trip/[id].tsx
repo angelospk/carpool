@@ -23,6 +23,7 @@ import { SocialLinks } from '../../src/components/SocialLink';
 import { PortNotice } from '../../src/components/PortNotice';
 import { PriceBreakdown } from '../../src/components/PriceBreakdown';
 import { PreferenceChips } from '../../src/components/Preferences';
+import { SharedGroups } from '../../src/components/SharedGroups';
 import { Map } from '../../src/map/Map';
 import polyline from '@mapbox/polyline';
 import { haveTiles } from '../../src/map/tiles';
@@ -195,6 +196,7 @@ export default function TripScreen() {
                         facebook={trip.data.driver.facebook_url}
                         instagram={trip.data.driver.instagram_url}
                       />
+                      <SharedGroups testID="driver-shared-groups" names={trip.data.driver.shared_groups} />
                     </View>
                     {/* The plate only exists in this payload once a booking is made. */}
                     {trip.data.driver.car_plate ? (
@@ -212,6 +214,26 @@ export default function TripScreen() {
                     tags={trip.data.driver.preferences}
                   />
                 </Card>
+
+                {/* Who is coming, for the driver. Their name and the groups
+                    the two of them share, which is what decides whether a
+                    stranger at the stop is expected. */}
+                {trip.data.role === 'driver' && trip.data.passengers.length > 0 ? (
+                  <Card>
+                    {trip.data.passengers.map((p) => (
+                      <View key={p.id} testID={`passenger-${p.id}`} style={styles.person}>
+                        <Avatar name={p.name} photoUrl={p.photo_url} size={40} />
+                        <View style={styles.personText}>
+                          <Text style={styles.personName}>
+                            {p.name}
+                            {p.rating ? ` · ★ ${p.rating}` : ''}
+                          </Text>
+                          <SharedGroups names={p.shared_groups} />
+                        </View>
+                      </View>
+                    ))}
+                  </Card>
+                ) : null}
 
                 <RepeatCard trip={trip.data} />
 
