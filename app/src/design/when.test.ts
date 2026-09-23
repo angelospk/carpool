@@ -79,6 +79,42 @@ describe('departureWindow', () => {
     expect(athensClock(w.end)).toBe('22:00');
   });
 
+  // The gap. The band's start was clamped to now and its end was not, so a band
+  // whose last minute had gone produced a window running backwards: start at
+  // 20:00, end at 10:00. The server's own CHECK refuses that, so the passenger
+  // pressed the button and got "something went wrong" with no way to read it —
+  // and the chip they had selected had already vanished from the picker, which
+  // is how the state is reachable at all.
+  //
+  // A band that has gone means the same band tomorrow, which is what asking for
+  // "morning" at eight in the evening means. It is the same clamping the band
+  // already does one step further on.
+  it('a band whose last minute has gone means the same band tomorrow', () => {
+    // 14 July 2026, 20:00 Athens.
+    const evening = new Date('2026-07-14T17:00:00Z');
+    const w = departureWindow('today', 'morning', evening);
+
+    expect(w.start.getTime()).toBeLessThan(w.end.getTime());
+    expect(athensDate(w.start)).toBe('2026-07-15');
+    expect(athensClock(w.start)).toBe('06:00');
+    expect(athensClock(w.end)).toBe('10:00');
+  });
+
+  // Whatever the day and the band, the window has to be a window. This is the
+  // property the bug broke, asserted across every combination rather than at
+  // the one time of day that happened to be noticed.
+  it('never runs backwards, at any hour of the day', () => {
+    for (const hour of [0, 3, 6, 9, 11, 13, 15, 17, 19, 21, 23]) {
+      const at = new Date(Date.UTC(2026, 6, 14, hour, 0, 0));
+      for (const day of ['today', 'tomorrow'] as const) {
+        for (const band of ['now', 'morning', 'midday', 'afternoon', 'evening'] as const) {
+          const w = departureWindow(day, band, at);
+          expect(w.start.getTime()).toBeLessThan(w.end.getTime());
+        }
+      }
+    }
+  });
+
   it('rolls into the next month when today is the last of it', () => {
     // 31 July 2026, 23:00 Athens.
     const lateNight = new Date('2026-07-31T20:00:00Z');

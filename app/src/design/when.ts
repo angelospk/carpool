@@ -113,11 +113,23 @@ export function bandIsOpen(day: Day, band: Band, now: Date): boolean {
  *
  * A band that has already started is clamped to this minute: asking to be
  * picked up at 06:00 when it is 08:30 is asking for a ride that has gone.
+ *
+ * A band whose last minute has also gone means the same band tomorrow. That is
+ * the same clamping one step further on — asking for "morning" at eight in the
+ * evening means tomorrow morning — and it is the case that used to produce a
+ * window running backwards, because the start was clamped to now and the end
+ * was not. The result was start 20:00, end 10:00, which the server's own CHECK
+ * refuses, so the passenger got an error with nothing in it to read.
+ *
+ * It is reachable because the selected band lives outside the picker: the chip
+ * disappears once bandIsOpen goes false, and the selection does not.
  */
 export function departureWindow(day: Day, band: Band, now: Date): Window {
   if (band === 'now') return { start: now, end: new Date(now.getTime() + NOW_WINDOW_MS) };
 
-  const date = day === 'today' ? athensDate(now) : nextDate(athensDate(now));
+  const today = athensDate(now);
+  const gone = day === 'today' && !bandIsOpen(day, band, now);
+  const date = day === 'today' && !gone ? today : nextDate(today);
   const [from, to] = BAND_HOURS[band];
   const start = athensInstant(date, from);
   const end = athensInstant(date, to);
