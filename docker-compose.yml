@@ -29,6 +29,9 @@ services:
       REGION_FIXTURE: ${REGION_FIXTURE:-/fixtures/regions/greece.geojson}
       FUEL_PRICE_EUR: ${FUEL_PRICE_EUR:-1.800}
       OSRM_DATA_VERSION: ${OSRM_DATA_VERSION:-unknown}
+      # Route links. Empty means a share is the sentence alone.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      INSTALL_URL: ${INSTALL_URL:-}
       # Must stay false: DEV_MODE prints OTP codes instead of sending them.
       DEV_MODE: "false"
     expose:
