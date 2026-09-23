@@ -50,6 +50,15 @@ test('the link shows the same sentence the driver sent', async () => {
   );
 });
 
+// The sentence is in the driver's first person ("έχω 3 θέσεις"), so the
+// screen says whose words they are rather than speaking them itself.
+test('the sentence is attributed to the driver', async () => {
+  (api.sharedRoute as jest.Mock).mockResolvedValue(shared);
+  render(wrap(<SharedRouteScreen />));
+  await waitFor(() => expect(screen.getByTestId('shared-route-line')).toBeTruthy());
+  expect(screen.getByText('Ο οδηγός γράφει:')).toBeTruthy();
+});
+
 // Searching resolves the names through the public places list, so the link
 // never had to carry anybody's coordinates.
 test('searching fills the search form with the two places', async () => {

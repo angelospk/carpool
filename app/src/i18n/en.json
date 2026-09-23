@@ -468,6 +468,7 @@
     "title": "Route",
     "notFound": "This link does not lead to a route.",
     "retired": "This route is no longer offered.",
+    "driverSays": "The driver wrote:",
     "forGroup": "Offered to the members of one group only.",
     "howItWorks": "The driver shares costs, they do not sell rides. Search the road and the app will ask them for you.",
     "search": "Search this route",

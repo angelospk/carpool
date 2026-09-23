@@ -90,7 +90,9 @@ export default function SharedRouteScreen() {
         <Card testID="shared-route">
           <RouteSpine from={route.data.origin_label} to={route.data.destination_label} />
           {/* The same sentence the driver sent, so the screen and the chat
-              agree about what was offered. Its first line only. */}
+              agree about what was offered. Its first line only. It is in the
+              driver's first person, so it is shown as theirs. */}
+          <Text style={styles.says}>{t('sharedRoute.driverSays')}</Text>
           <Text testID="shared-route-line" style={styles.line}>
             {shareRouteMessage(
               {
@@ -125,5 +127,6 @@ export default function SharedRouteScreen() {
 }
 
 const styles = StyleSheet.create({
-  line: { ...type.body, color: colors.ink, marginTop: space.sm },
+  says: { ...type.caption, color: colors.muted, marginTop: space.sm },
+  line: { ...type.body, color: colors.ink, fontStyle: 'italic' },
 });
