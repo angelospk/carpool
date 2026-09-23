@@ -44,7 +44,7 @@ test-routed:
 		{ echo "set CARPOOL_TEST_OSRM to a running osrm-routed, e.g. http://127.0.0.1:5000"; exit 1; }
 	@test -n "$$CARPOOL_TEST_DSN" || \
 		{ echo "set CARPOOL_TEST_DSN as well: these tests need a database too"; exit 1; }
-	go test ./internal/api/ -run "AcrossAPrefectureBoundary|OutsideTheRoutedArea" -count=1 -v
+	go test ./internal/api/ -run "AcrossAPrefectureBoundary|OutsideTheRoutedArea|FromOutsideGreece|FromInsideGreece" -count=1 -v
 
 ## test-race: the same suite under the race detector
 test-race:
