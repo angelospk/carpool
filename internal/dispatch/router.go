@@ -240,8 +240,12 @@ func (p pushPayload) notification() (recipient uuid.UUID, title, body string, er
 func say(event notices.Event) (title, body string, ok bool) {
 	switch event {
 	case notices.BookingCancelledForPassenger:
+		// The second sentence is true whichever of the three it was: each of
+		// them puts the passenger's request back in the queue if it came from
+		// one. It is conditional because a seat from a standing arrangement had
+		// no request behind it, and a lock screen cannot tell the two apart.
 		return "Η διαδρομή ακυρώθηκε",
-			"Η κράτησή σου δεν ισχύει πια.", true
+			"Η κράτησή σου δεν ισχύει πια. Αν το αίτημά σου ισχύει ακόμα, ψάχνουμε ήδη άλλον οδηγό.", true
 	case notices.BookingCancelledForDriver:
 		return "Ακυρώθηκε μια κράτηση",
 			"Ένας επιβάτης δεν θα έρθει τελικά, και η θέση είναι πάλι ελεύθερη.", true

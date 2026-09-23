@@ -1,7 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { Linking, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { api } from '../../src/api/endpoints';
@@ -32,6 +32,17 @@ export default function RequestScreen() {
   const requests = useOpenRequests();
   const mine = requests.data?.requests.find((q) => q.id === id) ?? null;
   const loading = requests.isLoading || (requests.isPending && !requests.data);
+
+  // The cars still on this road, for somebody whose driver cancelled. Only
+  // then: for an ordinary request the progress line already says what is
+  // happening, and a list under it would read as a choice the passenger has to
+  // make when the dispatcher is making it.
+  const stranded = mine?.stranded === true;
+  const alternatives = useQuery({
+    queryKey: ['requests', id, 'alternatives'],
+    queryFn: () => api.requestAlternatives(id),
+    enabled: stranded,
+  });
 
   const cancel = useMutation({
     mutationFn: () => api.cancelRequest(id),
@@ -105,6 +116,34 @@ export default function RequestScreen() {
         )}
       </Card>
 
+      {stranded ? (
+        <Card testID="request-stranded">
+          <Text style={styles.strandedTitle}>{t('request.strandedTitle')}</Text>
+          {alternatives.data && alternatives.data.alternatives.length > 0 ? (
+            <>
+              <Hint>{t('request.alternativesIntro')}</Hint>
+              {alternatives.data.alternatives.map((a, i) => (
+                <Text key={i} testID={`alternative-${i}`} style={styles.alternative}>
+                  {athensTime(a.depart_earliest)}–{athensTime(a.depart_latest)} · {a.origin_label} →{' '}
+                  {a.destination_label} · {t('request.seatsFree', { count: a.seats_free })}
+                </Text>
+              ))}
+            </>
+          ) : alternatives.isSuccess ? (
+            <Hint testID="request-no-alternatives">{t('request.noAlternatives')}</Hint>
+          ) : null}
+          {/* The fallback that is always there. The pilot runs in Έβρος, so it
+              is that ΚΤΕΛ, named, rather than a link that pretends to know
+              about every bus in the country. */}
+          <Button
+            testID="request-bus"
+            label={t('request.busFallback')}
+            variant="secondary"
+            onPress={() => void Linking.openURL(KTEL_URL)}
+          />
+        </Card>
+      ) : null}
+
       {/* Nobody should sit here watching. Saying so is the difference between a
           waiting room and a thing you can walk away from. */}
       <Hint>{t('request.leaveOk')}</Hint>
@@ -152,7 +191,11 @@ export default function RequestScreen() {
   );
 }
 
+const KTEL_URL = 'https://ktelevrou.gr/';
+
 const styles = StyleSheet.create({
+  strandedTitle: { ...type.body, color: colors.ink, fontWeight: '700' },
+  alternative: { ...type.body, color: colors.ink },
   // Place names wrap rather than truncate: "Αλεξανδρούπολη → Πεπλος" cut at
   // one line is a journey nobody can check.
   route: { ...type.title, color: colors.ink },

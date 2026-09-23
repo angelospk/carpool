@@ -34,7 +34,7 @@ func TestEveryNoticeReachesThePersonItNames(t *testing.T) {
 	}{
 		notices.BookingCancelledForPassenger: {
 			"Η διαδρομή ακυρώθηκε",
-			"Η κράτησή σου δεν ισχύει πια.",
+			"Η κράτησή σου δεν ισχύει πια. Αν το αίτημά σου ισχύει ακόμα, ψάχνουμε ήδη άλλον οδηγό.",
 		},
 		notices.BookingCancelledForDriver: {
 			"Ακυρώθηκε μια κράτηση",

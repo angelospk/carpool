@@ -283,7 +283,21 @@ export type OpenRequest = {
   asking_now: boolean;
   /** Absent from a server that predates the field. Absent is not zero. */
   drivers_on_corridor?: number;
+  /** The driver took the seat back and the request is being matched again. */
+  stranded?: boolean;
   created_at: string;
+};
+
+/**
+ * A departure the matcher would try next for a request. Anonymous: nobody on
+ * it has been asked, so nobody's name is on it.
+ */
+export type Alternative = {
+  depart_earliest: string;
+  depart_latest: string;
+  origin_label: string;
+  destination_label: string;
+  seats_free: number;
 };
 
 export type Arrangement = {
@@ -542,6 +556,9 @@ export const api = {
 
   /** What the caller is still waiting on, and how far the search has got. */
   myRequests: () => request<{ requests: OpenRequest[] }>('/v1/requests/mine'),
+
+  requestAlternatives: (id: string) =>
+    request<{ alternatives: Alternative[] }>(`/v1/requests/${id}/alternatives`),
 
   cancelRequest: (id: string) => request<void>(`/v1/requests/${id}`, { method: 'DELETE' }),
 

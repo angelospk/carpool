@@ -159,3 +159,62 @@ func TestBeingStrandedTwiceAsksTwice(t *testing.T) {
 		t.Fatalf("%d recovery events for somebody stranded twice, want 2", n)
 	}
 }
+
+// The same promise when the driver takes back one seat rather than calling off
+// the whole departure.
+//
+// Only CancelOccurrence handed its passengers back to the matcher. A driver who
+// told one passenger "not today" through Cancel left that passenger's request
+// at 'matched' for ever, with the same push and nothing behind it — the
+// guaranteed ride home kept for a cancelled car and broken for a cancelled seat.
+func TestADriverCancellingOneSeatLooksForAnotherDriverForThatPassenger(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	requestID := requestFor(t, w, w.fromAsk)
+
+	if err := w.svc.Cancel(ctx, w.fromAsk, w.driverID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if n := reopensQueuedFor(t, w, requestID); n != 1 {
+		t.Fatalf("%d recovery events for a seat the driver took back, want 1", n)
+	}
+
+	// Asking twice is the same act and asks once.
+	if err := w.svc.Cancel(ctx, w.fromAsk, w.driverID); err != nil {
+		t.Fatalf("second Cancel: %v", err)
+	}
+	if n := reopensQueuedFor(t, w, requestID); n != 1 {
+		t.Fatalf("%d recovery events after cancelling twice, want 1", n)
+	}
+}
+
+// A passenger giving their own seat back has changed their mind, and finding
+// them another driver would be doing the opposite of what they asked.
+func TestAPassengerCancellingTheirOwnSeatIsNotLookedAfter(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	requestID := requestFor(t, w, w.fromAsk)
+
+	if err := w.svc.Cancel(ctx, w.fromAsk, w.passengerID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if n := reopensQueuedFor(t, w, requestID); n != 0 {
+		t.Fatalf("%d recovery events for a passenger who cancelled themselves", n)
+	}
+}
+
+// A seat from a standing arrangement has no request to reopen.
+func TestADriverCancellingAnArrangedSeatQueuesNothing(t *testing.T) {
+	w := newWorld(t)
+	if err := w.svc.Cancel(context.Background(), w.fromArrangement, w.driverID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	var queued int
+	if err := w.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM outbox WHERE kind = 'reopen_request'`).Scan(&queued); err != nil {
+		t.Fatalf("counting: %v", err)
+	}
+	if queued != 0 {
+		t.Fatalf("%d recovery events for an arranged seat", queued)
+	}
+}

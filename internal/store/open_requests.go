@@ -45,7 +45,12 @@ type OpenRequest struct {
 	// whether anybody drives this road, not whether they can take this
 	// particular trip.
 	DriversOnCorridor int
-	CreatedAt         time.Time
+	// Stranded is a request that had a seat and lost it to the driver: its
+	// latest booking was cancelled from the driver's side, and it is back in
+	// the queue. The passenger needs to hear that the search restarted on its
+	// own, not find a request looking exactly like one never answered.
+	Stranded  bool
+	CreatedAt time.Time
 }
 
 // OpenRequests lists what the caller is still waiting on, newest first.
@@ -91,6 +96,9 @@ func OpenRequests(
 		       count(DISTINCT t.driver_id) FILTER (WHERE a.status IN ('declined','expired')),
 		       coalesce(bool_or(a.status = 'pending' AND a.expires_at > $2), false),
 		       corridor.drivers,
+		       coalesce((SELECT lb.status = 'cancelled_by_driver' FROM bookings lb
+		                 WHERE lb.request_id = r.id
+		                 ORDER BY lb.created_at DESC, lb.id DESC LIMIT 1), false),
 		       r.created_at
 		FROM mine r
 		LEFT JOIN asks a             ON a.request_id = r.id
@@ -129,6 +137,12 @@ func OpenRequests(
 			        AND (cs.effective_until IS NULL OR cs.effective_until >= $2::date)))
 			WHERE ct.active
 			  AND ct.driver_id <> r.passenger_id
+			  -- A route offered to a group the passenger is not in does not
+			  -- drive this road for them, and counting it would hide the
+			  -- sentence that says nobody does.
+			  AND (ct.group_id IS NULL OR EXISTS (
+			        SELECT 1 FROM group_members gm
+			        WHERE gm.group_id = ct.group_id AND gm.user_id = r.passenger_id AND gm.left_at IS NULL))
 			  AND ST_DWithin(ct.route_geom::geography, r.origin::geography,
 			                 d.notify_radius_km * 1000)
 			  AND ST_DWithin(ct.route_geom::geography, r.destination::geography,
@@ -150,7 +164,7 @@ func OpenRequests(
 		var q OpenRequest
 		if err := rows.Scan(&q.ID, &q.OriginLabel, &q.DestinationLabel,
 			&q.WindowStart, &q.WindowEnd, &q.Seats, &q.Status,
-			&q.DriversAsked, &q.DriversDeclined, &q.AskingNow, &q.DriversOnCorridor, &q.CreatedAt); err != nil {
+			&q.DriversAsked, &q.DriversDeclined, &q.AskingNow, &q.DriversOnCorridor, &q.Stranded, &q.CreatedAt); err != nil {
 			return nil, fmt.Errorf("store: scanning an open request: %w", err)
 		}
 		out = append(out, q)

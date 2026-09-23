@@ -130,7 +130,8 @@
     "seatsFree_one": "{{count}} seat free",
     "seatsFree_other": "{{count}} seats free",
     "seatsFull": "Full",
-    "contribution": "Suggested contribution"
+    "contribution": "Suggested contribution",
+    "requestStranded": "Your driver cancelled and we are already looking for another."
   },
   "luggage": {
     "bulky": "A bicycle, skis, a pushchair",
@@ -296,7 +297,13 @@
     "backHome": "Back to home",
     "cancel": "Cancel request",
     "closed": "This request is no longer open.",
-    "leaveOk": "You can close the app. We will notify you as soon as a driver accepts."
+    "leaveOk": "You can close the app. We will notify you as soon as a driver accepts.",
+    "strandedTitle": "Your driver cancelled. You do not need to do anything: we are already asking the next one.",
+    "alternativesIntro": "These cars still pass along your road and will be asked in this order:",
+    "noAlternatives": "No other car on your road for now. The request stays open.",
+    "seatsFree_one": "{{count}} seat",
+    "seatsFree_other": "{{count}} seats",
+    "busFallback": "KTEL Evros timetables"
   },
   "search": {
     "asking": "Asking a driver…",

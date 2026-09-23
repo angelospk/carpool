@@ -324,3 +324,38 @@ func TestATemplateWithNoScheduleIsNotADriverOnTheCorridor(t *testing.T) {
 		t.Errorf("drivers on corridor = %d, want 0", got)
 	}
 }
+
+// A route its driver offered to one group is not cover for somebody outside
+// it: the matcher will never offer it to them, and counting it would hide the
+// sentence that says nobody drives their road. Joining the group makes it
+// count, because then it is.
+func TestARouteForAGroupIsCoverOnlyForItsMembers(t *testing.T) {
+	w := newCorridorWorld(t)
+	ctx := context.Background()
+	id := w.route(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+
+	var groupID, passengerID uuid.UUID
+	if err := w.pool.QueryRow(ctx,
+		`INSERT INTO groups (name, join_code) VALUES ('ΔΠΘ', 'ACDEFGHJ') RETURNING id`).Scan(&groupID); err != nil {
+		t.Fatalf("seeding group: %v", err)
+	}
+	if _, err := w.pool.Exec(ctx, `UPDATE route_templates SET group_id = $1 WHERE id = $2`, groupID, id); err != nil {
+		t.Fatalf("restricting: %v", err)
+	}
+	if got := onlyRequest(t, w).DriversOnCorridor; got != 0 {
+		t.Errorf("an outsider is told %d drivers are on the road, want 0", got)
+	}
+
+	if err := w.pool.QueryRow(ctx,
+		`SELECT passenger_id FROM ride_requests LIMIT 1`).Scan(&passengerID); err != nil {
+		t.Fatalf("finding the passenger: %v", err)
+	}
+	if _, err := w.pool.Exec(ctx, `
+		INSERT INTO group_members (group_id, user_id, role, joined_at) VALUES ($1, $2, 'member', now())`,
+		groupID, passengerID); err != nil {
+		t.Fatalf("joining: %v", err)
+	}
+	if got := onlyRequest(t, w).DriversOnCorridor; got != 1 {
+		t.Errorf("a member is told %d drivers are on the road, want 1", got)
+	}
+}

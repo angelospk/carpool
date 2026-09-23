@@ -102,6 +102,14 @@ export function OpenRequests() {
  * οδηγοί δεν μπορούσαν" on its own reads as a refusal rather than as progress.
  */
 export function requestProgress(request: OpenRequest, t: TFunction): string {
+  // Somebody whose driver took the seat back has to hear that first, and that
+  // the search started again without them doing anything. Otherwise the card
+  // reads exactly like a request nobody ever answered.
+  const progress = progressOf(request, t);
+  return request.stranded ? `${t('home.requestStranded')} ${progress}` : progress;
+}
+
+function progressOf(request: OpenRequest, t: TFunction): string {
   if (request.drivers_asked === 0 && request.drivers_on_corridor === 0)
     return t('home.requestNoDrivers');
   const declined =

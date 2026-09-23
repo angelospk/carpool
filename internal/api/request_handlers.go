@@ -193,6 +193,7 @@ func (d Deps) handleMyRequests(w http.ResponseWriter, r *http.Request) {
 			"drivers_declined":    q.DriversDeclined,
 			"asking_now":          q.AskingNow,
 			"drivers_on_corridor": q.DriversOnCorridor,
+			"stranded":            q.Stranded,
 			"created_at":          q.CreatedAt,
 		})
 	}
@@ -355,3 +356,36 @@ func (d Deps) handlePutPushToken(w http.ResponseWriter, r *http.Request) {
 // is moving house, and that is a conversation to have rather than a form to fill
 // in. It matches the CHECK on ride_requests.luggage_count.
 const maxLuggageItems = 4
+
+// handleRequestAlternatives lists, anonymously, the departures the matcher
+// would try next for one of the caller's own requests. It is what the request
+// screen shows a passenger whose driver cancelled: there is still a car on
+// this road, and it is already being asked.
+func (d Deps) handleRequestAlternatives(w http.ResponseWriter, r *http.Request) {
+	userID, _ := callerID(r.Context())
+	requestID, err := uuid.Parse(chiURLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "no such request")
+		return
+	}
+	list, err := d.Asks.Alternatives(r.Context(), requestID, userID, 5)
+	if errors.Is(err, asks.ErrNotYourRequest) {
+		writeError(w, http.StatusNotFound, "not_found", "no such request")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not look for alternatives")
+		return
+	}
+	out := make([]map[string]any, 0, len(list))
+	for _, a := range list {
+		out = append(out, map[string]any{
+			"depart_earliest":   a.DepartEarliest,
+			"depart_latest":     a.DepartLatest,
+			"origin_label":      a.OriginLabel,
+			"destination_label": a.DestinationLabel,
+			"seats_free":        a.SeatsFree,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"alternatives": out})
+}

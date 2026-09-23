@@ -89,9 +89,11 @@ func (s *Service) Cancel(ctx context.Context, bookingID, userID uuid.UUID) error
 		return fmt.Errorf("bookings: loading the trip: %w", err)
 	}
 
+	// request is nil for a seat that came from a standing arrangement.
+	var request *uuid.UUID
 	err = tx.QueryRow(ctx,
-		`SELECT passenger_id, status FROM bookings WHERE id = $1 FOR UPDATE`, bookingID).
-		Scan(&passengerID, &status)
+		`SELECT passenger_id, status, request_id FROM bookings WHERE id = $1 FOR UPDATE`, bookingID).
+		Scan(&passengerID, &status, &request)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -163,6 +165,16 @@ func (s *Service) Cancel(ctx context.Context, bookingID, userID uuid.UUID) error
 	}
 	if err := outbox.Enqueue(ctx, tx, notice, now); err != nil {
 		return err
+	}
+
+	// A driver taking back one seat strands its passenger exactly as calling
+	// off the departure does, and gets the same recovery: the request they
+	// already made goes back to the matcher. A passenger giving their own seat
+	// back has changed their mind, and is left alone.
+	if byDriver && request != nil {
+		if err := s.lookAgainFor(ctx, tx, *request, bookingID, now); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {

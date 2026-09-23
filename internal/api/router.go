@@ -229,6 +229,7 @@ func NewRouter(deps Deps) http.Handler {
 			if deps.Asks != nil {
 				r.Post("/requests", deps.handleCreateRequest)
 				r.Delete("/requests/{id}", deps.handleCancelRequest)
+				r.Get("/requests/{id}/alternatives", deps.handleRequestAlternatives)
 				r.Post("/bookings/{id}/again", deps.handleAgain)
 				r.Post("/asks/{id}/accept", deps.handleAcceptAsk)
 				r.Post("/asks/{id}/decline", deps.handleDeclineAsk)

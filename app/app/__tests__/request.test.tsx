@@ -14,7 +14,7 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { cancelRequest: jest.fn(), myRequests: jest.fn() },
+  api: { cancelRequest: jest.fn(), myRequests: jest.fn(), requestAlternatives: jest.fn() },
 }));
 
 jest.mock('../../src/state/session', () => ({
@@ -125,4 +125,44 @@ test('a failure to cancel is not read as a cancellation', async () => {
 
   await waitFor(() => expect(screen.getByTestId('request-outcome')).toBeTruthy());
   expect(mockReplace).not.toHaveBeenCalled();
+});
+
+// A passenger whose driver took the seat back is told so, told the search
+// restarted without them, and shown the cars still on the road in the order
+// they will be asked — with no driver named, because none of them has agreed
+// to anything.
+test('a stranded request says the driver cancelled and lists the cars still on the road', async () => {
+  (api.myRequests as jest.Mock).mockResolvedValue({ requests: [{ ...asking, stranded: true }] });
+  (api.requestAlternatives as jest.Mock).mockResolvedValue({
+    alternatives: [
+      {
+        depart_earliest: '2026-07-29T05:00:00Z',
+        depart_latest: '2026-07-29T05:30:00Z',
+        origin_label: 'Αλεξανδρούπολη',
+        destination_label: 'Κομοτηνή',
+        seats_free: 2,
+      },
+    ],
+  });
+
+  render(wrap(<RequestScreen />));
+
+  await waitFor(() => expect(screen.getByTestId('request-stranded')).toBeTruthy());
+  expect(String(screen.getByTestId('request-progress').props.children)).toContain('Ο οδηγός ακύρωσε');
+  await waitFor(() => expect(screen.getByTestId('alternative-0')).toBeTruthy());
+  const line = [screen.getByTestId('alternative-0').props.children].flat().join('');
+  expect(line).toContain('08:00');
+  expect(line).toContain('2 θέσεις');
+  expect(api.requestAlternatives).toHaveBeenCalledWith('req-1');
+  expect(screen.getByTestId('request-bus')).toBeTruthy();
+});
+
+// An ordinary request does not ask for alternatives at all: the dispatcher is
+// choosing, and a list would read as a choice the passenger has to make.
+test('an ordinary request does not look for alternatives', async () => {
+  (api.myRequests as jest.Mock).mockResolvedValue({ requests: [asking] });
+  render(wrap(<RequestScreen />));
+  await waitFor(() => expect(screen.getByTestId('request-progress')).toBeTruthy());
+  expect(screen.queryByTestId('request-stranded')).toBeNull();
+  expect(api.requestAlternatives).not.toHaveBeenCalled();
 });

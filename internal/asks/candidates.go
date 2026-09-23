@@ -44,23 +44,7 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 		return uuid.Nil, ErrNoCandidates
 	}
 
-	candidates, err := match.Gross(ctx, s.pool, match.GrossQuery{
-		Origin:       match.Point{Lon: req.Origin.Lon, Lat: req.Origin.Lat},
-		Destination:  match.Point{Lon: req.Destination.Lon, Lat: req.Destination.Lat},
-		WindowStart:  req.WindowStart,
-		WindowEnd:    req.WindowEnd,
-		Seats:        req.Seats,
-		Luggage:      req.Luggage,
-		LuggageCount: req.LuggageCount,
-		RequestKm:    req.RequestKm,
-		PassengerID:  req.PassengerID,
-		// Both of these used to be applied to the results of this call. The
-		// gross stage limits its candidates in SQL, so filtering afterwards
-		// discards rows that had already displaced the ones being looked for.
-		RequestID: requestID,
-		Target:    req.Target,
-		Now:       s.clock.Now(),
-	})
+	candidates, err := match.Gross(ctx, s.pool, s.grossQuery(req))
 	if err != nil {
 		return uuid.Nil, err
 	}
