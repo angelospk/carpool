@@ -10,6 +10,7 @@ import { useRef, useState } from 'react';
 import { Share } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
+import { api } from '../api/endpoints';
 import { shareRouteMessage, type ShareableRoute } from '../design/shareRoute';
 import { Button, Hint } from './ui';
 
@@ -41,7 +42,16 @@ export function ShareRouteButton({
     // A failure belongs to the attempt that produced it, not to the next one.
     setFailed(false);
     try {
-      await Share.share({ message: shareRouteMessage(route, t) });
+      // A link when the route has one to make, and the sentence alone when it
+      // cannot: a failed link is not a reason to send nothing.
+      let link: string | undefined;
+      if (route.id) {
+        link = await api
+          .shareRouteLink(route.id)
+          .then((r) => r.url || undefined)
+          .catch(() => undefined);
+      }
+      await Share.share({ message: shareRouteMessage(route, t, link) });
     } catch {
       setFailed(true);
     } finally {

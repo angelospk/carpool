@@ -53,6 +53,11 @@ type Config struct {
 	// does not affect anyone who already has an account.
 	InviteOnly bool
 
+	// PublicBaseURL is the address route links are built on, and InstallURL
+	// is where their page sends somebody without the app. Both optional.
+	PublicBaseURL string
+	InstallURL    string
+
 	// DevMode enables developer conveniences that must never be reachable in
 	// production — most importantly printing the OTP to the console instead of
 	// sending an SMS. It defaults to false so production is the safe default.
@@ -76,6 +81,9 @@ func Load(lookup LookupFunc) (Config, error) {
 		// differently is a change of environment variable, not of code.
 		SMSTemplate: optional(lookup, "SMS_TEMPLATE",
 			`{"sender":"{{sender}}","recipient":"{{phone}}","text":"{{message}}"}`),
+
+		PublicBaseURL: optional(lookup, "PUBLIC_BASE_URL", ""),
+		InstallURL:    optional(lookup, "INSTALL_URL", ""),
 
 		RegionFixture:   optional(lookup, "REGION_FIXTURE", ""),
 		FuelPriceSource: optional(lookup, "FUEL_PRICE_SOURCE", "configured at deploy"),

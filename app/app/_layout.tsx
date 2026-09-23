@@ -69,7 +69,10 @@ function AuthGate() {
     if (status === 'loading') return;
 
     const inAuthFlow = segments[0] === '(auth)';
-    if (status === 'signedOut' && !inAuthFlow) {
+    // A route link is how somebody meets the app before they have an account,
+    // so it is the one screen a signed-out visitor is left on.
+    const onPublicLink = segments[0] === 'r';
+    if (status === 'signedOut' && !inAuthFlow && !onPublicLink) {
       router.replace('/(auth)/phone');
     } else if (status === 'signedIn' && inAuthFlow) {
       router.replace('/(tabs)');
@@ -90,6 +93,7 @@ function AuthGate() {
       <Stack.Screen name="profile/routes" options={{ title: t('profile.routes') }} />
       <Stack.Screen name="profile/vehicles" options={{ title: t('garage.title') }} />
       <Stack.Screen name="profile/groups" options={{ title: t('groups.title') }} />
+      <Stack.Screen name="r/[token]" options={{ title: t('sharedRoute.title') }} />
     </Stack>
   );
 }

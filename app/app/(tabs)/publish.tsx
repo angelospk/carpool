@@ -145,7 +145,7 @@ export default function PublishScreen() {
     },
     onSuccess: (r, snap) => {
       setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`);
-      setPublished(snap);
+      setPublished({ ...snap, id: r.template_id });
     },
     onError: (e) => {
       setOutcome(

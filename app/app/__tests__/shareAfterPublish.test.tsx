@@ -13,7 +13,14 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { publishRoute: jest.fn(), places: jest.fn(), meetingPoints: jest.fn(), vehicles: jest.fn() },
+  api: {
+    publishRoute: jest.fn(),
+    places: jest.fn(),
+    meetingPoints: jest.fn(),
+    vehicles: jest.fn(),
+    myGroups: jest.fn(),
+    shareRouteLink: jest.fn(),
+  },
   LUGGAGE_SIZES: ['none', 'cabin', 'suitcase', 'bulky'],
 }));
 
@@ -54,6 +61,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   share = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' });
   (api.vehicles as jest.Mock).mockResolvedValue([car]);
+  (api.myGroups as jest.Mock).mockResolvedValue({ groups: [] });
+  (api.shareRouteLink as jest.Mock).mockRejectedValue(new Error('offline'));
   (api.places as jest.Mock).mockResolvedValue({
     places: [pin('Αλεξανδρούπολη', 25.87, 40.84), pin('Σουφλί', 26.29, 41.19)],
   });

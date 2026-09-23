@@ -1,6 +1,7 @@
 // The sentence a driver pastes into the village's chat group.
 //
-// There is no listing and no link to send, so the message itself has to carry
+// The message has to work without the link — a link may not exist yet, and a
+// chat may not preview it — so it still carries
 // the four things somebody decides on without opening anything: where from,
 // where to, when, and whether there is room. It ends with what to do about
 // it, because a route with nothing asking for a reply is a fact nobody acts
@@ -10,6 +11,8 @@
 // seat count drops its segment instead of leaving a gap or a wrong promise.
 
 export type ShareableRoute = {
+  /** The published route, when there is one to make a link for. */
+  id?: string;
   origin_label: string;
   destination_label: string;
   kind: string;
@@ -21,7 +24,7 @@ export type ShareableRoute = {
 
 type Translate = (key: string, options?: { count?: number }) => string;
 
-export function shareRouteMessage(route: ShareableRoute, t: Translate): string {
+export function shareRouteMessage(route: ShareableRoute, t: Translate, link?: string): string {
   const origin = route.origin_label.trim();
   const destination = route.destination_label.trim();
   const where = origin && destination ? `${origin} → ${destination}` : origin || destination;
@@ -58,7 +61,9 @@ export function shareRouteMessage(route: ShareableRoute, t: Translate): string {
   const line1 = [where, whenAndTime, seats].filter(Boolean).join(' · ');
   // A route with nothing usable to say about itself still asks to be replied
   // to, but the ask must not arrive underneath a blank first line.
-  return [line1, t('share.callToAction')].filter(Boolean).join('\n');
+  // The link comes last and on its own line, so a chat app turns it into a
+  // preview rather than swallowing the sentence into one.
+  return [line1, t('share.callToAction'), link?.trim()].filter(Boolean).join('\n');
 }
 
 function equals(days: number[], preset: number[]): boolean {

@@ -11,7 +11,7 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { myRoutes: jest.fn(), retireRoute: jest.fn() },
+  api: { myRoutes: jest.fn(), retireRoute: jest.fn(), shareRouteLink: jest.fn() },
 }));
 
 const route = (over: Partial<Record<string, unknown>> = {}) => ({
@@ -41,6 +41,8 @@ let share: jest.SpyInstance;
 beforeEach(() => {
   jest.clearAllMocks();
   share = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' });
+  // No link by default, so the sentence tests below see the sentence alone.
+  (api.shareRouteLink as jest.Mock).mockRejectedValue(new Error('offline'));
 });
 
 afterEach(() => {
@@ -141,6 +143,10 @@ test('a second press while the sheet is open is ignored', async () => {
   fireEvent.press(button);
   fireEvent.press(button);
 
+  // Awaited: the sheet opens after the link is asked for, so it is no longer
+  // on the same tick as the press. Three presses are still one sheet.
+  await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+  await new Promise((r) => setTimeout(r, 20));
   expect(share).toHaveBeenCalledTimes(1);
 
   // Once it closes, sharing again is allowed.
@@ -168,4 +174,18 @@ test('a failed share can be retried', async () => {
   await waitFor(() => expect(share).toHaveBeenCalledTimes(2));
   // The hint from the failed attempt does not survive a successful one.
   await waitFor(() => expect(screen.queryByTestId('share-failed-r1')).toBeNull());
+});
+
+// With a link, the link rides along on its own line after the sentence; the
+// sentence is unchanged, because a chat may not preview it.
+test('the message carries the route link when there is one', async () => {
+  (api.myRoutes as jest.Mock).mockResolvedValue({ routes: [route()] });
+  (api.shareRouteLink as jest.Mock).mockResolvedValue({ token: 'tok', url: 'https://carpool.test/r/tok' });
+  render(wrap(<MyRoutesScreen />));
+  const button = await screen.findByTestId('share-r1');
+  fireEvent.press(button);
+  await waitFor(() => expect(share).toHaveBeenCalled());
+  const message: string = share.mock.calls[0][0].message;
+  expect(message.split('\n').pop()).toBe('https://carpool.test/r/tok');
+  expect(api.shareRouteLink).toHaveBeenCalledWith('r1');
 });

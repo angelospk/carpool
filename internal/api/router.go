@@ -89,6 +89,14 @@ type Deps struct {
 	// already tomorrow in UTC.
 	Location *time.Location
 
+	// PublicBaseURL is where route links point, e.g. https://carpool.example.
+	// Empty means links are made without an address, which the app treats as
+	// "share the sentence only".
+	PublicBaseURL string
+	// InstallURL is where a route link's page sends somebody without the app.
+	// Only an https address is ever shown.
+	InstallURL string
+
 	// DevMode relaxes things that must stay strict in a deployment: OTP codes
 	// go to the log instead of an SMS, and the browser is allowed to call this
 	// API cross-origin so the Expo web build can be used for testing.
@@ -109,6 +117,15 @@ func NewRouter(deps Deps) http.Handler {
 	r.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "that method is not allowed on this resource")
 	})
+
+	// The few routes anybody can open without an account share one limit per
+	// address. See perIP for why it exists when the tokens cannot be guessed.
+	public := newPerIP(60, time.Minute, time.Now)
+	if deps.Pool != nil {
+		// A route link, as tapped in a chat. Outside /v1 because it is a page
+		// for a person, not an API for the app.
+		r.With(public.middleware).Get("/r/{token}", deps.handleRoutePage)
+	}
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Get("/livez", handleLivez)
@@ -132,6 +149,10 @@ func NewRouter(deps Deps) http.Handler {
 		// through it is a linear scan of 12k rows measured at under a
 		// millisecond, so there is neither a secret nor a cost to protect.
 		r.Get("/places", deps.handlePlaces)
+
+		// What a route link says, for the app to show before anybody has an
+		// account. Only what the page says; see store.SharedRoute.
+		r.With(public.middleware).Get("/shared-routes/{token}", deps.handleSharedRoute)
 
 		r.Route("/auth", func(r chi.Router) {
 			// Guarded on their collaborator like every other group here: these
@@ -170,6 +191,8 @@ func NewRouter(deps Deps) http.Handler {
 			// behind auth because it is other people's journeys.
 			r.Get("/demand", deps.handleDemand)
 			r.Delete("/me/routes/{id}", deps.handleRetireRoute)
+			r.Post("/me/routes/{id}/share", deps.handleShareRoute)
+			r.Delete("/me/routes/{id}/share", deps.handleRevokeRouteShare)
 
 			if deps.PhoneChange != nil {
 				r.Post("/me/phone/request", deps.handleRequestPhoneChange)

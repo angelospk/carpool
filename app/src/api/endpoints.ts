@@ -194,6 +194,19 @@ export type Participant = {
   shared_groups?: string[];
 };
 
+/** A route as its link shows it: the share sentence's facts, no driver. */
+export type SharedRoute = {
+  origin_label: string;
+  destination_label: string;
+  kind: string;
+  weekdays: number[];
+  oneoff_date?: string | null;
+  depart_earliest: string;
+  depart_latest: string;
+  seats: number;
+  for_group: boolean;
+};
+
 /** Where somebody on your trip is, as of updated_at. */
 export type LivePosition = {
   user_id: string;
@@ -616,6 +629,13 @@ export const api = {
   createGroup: (name: string) => request<Group>('/v1/groups', { method: 'POST', body: { name } }),
   joinGroup: (code: string) => request<Group>('/v1/groups/join', { method: 'POST', body: { code } }),
   leaveGroup: (id: string) => request<void>(`/v1/groups/${id}/membership`, { method: 'DELETE' }),
+  /** The route's link, made the first time and the same one after. */
+  shareRouteLink: (id: string) =>
+    request<{ token: string; url: string }>(`/v1/me/routes/${id}/share`, { method: 'POST' }),
+  /** What a route link shows. Anonymous: it is opened before there is an account. */
+  sharedRoute: (token: string) =>
+    request<SharedRoute>(`/v1/shared-routes/${encodeURIComponent(token)}`, { anonymous: true }),
+
   /** A month of verified trips between members, as CSV. Admins only. */
   groupTripsCSV: (id: string, month: string) =>
     request<string>(`/v1/groups/${id}/trips.csv?month=${encodeURIComponent(month)}`, { text: true }),
