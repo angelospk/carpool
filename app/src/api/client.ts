@@ -40,6 +40,11 @@ type Options = {
   /** Skip the Authorization header, for the auth endpoints themselves. */
   anonymous?: boolean;
   signal?: AbortSignal;
+  /**
+   * Return the body as text instead of parsing it. For the one response that
+   * is a file rather than JSON; an error is still read as the JSON envelope.
+   */
+  text?: boolean;
 };
 
 let baseUrl = '';
@@ -228,6 +233,7 @@ export async function request<T>(path: string, options: Options = {}): Promise<T
   if (res.status === 204) return undefined as T;
 
   const text = await res.text();
+  if (res.ok && options.text) return text as T;
   const body = text ? safeParse(text) : undefined;
 
   if (!res.ok) {

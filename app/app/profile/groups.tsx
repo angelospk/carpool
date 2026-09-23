@@ -14,6 +14,8 @@ import { api, type Group } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import { Badge, Button, Card, Field, Hint, Screen, SectionHeader, Title } from '../../src/components/ui';
 import { colors, radius, space, type } from '../../src/design/tokens';
+import { exportMonths } from '../../src/design/months';
+import { saveCsv } from '../../src/components/saveCsv';
 
 export default function GroupsScreen() {
   const { t } = useTranslation();
@@ -66,6 +68,14 @@ export default function GroupsScreen() {
   const rotate = useMutation({
     mutationFn: (id: string) => api.rotateGroupCode(id),
     onSuccess: refresh,
+    onError: explain,
+  });
+
+  // What an organisation pays against: confirmed trips between members, last
+  // month or this one. See groups.Export on the server for what is left out.
+  const exportTrips = useMutation({
+    mutationFn: async ({ g, month }: { g: Group; month: string }) =>
+      saveCsv(`trips-${month}.csv`, await api.groupTripsCSV(g.id, month)),
     onError: explain,
   });
 
@@ -141,6 +151,18 @@ export default function GroupsScreen() {
                   />
                 </>
               ) : null}
+              {g.code
+                ? exportMonths(new Date()).map((month) => (
+                    <Button
+                      key={month}
+                      testID={`group-export-${g.id}-${month}`}
+                      label={t('groups.export', { month })}
+                      variant="secondary"
+                      disabled={exportTrips.isPending}
+                      onPress={() => exportTrips.mutate({ g, month })}
+                    />
+                  ))
+                : null}
               <Button
                 testID={`group-leave-${g.id}`}
                 label={t('groups.leave')}

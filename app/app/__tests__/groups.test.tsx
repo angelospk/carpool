@@ -13,6 +13,7 @@ jest.mock('../../src/api/endpoints', () => ({
     joinGroup: jest.fn(),
     leaveGroup: jest.fn(),
     rotateGroupCode: jest.fn(),
+    groupTripsCSV: jest.fn(),
   },
 }));
 
@@ -70,4 +71,21 @@ test('creating a group sends the name and clears the field', async () => {
 
   await waitFor(() => expect(api.createGroup).toHaveBeenCalledWith('Γραφείο'));
   await waitFor(() => expect(screen.getByTestId('group-create-name').props.value).toBe(''));
+});
+
+// The export is an admin's, like the code. A member has nothing to reconcile.
+test('an admin can pull the month for the organisation and a member cannot', async () => {
+  (api.groupTripsCSV as jest.Mock).mockResolvedValue('date,departure\n');
+  const share = jest.spyOn(require('react-native').Share, 'share').mockResolvedValue({ action: 'sharedAction' });
+
+  render(wrap(<GroupsScreen />));
+  await waitFor(() => expect(screen.getByTestId('group-code-g1')).toBeTruthy());
+
+  const buttons = screen.getAllByTestId(/^group-export-g1-/);
+  expect(buttons).toHaveLength(2);
+  expect(screen.queryAllByTestId(/^group-export-g2-/)).toHaveLength(0);
+
+  fireEvent.press(buttons[0]);
+  await waitFor(() => expect(api.groupTripsCSV).toHaveBeenCalledWith('g1', expect.stringMatching(/^\d{4}-\d{2}$/)));
+  await waitFor(() => expect(share).toHaveBeenCalledWith(expect.objectContaining({ message: 'date,departure\n' })));
 });

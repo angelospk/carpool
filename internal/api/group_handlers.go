@@ -1,8 +1,13 @@
 package api
 
 import (
+	"bytes"
+	"encoding/csv"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -117,4 +122,76 @@ func (d Deps) groupError(w http.ResponseWriter, err error) bool {
 		writeError(w, http.StatusInternalServerError, "internal", "could not update the group")
 	}
 	return true
+}
+
+// handleGroupExport is the month's verified trips between members, as CSV,
+// for an admin to hand to whoever pays for them. See groups.Export for what
+// counts as a trip and what is left out.
+func (d Deps) handleGroupExport(w http.ResponseWriter, r *http.Request) {
+	userID, _ := callerID(r.Context())
+	groupID, err := uuid.Parse(chiURLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "no such group")
+		return
+	}
+	month, err := time.Parse("2006-01", r.URL.Query().Get("month"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_month", "month must be YYYY-MM")
+		return
+	}
+	trips, err := d.Groups.Export(r.Context(), userID, groupID, month)
+	if d.groupError(w, err) {
+		return
+	}
+
+	loc := d.Location
+	if loc == nil {
+		loc = time.UTC
+	}
+	var buf bytes.Buffer
+	// A byte-order mark, so that a spreadsheet opened by double-click reads the
+	// Greek as Greek rather than as mojibake. It is what an admin will do.
+	buf.WriteString("\uFEFF")
+	out := csv.NewWriter(&buf)
+	_ = out.Write([]string{"date", "departure", "from", "to", "route_km", "driver", "passenger", "seats"})
+	for _, v := range trips {
+		_ = out.Write([]string{
+			v.ServiceDate.Format("2006-01-02"),
+			v.DepartEarliest.In(loc).Format("15:04"),
+			csvCell(v.OriginLabel),
+			csvCell(v.DestinationLabel),
+			strconv.FormatFloat(v.RouteKm, 'f', 1, 64),
+			csvCell(v.Driver),
+			csvCell(v.Passenger),
+			strconv.Itoa(v.Seats),
+		})
+	}
+	out.Flush()
+	if err := out.Error(); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not build the export")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition",
+		`attachment; filename="trips-`+month.Format("2006-01")+`.csv"`)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// Names of people and where they went. Not a thing for a shared cache.
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(buf.Bytes())
+}
+
+// csvCell defuses a value a spreadsheet would run as a formula.
+//
+// Names and place labels are typed by members, and a cell beginning with one
+// of these characters is evaluated when the file is opened — by the admin, on
+// their own machine. Leading whitespace is skipped before looking, because a
+// spreadsheet skips it too. A leading apostrophe makes the cell text.
+func csvCell(s string) string {
+	trimmed := strings.TrimLeft(s, " \t\r\n")
+	if trimmed != "" && strings.ContainsRune("=+-@", rune(trimmed[0])) {
+		return "'" + s
+	}
+	return s
 }

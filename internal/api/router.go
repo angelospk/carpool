@@ -258,6 +258,7 @@ func NewRouter(deps Deps) http.Handler {
 				r.Post("/groups/join", deps.handleJoinGroup)
 				r.Delete("/groups/{id}/membership", deps.handleLeaveGroup)
 				r.Post("/groups/{id}/code", deps.handleRotateGroupCode)
+				r.Get("/groups/{id}/trips.csv", deps.handleGroupExport)
 			}
 			r.Route("/trips/{id}", func(r chi.Router) {
 				r.Get("/", deps.handleGetTrip)

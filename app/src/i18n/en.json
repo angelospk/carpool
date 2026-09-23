@@ -408,7 +408,7 @@
   },
   "groups": {
     "title": "Groups",
-    "intro": "A group is the people you already know from school or work. On a trip you see who is in the same group as you, and you can publish a route for your group only.",
+    "intro": "A group is the people you already know from school or work. On a trip you see who is in the same group as you, and you can publish a route for your group only. Admins can see the trips members confirmed with each other, so the organisation can support them.",
     "none": "You are not in any group yet.",
     "members_one": "{{count}} member",
     "members_other": "{{count}} members",
@@ -433,6 +433,8 @@
     "shared": "Shared group: {{names}}",
     "audience": "Who sees it",
     "everybody": "Everybody",
-    "onlyGroup": "Only “{{name}}”"
+    "onlyGroup": "Only “{{name}}”",
+    "export": "Trips {{month}} (CSV)",
+    "exportHint": "Confirmed trips between members, for whoever pays for them."
   }
 }

@@ -600,6 +600,9 @@ export const api = {
   createGroup: (name: string) => request<Group>('/v1/groups', { method: 'POST', body: { name } }),
   joinGroup: (code: string) => request<Group>('/v1/groups/join', { method: 'POST', body: { code } }),
   leaveGroup: (id: string) => request<void>(`/v1/groups/${id}/membership`, { method: 'DELETE' }),
+  /** A month of verified trips between members, as CSV. Admins only. */
+  groupTripsCSV: (id: string, month: string) =>
+    request<string>(`/v1/groups/${id}/trips.csv?month=${encodeURIComponent(month)}`, { text: true }),
   rotateGroupCode: (id: string) =>
     request<{ code: string }>(`/v1/groups/${id}/code`, { method: 'POST' }),
 
