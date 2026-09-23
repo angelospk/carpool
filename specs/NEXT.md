@@ -197,7 +197,12 @@ The 1.15 GB figure for the whole-Greece extract still stands and is still the
 reason not to serve it. It simply was never what stood between this app and
 Κομοτηνή.
 
-### 3. Verified trips, so somebody else can pay for them
+### 3. Verified trips, so somebody else can pay for them — BUILT
+
+**Built 23 September 2026**, on top of groups (an organisation is a group). An
+admin pulls `GET /v1/groups/{id}/trips.csv?month=YYYY-MM`: trips both sides
+confirmed, where driver and passenger were both members on the day. See
+`internal/groups/export.go`. The reasoning below is why.
 
 This is the one genuinely new thing to build, and it is what makes the subsidy
 model of Fact 2 reachable without breaking the rule that the app never moves
@@ -219,7 +224,12 @@ nothing else.
 own members as CSV, no personal data beyond what the organisation already holds,
 and the endpoint refuses everything outside their own membership.
 
-### 4. Guaranteed ride home
+### 4. Guaranteed ride home — BUILT, the information version
+
+**Built 23 September 2026.** A driver cancelling one seat now reopens the
+passenger's request, as calling off the departure already did. The request
+screen says so, lists the cars still on the road anonymously, and links the
+ΚΤΕΛ Έβρου timetable. No taxi voucher: that needs a partner and money.
 
 Cheap, and it removes the objection that kills commuter carpooling: the passenger
 who is afraid of being stranded when the driver calls in sick. Every European
