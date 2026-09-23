@@ -16,7 +16,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "gr.carpool.app",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Για να διαλέξεις σημείο επιβίβασης και να δεις πού βρίσκεσαι στον χάρτη."
+        "NSLocationWhenInUseUsageDescription": "Για να διαλέξεις σημείο επιβίβασης, να δεις πού βρίσκεσαι στον χάρτη και, αν το ζητήσεις, να δείξεις τη θέση σου στους συνταξιδιώτες σου την ώρα του ταξιδιού."
       }
     },
     "android": {

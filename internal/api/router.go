@@ -20,6 +20,7 @@ import (
 	"carpool/internal/groups"
 	"carpool/internal/invites"
 	"carpool/internal/jobs"
+	"carpool/internal/live"
 	"carpool/internal/moderation"
 	"carpool/internal/standing"
 	"carpool/internal/ws"
@@ -55,6 +56,9 @@ type Deps struct {
 	// Groups keeps the circles people already belong to — a school, an
 	// employer — and what membership lets them do.
 	Groups *groups.Service
+	// Live shares where the driver and their passengers are, around the time
+	// of a trip they are on together, and only then.
+	Live *live.Service
 	// Account answers the two requests a person can make about their own data.
 	Account *account.Service
 	// Drivers records a driver's car, and works out what it drinks so that the
@@ -271,6 +275,11 @@ func NewRouter(deps Deps) http.Handler {
 				r.Post("/messages", deps.handlePostMessage)
 				if deps.Hub != nil {
 					r.Get("/socket", deps.handleTripSocket)
+				}
+				if deps.Live != nil {
+					r.Get("/live", deps.handleLive)
+					r.Put("/position", deps.handlePutPosition)
+					r.Delete("/position", deps.handleStopPosition)
 				}
 			})
 

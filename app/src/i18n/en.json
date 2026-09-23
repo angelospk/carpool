@@ -436,5 +436,25 @@
     "onlyGroup": "Only “{{name}}”",
     "export": "Trips {{month}} (CSV)",
     "exportHint": "Confirmed trips between members, for whoever pays for them."
+  },
+  "tripShare": {
+    "button": "Send the trip to someone",
+    "headline": "I am travelling {{where}}, {{when}}.",
+    "driver": "Driver: {{name}}",
+    "driving_one": "I am driving, with {{count}} passenger.",
+    "driving_other": "I am driving, with {{count}} passengers."
+  },
+  "live": {
+    "title": "Where you are",
+    "start": "Share my location",
+    "stop": "Stop",
+    "sharing": "Your location is visible to your fellow travellers while this screen is open, until you press Stop.",
+    "notYet": "Location can be shared from {{time}}.",
+    "over": "The trip is over. Location is no longer shared.",
+    "nobody": "Nobody is sharing their location right now.",
+    "ago": "{{name}} · {{minutes}}′ ago",
+    "openMap": "Map",
+    "denied": "Without location permission your location cannot be shared.",
+    "who": "Only the driver and their passengers see it. Passengers do not see each other."
   }
 }

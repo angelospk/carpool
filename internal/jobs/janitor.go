@@ -97,6 +97,17 @@ func rules() []rule {
 	}
 
 	return []rule{
+		// Live positions are meant to be gone when the sharing stops. The app
+		// deletes its own row when it stops, and a trip that ends does too; this
+		// is for the phone that died on the way. An hour is past any update the
+		// screen would still show (it drops them at ten minutes).
+		{"live positions", batch("trip_live_positions",
+			`t.updated_at < $1::timestamptz - interval '1 hour'`)},
+		// Wrong group codes are counted over a day. Kept two, so the count is
+		// never short; after that they are only a record of somebody's typos.
+		{"group join failures", batch("group_join_failures",
+			`t.at < $1::timestamptz - interval '2 days'`)},
+
 		// "Κωδικοί μίας χρήσης και αρχεία επαλήθευσης — 6 μήνες", for fraud
 		// investigation. Both tables are verification records: one proves a
 		// number was reachable at sign-in, the other proves it at a change.

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -24,6 +24,8 @@ import { PortNotice } from '../../src/components/PortNotice';
 import { PriceBreakdown } from '../../src/components/PriceBreakdown';
 import { PreferenceChips } from '../../src/components/Preferences';
 import { SharedGroups } from '../../src/components/SharedGroups';
+import { LiveCard } from '../../src/components/LiveCard';
+import { tripShareMessage } from '../../src/design/tripShare';
 import { Map } from '../../src/map/Map';
 import polyline from '@mapbox/polyline';
 import { haveTiles } from '../../src/map/tiles';
@@ -234,6 +236,22 @@ export default function TripScreen() {
                     ))}
                   </Card>
                 ) : null}
+
+                {/* Only for a trip that is still going to happen. */}
+                {trip.data.status !== 'cancelled' ? <LiveCard tripId={id} /> : null}
+
+                {/* The oldest safety feature there is: tell somebody who you
+                    are with. A sentence for the share sheet, nothing stored. */}
+                <Button
+                  testID="trip-share"
+                  label={t('tripShare.button')}
+                  variant="secondary"
+                  onPress={() =>
+                    void Share.share({ message: tripShareMessage(trip.data, t) }).catch(() =>
+                      setNotice(t('common.error')),
+                    )
+                  }
+                />
 
                 <RepeatCard trip={trip.data} />
 

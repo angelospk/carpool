@@ -29,6 +29,7 @@ import (
 	"carpool/internal/groups"
 	"carpool/internal/invites"
 	"carpool/internal/jobs"
+	"carpool/internal/live"
 	"carpool/internal/moderation"
 	"carpool/internal/outbox"
 	"carpool/internal/push"
@@ -202,6 +203,7 @@ func run() error {
 		Bookings:   bookings.NewService(pool, clk),
 		Invites:    invites.NewService(pool, clk, cfg.InviteOnly),
 		Groups:     groups.NewService(pool, clk),
+		Live:       live.NewService(pool, clk),
 		DevMode:    cfg.DevMode,
 		Account:    account.NewService(pool, clk),
 		Drivers:    drivers.NewService(pool, clk),

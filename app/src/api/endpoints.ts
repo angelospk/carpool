@@ -194,6 +194,15 @@ export type Participant = {
   shared_groups?: string[];
 };
 
+/** Where somebody on your trip is, as of updated_at. */
+export type LivePosition = {
+  user_id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  updated_at: string;
+};
+
 /** A group the caller belongs to. */
 export type Group = {
   id: string;
@@ -574,6 +583,13 @@ export const api = {
       method: 'POST',
       body: { stars, ratee_id: rateeId, tag },
     }),
+
+  /** When sharing is open for this trip, and where the others you may see are. */
+  live: (id: string) =>
+    request<{ opens: string; closes: string; positions: LivePosition[] }>(`/v1/trips/${id}/live`),
+  putPosition: (id: string, lat: number, lon: number) =>
+    request<void>(`/v1/trips/${id}/position`, { method: 'PUT', body: { lat, lon } }),
+  stopPosition: (id: string) => request<void>(`/v1/trips/${id}/position`, { method: 'DELETE' }),
 
   messages: (id: string) => request<{ messages: Message[] }>(`/v1/trips/${id}/messages`),
   postMessage: (id: string, body: string) =>
