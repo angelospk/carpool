@@ -303,14 +303,15 @@ text is at fault. Stop there, and say so at the meeting. If people reply "is
 there a seat?", the sentence works and the demand is real. If they reply "which
 app?", the link page is not doing its job, and B says where people drop off.
 
-### B. Count the funnel from the Caddy log — config, no app code
+### B. Count the funnel from the Caddy log — two lines of config
 
 Caddy already writes every request to its log, so the funnel needs no analytics
-and stores no identity beyond what the log already holds. One piece is missing:
-the page's install button goes straight to the store, so those taps never reach
-Caddy. Set `INSTALL_URL=https://{$DOMAIN}/get` and give the Caddyfile one
-`redir /get <APK or TestFlight link>` above the `reverse_proxy`. About 15
-minutes, and it can be done before A starts.
+and stores no identity beyond what the log already holds. Only the install taps
+need a step: with `INSTALL_URL` set to the store link, the page's button goes
+straight there and the tap never reaches Caddy. The Caddyfile redirects `/get`
+to `INSTALL_REDIRECT`, so routing the taps through it is two lines of `.env`: `INSTALL_REDIRECT=<APK or TestFlight link>` and
+`INSTALL_URL=https://<your DOMAIN>/get`, written out in full because `.env`
+does not expand Caddy's `{$DOMAIN}`. Do it before A starts.
 
 Then, per post, from the time it went up to the next post:
 

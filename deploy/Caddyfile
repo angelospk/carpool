@@ -4,6 +4,17 @@
 {$DOMAIN} {
 	encode zstd gzip
 
+	# /get sends somebody to the app store link in INSTALL_REDIRECT. Point
+	# INSTALL_URL at https://{$DOMAIN}/get and every install tap from a route
+	# link lands in the log below, which is how specs/NEXT.md experiment B counts
+	# them. Unset, /get falls through to the API and is a 404. 302, not 301: the
+	# store link changes with every build and a browser caches a 301 for good.
+	@get {
+		path /get
+		expression `{env.INSTALL_REDIRECT} != ""`
+	}
+	redir @get {env.INSTALL_REDIRECT} 302
+
 	# The WebSocket upgrade needs no special handling in Caddy v2; reverse_proxy
 	# passes it through.
 	reverse_proxy api:8080 {

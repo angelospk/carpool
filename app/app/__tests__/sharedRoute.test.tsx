@@ -1,6 +1,7 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
+import { StyleSheet } from 'react-native';
 
 import SharedRouteScreen from '../r/[token]';
 import { ApiError } from '../../src/api/client';
@@ -56,7 +57,10 @@ test('the sentence is attributed to the driver', async () => {
   (api.sharedRoute as jest.Mock).mockResolvedValue(shared);
   render(wrap(<SharedRouteScreen />));
   await waitFor(() => expect(screen.getByTestId('shared-route-line')).toBeTruthy());
-  expect(screen.getByText('Ο οδηγός γράφει:')).toBeTruthy();
+  expect(within(screen.getByTestId('shared-route')).getByText('Ο οδηγός γράφει:')).toBeTruthy();
+  expect(StyleSheet.flatten(screen.getByTestId('shared-route-line').props.style)).toMatchObject({
+    fontStyle: 'italic',
+  });
 });
 
 // Searching resolves the names through the public places list, so the link
