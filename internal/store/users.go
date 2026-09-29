@@ -200,7 +200,10 @@ func UpdateUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, up UserUp
 		UPDATE users SET
 			name             = COALESCE($2, name),
 			gender           = COALESCE($3, gender),
-			women_only       = COALESCE($4, women_only),
+			-- Only a woman may ask for women drivers only, and changing the
+			-- gender away from female turns it off rather than failing.
+			women_only       = CASE WHEN COALESCE($3, gender) = 'female'
+			                        THEN COALESCE($4, women_only) ELSE false END,
 			home_region_id   = COALESCE($5, home_region_id),
 			facebook_handle  = CASE WHEN $6::text IS NULL THEN facebook_handle  ELSE NULLIF($6, '') END,
 			instagram_handle = CASE WHEN $7::text IS NULL THEN instagram_handle ELSE NULLIF($7, '') END,

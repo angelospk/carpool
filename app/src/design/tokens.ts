@@ -25,6 +25,8 @@ export const colors = {
   /** Something needs you: an ask waiting, seats running out. */
   accent: '#E4873B',
   accentSoft: '#FBEAD8',
+  /** Text on accentSoft. The accent itself is too light to read there. */
+  accentInk: '#8A4B17',
 
   danger: '#B3402E',
   success: '#3F7A57',

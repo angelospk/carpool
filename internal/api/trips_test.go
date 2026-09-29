@@ -619,3 +619,25 @@ func TestATripIsConfirmableOnceItCouldNoLongerBeWaiting(t *testing.T) {
 		t.Error("the confirmation was accepted but not recorded")
 	}
 }
+
+// Every message is a push on somebody's phone. Forty in two seconds used to go
+// through; a conversation typed fast still does.
+func TestChatIsThrottledPerPerson(t *testing.T) {
+	h := newHarness(t)
+	driver, passenger, occurrenceID := h.bookedTrip(t)
+	path := "/v1/trips/" + occurrenceID.String() + "/messages"
+
+	for i := range 20 {
+		if rec := h.do(http.MethodPost, path, map[string]any{"body": "ok"}, passenger); rec.Code != http.StatusCreated {
+			t.Fatalf("message %d: %d", i+1, rec.Code)
+		}
+	}
+	rec := h.do(http.MethodPost, path, map[string]any{"body": "one more"}, passenger)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("21st message in a minute: %d, want 429", rec.Code)
+	}
+	// Counted per person: the other side can still answer.
+	if rec := h.do(http.MethodPost, path, map[string]any{"body": "εδώ"}, driver); rec.Code != http.StatusCreated {
+		t.Fatalf("the driver's reply: %d", rec.Code)
+	}
+}

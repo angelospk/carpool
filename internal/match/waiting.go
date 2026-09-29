@@ -42,7 +42,7 @@ var waitingSQL = `
 WITH trip AS (
 	SELECT o.id, o.route_geom, o.seats_free, o.luggage,
 	       o.depart_earliest, o.depart_latest,
-	       t.driver_id, d.notify_radius_km
+	       t.driver_id, d.notify_radius_km, du.gender AS driver_gender
 	FROM trip_occurrences o
 	JOIN route_templates t ON t.id = o.template_id
 	JOIN driver_profiles d ON d.user_id = t.driver_id
@@ -83,6 +83,13 @@ WHERE rr.status = 'open'
   AND NOT EXISTS (
         SELECT 1 FROM asks a
         WHERE a.request_id = rr.id AND a.occurrence_id = trip.id)
+  -- The mirrors of the forward filter: nobody is offered a departure they
+  -- already have a seat on, and a passenger who wants women drivers only is
+  -- not woken by anybody else.
+  AND NOT EXISTS (
+        SELECT 1 FROM bookings bk
+        WHERE bk.occurrence_id = trip.id AND bk.passenger_id = rr.passenger_id)
+  AND (NOT pu.women_only OR trip.driver_gender = 'female')
   AND NOT EXISTS (
         SELECT 1 FROM blocks b
         WHERE (b.blocker_id = trip.driver_id AND b.blocked_id = rr.passenger_id)

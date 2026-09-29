@@ -60,6 +60,33 @@ func (d Deps) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		WomenOnly: body.WomenOnly,
 	}
 
+	if body.Gender != nil {
+		switch *body.Gender {
+		case "female", "male", "other":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid_gender", "gender is female, male or other")
+			return
+		}
+	}
+	// Women drivers only is for a woman to turn on. Asked for by anybody else it
+	// is refused rather than stored: a switch that shows "on" and does nothing
+	// is what this setting used to be.
+	if body.WomenOnly != nil && *body.WomenOnly {
+		gender := body.Gender
+		if gender == nil {
+			if err := d.Pool.QueryRow(r.Context(),
+				`SELECT gender FROM users WHERE id = $1`, userID).Scan(&gender); err != nil {
+				writeError(w, http.StatusInternalServerError, "internal", "could not read your profile")
+				return
+			}
+		}
+		if gender == nil || *gender != "female" {
+			writeError(w, http.StatusBadRequest, "women_only_needs_female",
+				"women drivers only is a setting for women; set your gender first")
+			return
+		}
+	}
+
 	// Validated here rather than left to the column constraint, because a CHECK
 	// violation aborts the transaction and comes back as "the update was
 	// rejected", which tells a person nothing about which field to look at.

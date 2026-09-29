@@ -47,6 +47,11 @@ var (
 	// what ran out is not the driver's half hour but the trip itself, and the
 	// passenger has to be told to look for another ride rather than to wait.
 	ErrTripDeparted = errors.New("asks: the trip has already left")
+	// ErrAlreadyAboard means the passenger already has a seat on this very
+	// departure through another request. One person, one seat per car: the
+	// database refuses a second booking, and before this was checked here that
+	// refusal reached the driver as "something went wrong".
+	ErrAlreadyAboard = errors.New("asks: the passenger already has a seat on this trip")
 )
 
 // Verifier re-checks that a detour still fits the driver's budget, given the
@@ -175,6 +180,20 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		}
 		return uuid.Nil, err
 	}
+	// Women drivers only, read again now that both rows are held. The matcher
+	// applies it when the offer is made; a passenger can turn it on, or a
+	// driver change their gender, while the offer sits on a phone. Answered
+	// like a block: the offer is simply no longer there.
+	var unwanted bool
+	if err := tx.QueryRow(ctx, `
+		SELECT p.women_only AND d.gender IS DISTINCT FROM 'female'
+		  FROM users p, users d
+		 WHERE p.id = $1 AND d.id = $2`, prePassenger, driverID).Scan(&unwanted); err != nil {
+		return uuid.Nil, fmt.Errorf("asks: reading the passenger's preference: %w", err)
+	}
+	if unwanted {
+		return uuid.Nil, ErrAskNotPending
+	}
 
 	// 2. occurrence
 	var (
@@ -258,6 +277,16 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	}
 	if requestState != "open" && requestState != "asking" {
 		return uuid.Nil, ErrAskNotPending
+	}
+	var aboard bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM bookings
+		               WHERE occurrence_id = $1 AND passenger_id = $2)`,
+		occurrenceID, passengerID).Scan(&aboard); err != nil {
+		return uuid.Nil, fmt.Errorf("asks: checking for an existing seat: %w", err)
+	}
+	if aboard {
+		return uuid.Nil, ErrAlreadyAboard
 	}
 	if seatsFree < seats {
 		return uuid.Nil, ErrNoSeats

@@ -5,7 +5,16 @@ import { useTranslation } from 'react-i18next';
 
 import { api } from '../../src/api/endpoints';
 import { ApiError, NetworkError, currentBaseUrl } from '../../src/api/client';
-import { Button, Card, Field, Hint, Screen, Title } from '../../src/components/ui';
+import {
+  BrandMark,
+  Button,
+  Card,
+  Field,
+  Hint,
+  Screen,
+  Spacer,
+  Title,
+} from '../../src/components/ui';
 import { space } from '../../src/design/tokens';
 
 export default function PhoneScreen() {
@@ -50,8 +59,9 @@ export default function PhoneScreen() {
   };
 
   return (
-    <Screen topInset>
+    <Screen topInset column="narrow">
       <View style={styles.top}>
+        <BrandMark tagline={t('auth.tagline')} />
         <Title>{t('auth.phoneTitle')}</Title>
         <Hint>{t('auth.phoneHint')}</Hint>
       </View>
@@ -70,7 +80,7 @@ export default function PhoneScreen() {
 
       {error ? <Hint>{error}</Hint> : null}
 
-      <View style={styles.spacer} />
+      <Spacer />
 
       <Button
         testID="phone-submit"
@@ -84,5 +94,4 @@ export default function PhoneScreen() {
 
 const styles = StyleSheet.create({
   top: { gap: space.sm },
-  spacer: { flex: 1 },
 });

@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -29,7 +30,7 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		DestinationLabel string    `json:"destination_label"`
 		WindowStart      time.Time `json:"window_start"`
 		WindowEnd        time.Time `json:"window_end"`
-		Seats            int       `json:"seats"`
+		Seats            *int      `json:"seats"`
 		// Luggage is what they are bringing. Absent means a bag they can hold,
 		// which is most people; the one bringing skis is the one who will
 		// happily say so.
@@ -43,8 +44,10 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.Seats <= 0 {
-		body.Seats = 1
+	seats, problem := seatsProblem(body.Seats, 1, maxPartySeats)
+	if problem != nil {
+		writeError(w, http.StatusBadRequest, problem.code, problem.message)
+		return
 	}
 	luggage := domain.LuggageNone
 	if body.Luggage != "" {
@@ -74,6 +77,14 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	if !body.WindowStart.Before(body.WindowEnd) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "window_start must precede window_end")
+		return
+	}
+	if problem := d.windowProblem(body.WindowStart, body.WindowEnd); problem != nil {
+		writeError(w, http.StatusBadRequest, problem.code, problem.message)
+		return
+	}
+	if problem := distanceProblem(body.OriginLon, body.OriginLat, body.DestinationLon, body.DestinationLat); problem != nil {
+		writeError(w, http.StatusBadRequest, problem.code, problem.message)
 		return
 	}
 
@@ -125,8 +136,83 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The same journey asked for twice is one request. A double tap or a retry
+	// over a bad connection used to make a second one, and each copy went on to
+	// ask the same driver about the same trip. Near enough is a few hundred
+	// metres at each end and an overlapping window, for the same party; the
+	// answer is the request already under way, so the app carries on as if this
+	// one had been made.
+	tx, err := d.Pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not save the request")
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+
+	// Held until commit, so two copies of the same post arriving together
+	// cannot both look, both find nothing, and both insert.
+	if _, err := tx.Exec(r.Context(),
+		`SELECT pg_advisory_xact_lock(hashtext('ride_request:' || $1::text))`, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not save the request")
+		return
+	}
+
+	var existing struct {
+		id     uuid.UUID
+		status string
+		askID  *uuid.UUID
+	}
+	err = tx.QueryRow(r.Context(), `
+		SELECT rr.id, rr.status,
+		       (SELECT a.id FROM asks a WHERE a.request_id = rr.id AND a.status = 'pending'
+		         ORDER BY a.created_at DESC LIMIT 1)
+		  FROM ride_requests rr
+		 WHERE rr.passenger_id = $1
+		   AND rr.status IN ('open', 'asking')
+		   AND rr.seats = $2
+		   AND rr.luggage = $9::luggage_size AND rr.luggage_count = $10
+		   AND rr.window_start < $4 AND rr.window_end > $3
+		   -- One whose time has passed is over, whatever its status still says
+		   -- before the sweeper comes round.
+		   AND rr.window_end > $11
+		   AND ST_DWithin(rr.origin::geography, ST_SetSRID(ST_MakePoint($5, $6), 4326)::geography, 500)
+		   AND ST_DWithin(rr.destination::geography, ST_SetSRID(ST_MakePoint($7, $8), 4326)::geography, 500)
+		 ORDER BY rr.created_at
+		 LIMIT 1`,
+		userID, seats, body.WindowStart, body.WindowEnd,
+		body.OriginLon, body.OriginLat, body.DestinationLon, body.DestinationLat,
+		string(luggage), count, d.now(),
+	).Scan(&existing.id, &existing.status, &existing.askID)
+	switch {
+	case err == nil:
+		if err := tx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not check your open requests")
+			return
+		}
+		out := map[string]any{"request_id": existing.id, "asking": existing.status == "asking"}
+		if existing.askID != nil {
+			out["ask_id"] = *existing.askID
+		} else if existing.status == "open" {
+			// Nobody is being asked. Perhaps nobody could be the first time, or
+			// perhaps that attempt failed after the insert and this post is the
+			// retry: either way the retry should do what the first post meant
+			// to, rather than report success and leave the next move to the
+			// reconciler an hour from now.
+			if askID, err := d.Asks.AskNext(r.Context(), existing.id); err == nil {
+				out["asking"], out["ask_id"] = true, askID
+			} else if !errors.Is(err, asks.ErrNoCandidates) {
+				slog.Warn("asking again for an existing request", "request", existing.id, "error", err)
+			}
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	case !errors.Is(err, pgx.ErrNoRows):
+		writeError(w, http.StatusInternalServerError, "internal", "could not check your open requests")
+		return
+	}
+
 	var requestID uuid.UUID
-	err = d.Pool.QueryRow(r.Context(), `
+	err = tx.QueryRow(r.Context(), `
 		INSERT INTO ride_requests (passenger_id, origin, destination, origin_label, destination_label,
 		                           window_start, window_end, seats, kind, status, luggage, luggage_count)
 		VALUES ($1,
@@ -135,10 +221,14 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		        $6, $7, $8, $9, $10, 'open', 'open', $11::luggage_size, $12)
 		RETURNING id`,
 		userID, body.OriginLon, body.OriginLat, body.DestinationLon, body.DestinationLat,
-		originLabel, destinationLabel, body.WindowStart, body.WindowEnd, body.Seats,
+		originLabel, destinationLabel, body.WindowStart, body.WindowEnd, seats,
 		string(luggage), count).Scan(&requestID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "the request was rejected")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not save the request")
 		return
 	}
 

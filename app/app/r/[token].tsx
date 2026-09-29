@@ -75,7 +75,7 @@ export default function SharedRouteScreen() {
   const missing = route.error instanceof ApiError && route.error.status === 404;
 
   return (
-    <Screen>
+    <Screen column="narrow">
       <Title>{t('sharedRoute.title')}</Title>
       {route.isLoading ? <Hint>{t('common.loading')}</Hint> : null}
       {route.isError && (gone || missing) ? (

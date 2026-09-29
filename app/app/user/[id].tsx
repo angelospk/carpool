@@ -6,7 +6,15 @@ import { useMutation } from '@tanstack/react-query';
 
 import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
-import { Avatar, Button, Card, Chip, Field, Screen } from '../../src/components/ui';
+import {
+  Avatar,
+  Button,
+  Card,
+  Chip,
+  Field,
+  Screen,
+  Spacer,
+} from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
 
 // What a report can be about.
@@ -118,7 +126,7 @@ export default function UserScreen() {
         </Card>
       ) : null}
 
-      <View style={styles.spacer} />
+      <Spacer />
 
       <Button
         testID="block-user"
@@ -157,5 +165,4 @@ const styles = StyleSheet.create({
   label: { ...type.body, color: colors.ink },
   hint: { ...type.caption, color: colors.muted },
   reasons: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
-  spacer: { flex: 1 },
 });

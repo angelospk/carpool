@@ -9,6 +9,7 @@ import { forgetPhoto } from '../../src/api/images';
 import { pickPhoto } from '../../src/photo/pick';
 import { TooBigError } from '../../src/photo/limits';
 import { ApiError } from '../../src/api/client';
+import { refusalText } from '../../src/api/errorText';
 import { useSession } from '../../src/state/session';
 import { Avatar, Button, Card, Field, Row, Screen, SectionHeader } from '../../src/components/ui';
 import { PreferencePicker } from '../../src/components/Preferences';
@@ -65,7 +66,7 @@ export default function ProfileScreen() {
           ? t('profile.handleInvalid')
           : e instanceof ApiError && e.code === 'invalid_name'
             ? t('profile.nameInvalid')
-            : t('common.error'),
+            : (refusalText(e) ?? t('common.error')),
       ),
   });
 

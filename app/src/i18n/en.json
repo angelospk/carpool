@@ -30,7 +30,8 @@
     "birthDate": "Date of birth",
     "birthDatePlaceholder": "DD/MM/YYYY",
     "birthDateHint": "Needed to confirm you are an adult. It is never shown to anyone.",
-    "underage": "This app is for adults. You have to be 18."
+    "underage": "This app is for adults. You have to be 18.",
+    "tagline": "Shared rides, shared costs."
   },
   "common": {
     "back": "Back",
@@ -105,7 +106,6 @@
     "asDriver": "Driving",
     "asPassenger": "Riding",
     "empty": "You have no upcoming trips.",
-    "greeting": "Good morning",
     "title": "Your trips",
     "upcoming": "Upcoming trips",
     "past": "Earlier rides",
@@ -131,7 +131,16 @@
     "seatsFree_other": "{{count}} seats free",
     "seatsFull": "Full",
     "contribution": "Suggested contribution",
-    "requestStranded": "Your driver cancelled. Your request stands and we are looking for another."
+    "requestStranded": "Your driver cancelled. Your request stands and we are looking for another.",
+    "greetingMorning": "Good morning",
+    "greetingEvening": "Good evening",
+    "greetingNight": "Hello",
+    "quickAsk": "Ask for a seat",
+    "quickOffer": "Publish a route",
+    "sideTitle": "At a glance",
+    "statTrips": "trips ahead",
+    "statKm": "kilometres",
+    "statSeats": "your free seats"
   },
   "luggage": {
     "bulky": "A bicycle, skis, a pushchair",
@@ -251,7 +260,8 @@
     "socialHint": "Just the username, not the whole link. Not verified.",
     "socialInvalid": "Give a facebook.com or instagram.com link",
     "title": "Your profile",
-    "upcomingTrips": "{{count}} scheduled trips",
+    "upcomingTrips_one": "{{count}} scheduled trip",
+    "upcomingTrips_other": "{{count}} scheduled trips",
     "womenOnly": "Women only",
     "you": "You",
     "bioHasContactDetails": "Take the contact details out of your profile. Everybody can see it, not only whoever travels with you, and your passenger can reach you through the app."
@@ -274,7 +284,8 @@
     "route": "Route",
     "schedule": "Schedule",
     "seats": "Seats",
-    "seatsN": "{{count}} seats",
+    "seatsN_one": "{{count}} seat",
+    "seatsN_other": "{{count}} seats",
     "title": "Publish a route",
     "until": "Until",
     "whichCar": "Which car?",
@@ -473,5 +484,18 @@
     "howItWorks": "The driver shares costs, they do not sell rides. Search the road and the app will ask them for you.",
     "search": "Search this route",
     "join": "Create an account to ask for a seat"
+  },
+  "errors": {
+    "invalid_seats": "Seats must be 1 to 8 in a car, and up to 4 in a request.",
+    "oneoff_in_past": "That time has already passed. Pick a future date or time.",
+    "oneoff_too_far": "A one-off route can be published up to three weeks ahead.",
+    "invalid_window": "The latest departure must be after the earliest, on the same day. Trips across midnight are not supported.",
+    "too_short": "Start and destination are the same place. A trip must be at least a kilometre.",
+    "window_in_past": "That time has already passed. Pick a future time.",
+    "window_too_far": "A request can look up to three weeks ahead.",
+    "already_aboard": "This passenger already has a seat on this trip.",
+    "invalid_name": "That name cannot be used. Write your name in letters, up to 80 characters.",
+    "women_only_needs_female": "Women drivers only is a setting for women. Set your gender first.",
+    "rate_limited": "Too many at once. Wait a moment and try again."
   }
 }

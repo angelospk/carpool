@@ -15,7 +15,15 @@ import { useMutation } from '@tanstack/react-query';
 import { api } from '../../src/api/endpoints';
 import { ApiError, NetworkError, currentBaseUrl } from '../../src/api/client';
 import { useSession } from '../../src/state/session';
-import { Button, Card, Field, Hint, Screen, Title } from '../../src/components/ui';
+import {
+  Button,
+  Card,
+  Field,
+  Hint,
+  Screen,
+  Spacer,
+  Title,
+} from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
 
 export default function ChangePhoneScreen() {
@@ -108,7 +116,7 @@ export default function ChangePhoneScreen() {
 
       {error ? <Hint>{error}</Hint> : null}
 
-      <View style={styles.spacer} />
+      <Spacer />
 
       {challenge ? (
         <Button
@@ -131,7 +139,6 @@ export default function ChangePhoneScreen() {
 
 const styles = StyleSheet.create({
   top: { gap: space.sm },
-  spacer: { flex: 1 },
   current: { ...type.caption, color: colors.muted },
   warning: { ...type.caption, color: colors.muted },
 });

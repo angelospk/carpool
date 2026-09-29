@@ -7,6 +7,7 @@ import { api, type Arrangement, type TripDetail } from '../api/endpoints';
 import { ApiError } from '../api/client';
 import { Button, Card } from './ui';
 import { colors, radius, space, type } from '../design/tokens';
+import { repeatUntil } from '../design/format';
 
 /**
  * The switch that records an arrangement two people already made.
@@ -95,7 +96,7 @@ export function RepeatCard({ trip }: { trip: TripDetail }) {
                 ? t('trip.repeatPending')
                 : declined
                   ? t('trip.repeatDeclined')
-                  : t('trip.repeatHint', { until: '' })}
+                  : t('trip.repeatHint', { until: repeatUntil(new Date()) })}
           </Text>
         </View>
 

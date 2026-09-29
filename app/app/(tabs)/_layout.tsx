@@ -1,9 +1,10 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 
 import { colors, lift, radius, space, type } from '../../src/design/tokens';
+import { breakpoint } from '../../src/design/layout';
 
 // The bar floats over the content as a single pill, and the active tab is a
 // filled pill inside it — the whole navigation is one object rather than a strip
@@ -42,6 +43,10 @@ type TabBarProps = {
 
 function PillTabBar({ state, descriptors, navigation }: TabBarProps) {
   const insets = useSafeAreaInsets();
+  // On a phone only the active tab is named, because four labels do not fit
+  // in a thumb's width. Anywhere wider they do, and a row of bare glyphs asks
+  // somebody to guess what ⌕ and ☺ mean.
+  const labelled = breakpoint(useWindowDimensions().width) !== 'compact';
 
   return (
     <View style={[styles.dock, { paddingBottom: Math.max(insets.bottom, space.md) }]}>
@@ -71,7 +76,11 @@ function PillTabBar({ state, descriptors, navigation }: TabBarProps) {
               <Text style={[styles.glyph, focused && styles.glyphActive]}>
                 {GLYPHS[route.name] ?? '•'}
               </Text>
-              {focused ? <Text style={styles.label}>{label}</Text> : null}
+              {focused || labelled ? (
+                <Text numberOfLines={1} style={[styles.label, !focused && styles.labelIdle]}>
+                  {label}
+                </Text>
+              ) : null}
             </Pressable>
           );
         })}
@@ -90,6 +99,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
   },
   bar: {
+    maxWidth: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.xs,
@@ -108,8 +118,11 @@ const styles = StyleSheet.create({
     paddingVertical: space.md,
     borderRadius: radius.pill,
   },
-  tabActive: { backgroundColor: colors.primary },
+  // The active tab gives way before the bar leaves the screen: a long label
+  // pushed the last tab past the edge of a 360px phone.
+  tabActive: { backgroundColor: colors.primary, flexShrink: 1 },
   glyph: { fontSize: 20, color: colors.muted, lineHeight: 22 },
   glyphActive: { color: colors.primaryInk },
-  label: { ...type.label, fontSize: 13, color: colors.primaryInk },
+  label: { ...type.label, fontSize: 13, color: colors.primaryInk, flexShrink: 1 },
+  labelIdle: { color: colors.muted },
 });

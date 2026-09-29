@@ -50,7 +50,17 @@ func newHarness(t *testing.T) *harness { return newHarnessWith(t, false) }
 // and the OTP comes back in the response.
 func newDevHarness(t *testing.T) *harness { return newHarnessWith(t, true) }
 
-func newHarnessWith(t *testing.T, devMode bool) *harness {
+// newRoutedMatcherHarness is the ordinary harness with a matcher that can get
+// a candidate through the fine stage: straight lines at 60 km/h instead of OSRM.
+// The default matcher has no router, which is enough for every test that is not
+// about a driver actually being asked.
+func newRoutedMatcherHarness(t *testing.T) *harness {
+	return newHarnessOpts(t, false, func(s *asks.Service) *asks.Service { return s.WithRouter(straightLines{}) })
+}
+
+func newHarnessWith(t *testing.T, devMode bool) *harness { return newHarnessOpts(t, devMode, nil) }
+
+func newHarnessOpts(t *testing.T, devMode bool, matcher func(*asks.Service) *asks.Service) *harness {
 	t.Helper()
 	ctx := context.Background()
 
@@ -81,6 +91,10 @@ func newHarnessWith(t *testing.T, devMode bool) *harness {
 	issuer := auth.NewTokenIssuer(testSecret, c)
 	sessions := auth.NewSessionService(pool, c, issuer)
 
+	askService := asks.NewService(pool, c, nil)
+	if matcher != nil {
+		askService = matcher(askService)
+	}
 	router := api.NewRouter(api.Deps{
 		DevMode:       devMode,
 		PublicBaseURL: "https://carpool.test/",
@@ -94,7 +108,7 @@ func newHarnessWith(t *testing.T, devMode bool) *harness {
 		Signup:        auth.NewSignupService(pool, c),
 		Sessions:      sessions,
 		PhoneChange:   auth.NewPhoneChangeService(pool, c, sms, sessions, []byte(testSecret)),
-		Asks:          asks.NewService(pool, c, nil),
+		Asks:          askService,
 		Standing:      standing.NewService(pool, c),
 		Bookings:      bookings.NewService(pool, c),
 		Invites:       invites.NewService(pool, c, false),

@@ -205,6 +205,9 @@ func run() error {
 		Groups:   groups.NewService(pool, clk),
 		Live:     live.NewService(pool, clk),
 		DevMode:  cfg.DevMode,
+		// Generous for a household or an office behind one address, far too
+		// few to be worth pumping SMS through.
+		OTPPerIPPerHour: 20,
 
 		PublicBaseURL: cfg.PublicBaseURL,
 		InstallURL:    cfg.InstallURL,

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -42,7 +43,10 @@ func (d Deps) handleMyRoutes(w http.ResponseWriter, r *http.Request) {
 	rows, err := d.Pool.Query(r.Context(), `
 		SELECT rt.id::text, rt.origin_label, rt.destination_label, rt.route_km,
 		       rt.seats, rt.pricing_mode,
-		       rs.kind, COALESCE(rs.weekdays, '{}'), rs.oneoff_date,
+		       rs.kind, COALESCE(rs.weekdays, '{}'),
+		       -- As text: pgx will not scan a date into a string, and a failed scan
+		       -- here used to take down the whole list over one one-off route.
+		       to_char(rs.oneoff_date, 'YYYY-MM-DD'),
 		       to_char(rs.depart_earliest, 'HH24:MI'), to_char(rs.depart_latest, 'HH24:MI'),
 		       (SELECT count(*) FROM trip_occurrences o
 		         WHERE o.template_id = rt.id
@@ -53,6 +57,7 @@ func (d Deps) handleMyRoutes(w http.ResponseWriter, r *http.Request) {
 		 WHERE rt.driver_id = $1 AND rt.active
 		 ORDER BY rs.depart_earliest, rt.created_at`, userID)
 	if err != nil {
+		slog.Error("listing routes", "driver", userID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal", "could not read your routes")
 		return
 	}
@@ -67,6 +72,7 @@ func (d Deps) handleMyRoutes(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&m.ID, &m.OriginLabel, &m.DestinationLabel, &m.RouteKm,
 			&m.Seats, &m.PricingMode, &m.Kind, &m.Weekdays, &oneoff,
 			&m.DepartEarliest, &m.DepartLatest, &m.UpcomingTrips); err != nil {
+			slog.Error("reading a route", "driver", userID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal", "could not read your routes")
 			return
 		}

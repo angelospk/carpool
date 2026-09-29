@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 
 import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
+import { refusalText } from '../../src/api/errorText';
 import { useSession } from '../../src/state/session';
 import { PlaceField } from '../../src/components/PlaceField';
 import { type Pin } from '../../src/design/pin';
@@ -63,8 +64,10 @@ export default function ProfileSetupScreen() {
         // The server is the one that decides, and it can refuse a date this
         // screen was happy with — a clock skewed by a day, or an older build.
         setError(t('auth.underage'));
+      } else if (e instanceof ApiError && e.code === 'invalid_name') {
+        setError(t('profile.nameInvalid'));
       } else {
-        setError(t('common.error'));
+        setError(refusalText(e) ?? t('common.error'));
       }
     } finally {
       setBusy(false);
@@ -72,7 +75,7 @@ export default function ProfileSetupScreen() {
   };
 
   return (
-    <Screen topInset>
+    <Screen topInset column="narrow">
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Title>{t('auth.profileTitle')}</Title>
 

@@ -3,6 +3,7 @@ package api
 import (
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -64,10 +65,30 @@ func (p *perIP) middleware(next http.Handler) http.Handler {
 			addr, _, _ = net.SplitHostPort(r.RemoteAddr)
 		}
 		if !p.allow(addr) {
-			w.Header().Set("Retry-After", "60")
-			writeError(w, http.StatusTooManyRequests, "too_many", "slow down")
+			p.refuse(w)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// perUser is the same counter keyed on the signed-in caller rather than the
+// address, for things only an account can do. It has to sit inside requireAuth.
+func (p *perIP) perUser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := callerID(r.Context())
+		if ok && !p.allow("user:"+id.String()) {
+			p.refuse(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// refuse answers 429. The code is the one the per-number sign-in limit already
+// uses, so the app has one thing to recognise; Retry-After is the window, not a
+// guess, because the sign-in limit is counted by the hour.
+func (p *perIP) refuse(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", strconv.Itoa(int(p.window.Seconds())))
+	writeError(w, http.StatusTooManyRequests, "rate_limited", "slow down")
 }

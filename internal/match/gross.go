@@ -196,6 +196,17 @@ WITH cand AS (
 	        SELECT 1 FROM blocks b
 	        WHERE (b.blocker_id = t.driver_id AND b.blocked_id = $7::uuid)
 	           OR (b.blocker_id = $7::uuid    AND b.blocked_id = t.driver_id)))
+	  -- Not a departure the passenger already has a seat on, under any
+	  -- status: bookings are unique per occurrence and passenger, so the
+	  -- driver could only be asked about something they cannot accept.
+	  AND ($7::uuid IS NULL OR NOT EXISTS (
+	        SELECT 1 FROM bookings bk
+	        WHERE bk.occurrence_id = o.id AND bk.passenger_id = $7::uuid))
+	  -- A passenger who asked for women drivers only is not offered anybody
+	  -- else. The profile showed the setting as on long before anything read
+	  -- it, which for a safety setting is worse than not having one.
+	  AND ($7::uuid IS NULL OR du.gender = 'female' OR NOT EXISTS (
+	        SELECT 1 FROM users pu WHERE pu.id = $7::uuid AND pu.women_only))
 	  -- A route offered to one group is offered to its live members and nobody
 	  -- else. Without a passenger there is nobody to be a member, so it is not
 	  -- offered at all. Inside the filter for the same reason as the two below.

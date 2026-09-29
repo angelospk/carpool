@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -25,9 +26,14 @@ func askErrorStatus(err error) (int, string, string) {
 		return http.StatusConflict, "no_luggage_room", "the trip has no room left for that much luggage"
 	case errors.Is(err, asks.ErrTripDeparted):
 		return http.StatusConflict, "trip_departed", "this trip has already set off"
+	case errors.Is(err, asks.ErrAlreadyAboard):
+		return http.StatusConflict, "already_aboard", "this passenger already has a seat on this trip"
 	case errors.Is(err, asks.ErrStaleItinerary):
 		return http.StatusConflict, "itinerary_changed", "your route changed; please reopen the request"
 	default:
+		// Anything unnamed above is a failure nobody planned for; the sentence
+		// the driver sees says nothing, so the log has to.
+		slog.Error("answering an ask", "error", err)
 		return http.StatusInternalServerError, "internal", "something went wrong"
 	}
 }

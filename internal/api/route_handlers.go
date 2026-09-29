@@ -25,7 +25,7 @@ type routeBody struct {
 	DestinationLat   float64 `json:"destination_lat"`
 	OriginLabel      string  `json:"origin_label"`
 	DestinationLabel string  `json:"destination_label"`
-	Seats            int     `json:"seats"`
+	Seats            *int    `json:"seats"`
 	PricingMode      string  `json:"pricing_mode"`
 
 	// Absent means "use my defaults", which is what the wizard sends when it
@@ -94,6 +94,17 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	seats, problem := seatsProblem(body.Seats, 3, maxCarSeats) // 3 is the wizard's default
+	if problem == nil {
+		problem = d.scheduleProblem(schedule)
+	}
+	if problem == nil {
+		problem = distanceProblem(body.OriginLon, body.OriginLat, body.DestinationLon, body.DestinationLat)
+	}
+	if problem != nil {
+		writeError(w, http.StatusBadRequest, problem.code, problem.message)
+		return
+	}
 
 	// Above the ceiling is the one answer the app does not accept. Below it is
 	// entirely theirs.
@@ -133,9 +144,6 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_luggage",
 			"say how many bags fit, between one and eight, or say the boot is full")
 		return
-	}
-	if body.Seats <= 0 {
-		body.Seats = 3 // the wizard's default
 	}
 	// An unknown mode used to be cast straight through to the insert, where the
 	// column's CHECK refused it and the driver was told "internal error". The
@@ -308,7 +316,7 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		RouteWKT:          shaped.WKT(),
 		RouteKm:           shaped.DistanceMeters / 1000,
 		RouteMin:          int(shaped.Duration.Minutes()) + 1,
-		Seats:             body.Seats,
+		Seats:             seats,
 		PricingMode:       mode,
 		OSRMDataVersion:   d.OSRMDataVersion,
 		EndsAtPort:        shaped.SeaCrossing,
@@ -376,7 +384,7 @@ func (b routeBody) schedule() (domain.Schedule, error) {
 		if len(b.Weekdays) == 0 {
 			return domain.Schedule{}, errInvalid("weekdays is required for a recurring route")
 		}
-		for _, iso := range b.Weekdays {
+		for _, iso := range uniqueSorted(b.Weekdays) {
 			if iso < 1 || iso > 7 {
 				return domain.Schedule{}, errInvalid("weekdays must be ISO numbers 1..7")
 			}

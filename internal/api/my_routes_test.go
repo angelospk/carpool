@@ -172,3 +172,29 @@ func TestMyRoutesNeedsASession(t *testing.T) {
 		t.Errorf("status %d, want 401", rec.Code)
 	}
 }
+
+func TestAOneOffRouteIsListedWithItsDate(t *testing.T) {
+	// A one-off route's date is a SQL date, and scanning it straight into a
+	// string failed the whole list: one one-off hid every route the driver had.
+	h := newHarness(t)
+	token, routeID := driverWithRoute(t, h, "+306900000611")
+	h.mustExec(`
+		UPDATE route_schedules SET kind = 'oneoff', weekdays = NULL, oneoff_date = '2026-10-02'
+		 WHERE template_id = $1::uuid`, routeID)
+
+	rec := h.do(http.MethodGet, "/v1/me/routes", nil, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Routes []struct {
+			Kind       string  `json:"kind"`
+			OneoffDate *string `json:"oneoff_date"`
+		} `json:"routes"`
+	}
+	h.decode(rec, &got)
+	if len(got.Routes) != 1 || got.Routes[0].Kind != "oneoff" ||
+		got.Routes[0].OneoffDate == nil || *got.Routes[0].OneoffDate != "2026-10-02" {
+		t.Fatalf("got %+v", got.Routes)
+	}
+}

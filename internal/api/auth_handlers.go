@@ -181,9 +181,16 @@ func (d Deps) handleSignupComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := strings.TrimSpace(body.Name)
-	if name == "" {
+	// The same rule the profile edit applies. Trimming alone let in, at signup,
+	// everything that edit refuses: line breaks, direction overrides, a name
+	// three hundred letters long.
+	if strings.TrimSpace(body.Name) == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "name is required")
+		return
+	}
+	name, err := domain.NormaliseName(body.Name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_name", "that name cannot be used")
 		return
 	}
 

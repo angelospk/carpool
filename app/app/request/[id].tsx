@@ -7,7 +7,14 @@ import { useState } from 'react';
 import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import { requestProgress, useOpenRequests } from '../../src/components/OpenRequests';
-import { Button, Card, Hint, Screen, Title } from '../../src/components/ui';
+import {
+  Button,
+  Card,
+  Hint,
+  Screen,
+  Spacer,
+  Title,
+} from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
 import { athensDay, athensTime } from '../../src/design/format';
 
@@ -171,7 +178,7 @@ export default function RequestScreen() {
         </Text>
       ) : null}
 
-      <View style={styles.spacer} />
+      <Spacer />
 
       {matched ? (
         <Button
@@ -221,6 +228,5 @@ const styles = StyleSheet.create({
   core: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },
   progress: { ...type.caption, color: colors.accent, fontWeight: '700', flex: 1 },
   outcome: { ...type.body, color: colors.danger },
-  spacer: { flex: 1 },
   actions: { gap: space.sm },
 });

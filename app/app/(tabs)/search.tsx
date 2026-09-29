@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { api, type LuggageSize } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
+import { refusalText } from '../../src/api/errorText';
 import { Button, Card, Hint, Screen, Stepper, Title } from '../../src/components/ui';
 import { PlaceField } from '../../src/components/PlaceField';
 import { LuggagePicker } from '../../src/components/LuggagePicker';
@@ -82,7 +83,8 @@ export default function SearchScreen() {
     },
     onError: (e) =>
       setOutcome(
-        e instanceof ApiError && e.code === 'outside_region' ? e.message : t('common.error'),
+        refusalText(e) ??
+          (e instanceof ApiError && e.code === 'outside_region' ? e.message : t('common.error')),
       ),
   });
 

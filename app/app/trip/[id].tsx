@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { api } from '../../src/api/endpoints';
+import { api, type Message } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import { useSession } from '../../src/state/session';
 import {
@@ -16,6 +16,7 @@ import {
   RouteSpine,
   Screen,
   SeatPips,
+  useBreakpoint,
 } from '../../src/components/ui';
 import { RouteGlyph, decodeRoute } from '../../src/components/RouteGlyph';
 import { RepeatCard } from '../../src/components/RepeatCard';
@@ -110,17 +111,43 @@ export default function TripScreen() {
     onError: () => setNotice(t('common.error')),
   });
 
-  return (
-    <Screen>
-      <AsyncState loading={trip.isLoading} error={trip.error} onRetry={() => void trip.refetch()}>
-        {trip.data ? (
-          <FlatList
-            testID="message-list"
-            data={messages.data?.messages ?? []}
-            keyExtractor={(m) => m.id}
-            contentContainerStyle={styles.list}
-            showsVerticalScrollIndicator={false}
-            ListHeaderComponent={
+  const wide = useBreakpoint() === 'wide';
+  const renderMessage = ({ item }: { item: Message }) => {
+              const mine = item.sender_id === me?.id;
+              return (
+                <View style={[styles.bubbleRow, mine && styles.bubbleRowMine]}>
+                  <View style={[styles.bubble, mine && styles.bubbleMine]}>
+                    {!mine ? <Text style={styles.sender}>{item.sender_name}</Text> : null}
+                    <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>
+                      {item.body}
+                    </Text>
+                    <Text style={[styles.bubbleTime, mine && styles.bubbleTimeMine]}>
+                      {athensTime(item.created_at)}
+                    </Text>
+                  </View>
+                </View>
+              );
+            };
+  const composerView = (
+      <View style={styles.composer}>
+      <TextInput
+        testID="message-input"
+        style={styles.composerInput}
+        value={draft}
+        onChangeText={setDraft}
+        placeholder={t('trip.messagePlaceholder')}
+        placeholderTextColor={colors.muted}
+      />
+      <Button
+        testID="message-send"
+        label={t('trip.send')}
+        onPress={() => send.mutate(draft)}
+        disabled={!draft.trim() || send.isPending}
+      />
+    </View>
+  );
+
+  const details = trip.data ? (
               <View style={styles.head}>
                 {/* The route's own shape, drawn from the geometry the server
                     routed — the pilot ships without map tiles. */}
@@ -315,25 +342,61 @@ export default function TripScreen() {
                   />
                 ) : null}
 
-                <Text style={styles.chatLabel}>{t('trip.chat')}</Text>
               </View>
+  ) : null;
+
+  // On a laptop the conversation is a column of its own beside the trip,
+  // rather than something scrolled to underneath it: the details stay in view
+  // while the two people agree where to meet.
+  if (wide) {
+    return (
+      <Screen column="wide">
+        <AsyncState loading={trip.isLoading} error={trip.error} onRetry={() => void trip.refetch()}>
+          {trip.data ? (
+            <View style={styles.columns}>
+              <ScrollView
+                style={styles.detailsColumn}
+                contentContainerStyle={styles.list}
+                showsVerticalScrollIndicator={false}
+              >
+                {details}
+              </ScrollView>
+              <View style={styles.chatColumn}>
+                <Text style={styles.chatLabel}>{t('trip.chat')}</Text>
+                <FlatList
+                  testID="message-list"
+                  data={messages.data?.messages ?? []}
+                  keyExtractor={(m) => m.id}
+                  contentContainerStyle={styles.chatList}
+                  showsVerticalScrollIndicator={false}
+                  renderItem={renderMessage}
+                />
+                {composerView}
+              </View>
+            </View>
+          ) : null}
+        </AsyncState>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen>
+      <AsyncState loading={trip.isLoading} error={trip.error} onRetry={() => void trip.refetch()}>
+        {trip.data ? (
+          <FlatList
+            testID="message-list"
+            data={messages.data?.messages ?? []}
+            keyExtractor={(m) => m.id}
+            contentContainerStyle={styles.list}
+            showsVerticalScrollIndicator={false}
+            ListHeaderComponent={
+              <>
+                {details}
+                <Text style={styles.chatLabel}>{t('trip.chat')}</Text>
+              </>
             }
-            renderItem={({ item }) => {
-              const mine = item.sender_id === me?.id;
-              return (
-                <View style={[styles.bubbleRow, mine && styles.bubbleRowMine]}>
-                  <View style={[styles.bubble, mine && styles.bubbleMine]}>
-                    {!mine ? <Text style={styles.sender}>{item.sender_name}</Text> : null}
-                    <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>
-                      {item.body}
-                    </Text>
-                    <Text style={[styles.bubbleTime, mine && styles.bubbleTimeMine]}>
-                      {athensTime(item.created_at)}
-                    </Text>
-                  </View>
-                </View>
-              );
-            }}
+            renderItem={renderMessage}
           />
         ) : null}
       </AsyncState>
@@ -358,8 +421,20 @@ export default function TripScreen() {
   );
 }
 
+
 const styles = StyleSheet.create({
   list: { gap: space.sm, paddingBottom: space.lg },
+  columns: { flex: 1, flexDirection: 'row', gap: space.xl },
+  detailsColumn: { flex: 1 },
+  chatColumn: {
+    flex: 1,
+    gap: space.sm,
+    backgroundColor: colors.sunken,
+    borderRadius: radius.card,
+    padding: space.lg,
+    marginBottom: space.lg,
+  },
+  chatList: { gap: space.sm, flexGrow: 1, justifyContent: 'flex-end' },
   head: { gap: space.md, paddingBottom: space.sm },
 
   hero: { flexDirection: 'row', gap: space.lg, alignItems: 'center' },

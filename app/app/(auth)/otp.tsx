@@ -6,7 +6,14 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import { useSession } from '../../src/state/session';
-import { Button, Card, Hint, Screen, Title } from '../../src/components/ui';
+import {
+  Button,
+  Card,
+  Hint,
+  Screen,
+  Spacer,
+  Title,
+} from '../../src/components/ui';
 import { colors, radius, space, type } from '../../src/design/tokens';
 
 // This screen used to fetch the list of regions and carry it forward, because
@@ -67,7 +74,7 @@ export default function OtpScreen() {
   };
 
   return (
-    <Screen topInset>
+    <Screen topInset column="narrow">
       <View style={styles.top}>
         <Title>{t('auth.otpTitle')}</Title>
         <Hint>{t('auth.otpHint')}</Hint>
@@ -94,7 +101,7 @@ export default function OtpScreen() {
         </Text>
       ) : null}
 
-      <View style={styles.spacer} />
+      <Spacer />
 
       <Button
         testID="otp-submit"
@@ -108,7 +115,6 @@ export default function OtpScreen() {
 
 const styles = StyleSheet.create({
   top: { gap: space.sm },
-  spacer: { flex: 1 },
   error: { ...type.body, color: colors.danger },
   input: {
     ...type.display,

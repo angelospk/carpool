@@ -10,6 +10,7 @@ import {
   type PricingMode,
 } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
+import { refusalText } from '../../src/api/errorText';
 import {
   Button,
   Card,
@@ -148,6 +149,8 @@ export default function PublishScreen() {
       setPublished({ ...snap, id: r.template_id });
     },
     onError: (e) => {
+      const refused = refusalText(e);
+      if (refused) return setOutcome(refused);
       setOutcome(
         // The server's own wording is English, and it reached the screen
         // verbatim: a Greek pilot user was told "add your car details before
@@ -224,9 +227,10 @@ export default function PublishScreen() {
         <SectionHeader title={t('publish.schedule')} />
         <Card>
           <Text style={styles.label}>{t('publish.recurring')}</Text>
-          <View style={styles.days}>
+          <View style={[styles.days, styles.wrap]}>
             {PRESETS.map((p) => (
               <Chip
+                fit
                 key={p.key}
                 testID={`preset-${p.key}`}
                 label={t(`publish.${p.key}`)}

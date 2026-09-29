@@ -18,6 +18,7 @@ import { Button, Card, Hint, Screen, SectionHeader, Title } from '../../src/comp
 import { ShareRouteButton } from '../../src/components/ShareRouteButton';
 import { confirm } from '../../src/components/confirm';
 import { colors, space, type } from '../../src/design/tokens';
+import { calendarDay } from '../../src/design/format';
 
 export default function MyRoutesScreen() {
   const { t } = useTranslation();
@@ -89,7 +90,9 @@ export default function MyRoutesScreen() {
                 <Text style={styles.meta}>
                   {r.kind === 'recurring'
                     ? r.weekdays.map((d) => t(`weekdaysShort.${d}`)).join(' ')
-                    : (r.oneoff_date ?? '')}
+                    : r.oneoff_date
+                      ? calendarDay(r.oneoff_date)
+                      : ''}
                 </Text>
               </View>
             </View>

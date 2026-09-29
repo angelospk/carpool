@@ -10,7 +10,15 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
-import { Badge, Button, Card, Screen, Title } from '../../src/components/ui';
+import { refusalText } from '../../src/api/errorText';
+import {
+  Badge,
+  Button,
+  Card,
+  Screen,
+  Spacer,
+  Title,
+} from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
 
 export default function AskScreen() {
@@ -43,7 +51,7 @@ export default function AskScreen() {
       case 'ask_closed':
         return setOutcome(t('ask.closed'));
       default:
-        return setOutcome(t('common.error'));
+        return setOutcome(refusalText(e) ?? t('common.error'));
     }
   };
 
@@ -87,7 +95,7 @@ export default function AskScreen() {
         </Text>
       ) : null}
 
-      <View style={styles.spacer} />
+      <Spacer />
 
       <Button
         testID="ask-accept"
@@ -112,5 +120,4 @@ const styles = StyleSheet.create({
   // Never "fare": the app suggests a contribution, it does not charge one.
   suggested: { ...type.caption, color: colors.muted },
   outcome: { ...type.body, color: colors.danger },
-  spacer: { flex: 1 },
 });

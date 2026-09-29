@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"carpool/internal/api"
+	"carpool/internal/auth"
 )
 
 // Φέρες. A real settlement out of the embedded national list, inside the
@@ -365,5 +368,62 @@ func TestABirthDateNeverLeavesInAProfile(t *testing.T) {
 	rec := h.do(http.MethodGet, "/v1/me", nil, token)
 	if body := rec.Body.String(); strings.Contains(body, "date_of_birth") {
 		t.Errorf("/v1/me carries a birth date: %s", body)
+	}
+}
+
+// One address asking for codes to many numbers is the shape of SMS pumping,
+// and the per-number limit cannot see it.
+func TestOneAddressCannotAskForCodesToEveryNumber(t *testing.T) {
+	h := newHarness(t)
+	h.router = api.NewRouter(api.Deps{
+		Pool: h.pool, Clock: h.clock, Location: testLocation(),
+		OTP:             auth.NewOTPService(h.pool, h.clock, h.sms),
+		Signup:          auth.NewSignupService(h.pool, h.clock),
+		OTPPerIPPerHour: 3,
+	})
+	for i := 0; i < 3; i++ {
+		rec := h.do(http.MethodPost, "/v1/auth/otp/request",
+			map[string]any{"phone": fmt.Sprintf("+30690000070%d", i)}, "")
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("request %d: %d %s", i, rec.Code, rec.Body.String())
+		}
+	}
+	rec := h.do(http.MethodPost, "/v1/auth/otp/request", map[string]any{"phone": "+306900000709"}, "")
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("fourth number from one address: %d, want 429", rec.Code)
+	}
+}
+
+// Signing up used to trim the name and nothing else, so everything the profile
+// edit refuses — a line break, an RTL override, three hundred letters — could be
+// had by putting it in at the start instead.
+func TestSignupHoldsTheNameToTheSameRuleAsTheProfile(t *testing.T) {
+	for _, bad := range []string{
+		"Α\u202eβγ",
+		"Α\x00βγ",
+		strings.Repeat("Α", 300),
+	} {
+		h := newHarness(t)
+		rec := h.do(http.MethodPost, "/v1/auth/signup/complete", map[string]any{
+			"signup_token": h.signupToken(phone), "name": bad,
+			"home_place_id": feres, "date_of_birth": adultDOB,
+		}, "")
+		if rec.Code != http.StatusBadRequest || h.errorCode(rec) != "invalid_name" {
+			t.Errorf("%q: %d %s, want 400 invalid_name", bad, rec.Code, rec.Body.String())
+		}
+	}
+
+	h := newHarness(t)
+	rec := h.do(http.MethodPost, "/v1/auth/signup/complete", map[string]any{
+		"signup_token": h.signupToken(phone), "name": "  Μαρία \n  Κ. ",
+		"home_place_id": feres, "date_of_birth": adultDOB,
+	}, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ordinary name: %d %s", rec.Code, rec.Body.String())
+	}
+	var name string
+	h.mustQuery(`SELECT name FROM users WHERE phone = $1`, &name, phone)
+	if name != "Μαρία Κ." {
+		t.Errorf("stored %q, want the normalised form", name)
 	}
 }

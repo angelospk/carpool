@@ -57,3 +57,38 @@ export function euros(cents: number): string {
     minimumFractionDigits: 2,
   }).format(cents / 100);
 }
+
+/**
+ * Which greeting fits the hour in Athens. Past midnight is neither morning nor
+ * evening, so it gets the one that is always right.
+ */
+export function greetingKey(now: Date): string {
+  const hour = Number(
+    now.toLocaleTimeString('en-GB', { timeZone: ZONE, hour: '2-digit', hour12: false }),
+  ) % 24;
+  if (hour < 5) return 'home.greetingNight';
+  if (hour < 12) return 'home.greetingMorning';
+  return 'home.greetingEvening';
+}
+
+/** How far ahead the server plans departures; see jobs.HorizonDays. */
+export const HORIZON_DAYS = 21;
+
+/**
+ * The day a weekly arrangement asked for now would run until, for the sentence
+ * that offers one. The server stores now + 21 days; this says the same thing.
+ */
+export function repeatUntil(now: Date): string {
+  const until = new Date(now.getTime() + HORIZON_DAYS * 24 * 60 * 60 * 1000);
+  return until.toLocaleDateString(LOCALE, { timeZone: ZONE, day: 'numeric', month: 'long' });
+}
+
+/**
+ * A calendar date the server sends as YYYY-MM-DD, named like the trip cards
+ * name days. Read as noon UTC so no zone can move it to a neighbouring day.
+ */
+export function calendarDay(date: string): string {
+  const d = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return date;
+  return d.toLocaleDateString(LOCALE, { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
+}

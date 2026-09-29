@@ -12,13 +12,16 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, initials, lift, radius, space, tileColor, type } from '../design/tokens';
 import { photoSource } from '../api/images';
+import { breakpoint, columnWidth, type Breakpoint, type ColumnKind } from '../design/layout';
 
 export { colors };
 
@@ -37,24 +40,118 @@ export function Screen({
   scroll,
   padded = true,
   topInset = false,
+  column = 'normal',
 }: {
   children: ReactNode;
   scroll?: boolean;
   padded?: boolean;
   topInset?: boolean;
+  /**
+   * How wide the content may grow. On a phone all three are the phone; in a
+   * browser a form stops at a readable width instead of spanning the window.
+   */
+  column?: ColumnKind;
 }) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const roomy = breakpoint(width) !== 'compact';
   return (
-    <View
-      style={[
-        styles.screen,
-        padded && styles.screenPadded,
-        topInset && { paddingTop: insets.top + (padded ? space.lg : 0) },
-      ]}
-    >
-      {children}
+    <View style={styles.screen}>
+      <Backdrop />
+      <View
+        style={[
+          styles.column,
+          { maxWidth: columnWidth(column, width) },
+          padded && styles.screenPadded,
+          padded && roomy && styles.screenRoomy,
+          topInset && { paddingTop: insets.top + (padded ? (roomy ? space.xl : space.lg) : 0) },
+        ]}
+      >
+        {children}
+      </View>
     </View>
   );
+}
+
+/**
+ * Faint roads across the top of the canvas.
+ *
+ * The same idea as the route glyph, used as texture: a few lines that bend the
+ * way the roads here do, too pale to read as anything but paper. Behind the
+ * content and out of the way of touches.
+ */
+function Backdrop() {
+  // Drawn in pixels at the window's width rather than scaled from a viewBox:
+  // scaling stretched the strokes into blobs on a wide window.
+  const { width } = useWindowDimensions();
+  const h = 200;
+  const x = (f: number) => (f * width).toFixed(1);
+  return (
+    <View pointerEvents="none" style={styles.backdrop}>
+      <Svg width={width} height={h}>
+        <Path
+          d={`M${x(-0.05)} 150 C ${x(0.15)} 118, ${x(0.28)} 172, ${x(0.45)} 128 S ${x(0.75)} 58, ${x(1.05)} 92`}
+          stroke={colors.primary}
+          strokeOpacity={0.06}
+          strokeWidth={14}
+          strokeLinecap="round"
+          fill="none"
+        />
+        <Path
+          d={`M${x(-0.05)} 56 C ${x(0.2)} 86, ${x(0.35)} 22, ${x(0.58)} 48 S ${x(0.86)} 132, ${x(1.05)} 104`}
+          stroke={colors.primary}
+          strokeOpacity={0.08}
+          strokeWidth={2}
+          strokeDasharray="2 10"
+          strokeLinecap="round"
+          fill="none"
+        />
+      </Svg>
+    </View>
+  );
+}
+
+/**
+ * Pushes what follows to the bottom of a phone screen, where a thumb reaches
+ * it. On anything wider the bottom of the window is nowhere near the form, so
+ * it is only a gap.
+ */
+export function Spacer() {
+  const roomy = useBreakpoint() !== 'compact';
+  return <View style={roomy ? styles.spacerRoomy : styles.spacer} />;
+}
+
+/**
+ * The name and what it is for, over the sign-in. The first thing somebody sees
+ * should say what they are signing in to.
+ */
+export function BrandMark({ tagline }: { tagline: string }) {
+  return (
+    <View style={styles.brand}>
+      <View style={styles.brandGlyph}>
+        <Svg width={28} height={28} viewBox="0 0 28 28">
+          <Path
+            d="M5 21 C 9 12, 14 20, 18 11 S 23 6, 23 6"
+            stroke={colors.primaryInk}
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            fill="none"
+          />
+          <Circle cx={5} cy={21} r={2.5} fill={colors.primaryInk} />
+          <Circle cx={23} cy={6} r={3} fill={colors.accent} />
+        </Svg>
+      </View>
+      <View>
+        <Text style={styles.brandName}>carpool</Text>
+        <Text style={styles.brandTagline}>{tagline}</Text>
+      </View>
+    </View>
+  );
+}
+
+/** Which breakpoint the window is at, for screens that lay out differently. */
+export function useBreakpoint(): Breakpoint {
+  return breakpoint(useWindowDimensions().width);
 }
 
 /** The big line at the top of a screen. */
@@ -438,8 +535,12 @@ export function Chip({
   selected,
   onPress,
   testID,
+  fit,
 }: {
   label: string;
+  /** Sized to the label rather than an equal share of the row, for words too
+      long to squeeze: the row then wraps instead of cutting them. */
+  fit?: boolean;
   /** A pictogram shown before the label. Decoration over a word that already
       says it, so it is hidden from a screen reader rather than read out under
       whatever name the platform happens to give the character. */
@@ -455,7 +556,7 @@ export function Chip({
       accessibilityLabel={label}
       aria-selected={selected}
       onPress={onPress}
-      style={[styles.chip, selected && styles.chipSelected]}
+      style={[styles.chip, fit && styles.chipFit, selected && styles.chipSelected]}
     >
       {glyph ? (
         <Text
@@ -521,8 +622,25 @@ export function AsyncState({
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.canvas, gap: space.md },
+  screen: { flex: 1, backgroundColor: colors.canvas },
+  column: { flex: 1, width: '100%', alignSelf: 'center', gap: space.md },
   screenPadded: { paddingHorizontal: space.lg, paddingTop: space.lg },
+  screenRoomy: { paddingHorizontal: space.xl },
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, height: 200 },
+  spacer: { flex: 1 },
+  spacerRoomy: { height: space.xl },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: space.md },
+  brandGlyph: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.inner,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...lift,
+  },
+  brandName: { ...type.title, color: colors.primary, letterSpacing: -0.2 },
+  brandTagline: { ...type.caption, color: colors.muted },
 
   display: { ...type.display, color: colors.ink },
   sectionHeader: {
@@ -654,12 +772,17 @@ const styles = StyleSheet.create({
   chip: {
     flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: space.md,
+    // A long Greek word wraps inside the chip instead of touching its edges;
+    // «Σαββατοκύριακο» did at the width of an ordinary phone.
+    paddingHorizontal: space.xs,
     borderRadius: radius.inner,
     backgroundColor: colors.sunken,
   },
+  chipFit: { flexGrow: 1, flexBasis: 'auto', paddingHorizontal: space.md },
   chipGlyph: { fontSize: 20, lineHeight: 24 },
   chipSelected: { backgroundColor: colors.primary },
-  chipLabel: { ...type.label, color: colors.muted },
+  chipLabel: { ...type.label, color: colors.muted, textAlign: 'center' },
   chipLabelSelected: { color: colors.primaryInk },
 });

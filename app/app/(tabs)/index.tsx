@@ -1,4 +1,4 @@
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
@@ -17,10 +17,11 @@ import {
   Button,
   Screen,
   SectionHeader,
+  useBreakpoint,
 } from '../../src/components/ui';
 import { RouteGlyph, decodeRoute } from '../../src/components/RouteGlyph';
-import { colors, space, type } from '../../src/design/tokens';
-import { athensDay, athensTime, startsNewDay } from '../../src/design/format';
+import { colors, lift, radius, space, type } from '../../src/design/tokens';
+import { athensDay, athensTime, greetingKey, startsNewDay } from '../../src/design/format';
 
 export default function HomeScreen() {
   const { t } = useTranslation();
@@ -58,17 +59,57 @@ export default function HomeScreen() {
   const all = trips.data?.trips ?? [];
   const [next, ...rest] = all;
 
-  return (
-    <Screen topInset>
-      <View style={styles.header}>
-        <View style={styles.greeting}>
-          <Avatar name={me?.name ?? '·'} photoUrl={me?.photo_url} size={44} />
-          <View>
-            <Text style={styles.hello}>{t('home.greeting')}</Text>
-            <Text style={styles.name}>{me?.name ?? ''}</Text>
-          </View>
+  const wide = useBreakpoint() === 'wide';
+
+  const list = (
+    <FlatList
+      testID="trip-list"
+      data={rest}
+      keyExtractor={(item) => item.id}
+      refreshing={trips.isRefetching || requests.isRefetching}
+      // Nothing here changes because of anything done on this phone: a
+      // driver answers somewhere else and the screen finds out by asking.
+      // So a pull refreshes the requests as well as the trips.
+      onRefresh={() => {
+        void trips.refetch();
+        void requests.refetch();
+      }}
+      contentContainerStyle={styles.list}
+      showsVerticalScrollIndicator={false}
+      ListHeaderComponent={
+        <View style={styles.listHeader}>
+          {next ? <NextTrip trip={next} onPress={() => router.push(`/trip/${next.id}`)} /> : null}
+          {wide ? null : <OpenRequests />}
+          {rest.length ? <SectionHeader title={t('home.upcoming')} /> : null}
         </View>
-      </View>
+      }
+      ListFooterComponent={
+        wide ? null : (
+          <>
+            <PastTrips />
+            <Suggestions />
+          </>
+        )
+      }
+      renderItem={({ item, index }) => (
+        <>
+          {startsNewDay(item.depart_earliest, rest[index - 1]?.depart_earliest) ? (
+            <Text style={styles.day}>{athensDay(item.depart_earliest)}</Text>
+          ) : null}
+          <TripCard trip={item} onPress={() => router.push(`/trip/${item.id}`)} />
+        </>
+      )}
+    />
+  );
+
+  return (
+    <Screen topInset column="wide">
+      <Hero
+        name={me?.name ?? ''}
+        photoUrl={me?.photo_url}
+        onAsk={() => router.push('/search')}
+        onOffer={() => router.push('/publish')}
+      />
 
       <AsyncState
         loading={trips.isLoading}
@@ -89,44 +130,132 @@ export default function HomeScreen() {
         }
         emptySlot={<FirstRun onAsk={() => router.push('/search')} onOffer={() => router.push('/publish')} />}
       >
-        <FlatList
-          testID="trip-list"
-          data={rest}
-          keyExtractor={(item) => item.id}
-          refreshing={trips.isRefetching || requests.isRefetching}
-          // Nothing here changes because of anything done on this phone: a
-          // driver answers somewhere else and the screen finds out by asking.
-          // So a pull refreshes the requests as well as the trips.
-          onRefresh={() => {
-            void trips.refetch();
-            void requests.refetch();
-          }}
-          contentContainerStyle={styles.list}
-          showsVerticalScrollIndicator={false}
-          ListHeaderComponent={
-            <View style={styles.listHeader}>
-              {next ? <NextTrip trip={next} onPress={() => router.push(`/trip/${next.id}`)} /> : null}
+        {wide ? (
+          // A laptop has the room for what a phone scrolls past: the trips on
+          // the left, everything waiting or worth repeating beside them.
+          <View style={styles.columns}>
+            <View style={styles.main}>{list}</View>
+            <ScrollView
+              style={styles.side}
+              contentContainerStyle={styles.sideBody}
+              showsVerticalScrollIndicator={false}
+            >
+              <AtAGlance trips={all} />
               <OpenRequests />
-              {rest.length ? <SectionHeader title={t('home.upcoming')} /> : null}
-            </View>
-          }
-          ListFooterComponent={
-            <>
               <PastTrips />
               <Suggestions />
-            </>
-          }
-          renderItem={({ item, index }) => (
-            <>
-              {startsNewDay(item.depart_earliest, rest[index - 1]?.depart_earliest) ? (
-                <Text style={styles.day}>{athensDay(item.depart_earliest)}</Text>
-              ) : null}
-              <TripCard trip={item} onPress={() => router.push(`/trip/${item.id}`)} />
-            </>
-          )}
-        />
+            </ScrollView>
+          </View>
+        ) : (
+          list
+        )}
       </AsyncState>
     </Screen>
+  );
+}
+
+/**
+ * The top of the home screen: who you are, what time of day it is, and the two
+ * things this app is for, one tap away from wherever the list has scrolled to.
+ */
+function Hero({
+  name,
+  photoUrl,
+  onAsk,
+  onOffer,
+}: {
+  name: string;
+  photoUrl?: string | null;
+  onAsk: () => void;
+  onOffer: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.hero}>
+      <View style={styles.greeting}>
+        <Avatar name={name || '·'} photoUrl={photoUrl} size={48} />
+        <View style={styles.greetingText}>
+          <Text style={styles.hello}>{t(greetingKey(new Date()))}</Text>
+          <Text style={styles.name} numberOfLines={1}>
+            {name}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.quick}>
+        <QuickAction testID="quick-ask" glyph="⌕" label={t('home.quickAsk')} onPress={onAsk} />
+        <QuickAction
+          testID="quick-offer"
+          glyph="＋"
+          label={t('home.quickOffer')}
+          onPress={onOffer}
+          tone="accent"
+        />
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The side column's first card: the week ahead in three numbers. It is there so
+ * that a driver with nothing waiting and nothing to repeat still has something
+ * beside the list, and it is the thing a regular driver wants to know anyway.
+ */
+function AtAGlance({ trips }: { trips: TripSummary[] }) {
+  const { t } = useTranslation();
+  const driving = trips.filter((x) => x.role === 'driver');
+  const km = trips.reduce((sum, x) => sum + x.route_km, 0);
+  const seats = driving.reduce((sum, x) => sum + x.seats_free, 0);
+  return (
+    <Card testID="at-a-glance">
+      <Text style={styles.glanceTitle}>{t('home.sideTitle')}</Text>
+      <View style={styles.glanceRow}>
+        <Stat value={String(trips.length)} label={t('home.statTrips')} />
+        <Stat value={`${Math.round(km)}`} label={t('home.statKm')} />
+        {driving.length ? (
+          <Stat value={String(seats)} label={t('home.statSeats')} tone="accent" />
+        ) : null}
+      </View>
+    </Card>
+  );
+}
+
+function Stat({ value, label, tone }: { value: string; label: string; tone?: 'accent' }) {
+  return (
+    <View style={styles.stat}>
+      <Text style={[styles.statValue, tone === 'accent' && styles.statValueAccent]}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function QuickAction({
+  glyph,
+  label,
+  onPress,
+  tone = 'primary',
+  testID,
+}: {
+  glyph: string;
+  label: string;
+  onPress: () => void;
+  tone?: 'primary' | 'accent';
+  testID?: string;
+}) {
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.quickAction,
+        tone === 'accent' && styles.quickActionAccent,
+        pressed && styles.quickPressed,
+      ]}
+    >
+      <Text style={[styles.quickGlyph, tone === 'accent' && styles.quickGlyphAccent]}>{glyph}</Text>
+      <Text style={[styles.quickLabel, tone === 'accent' && styles.quickLabelAccent]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -232,7 +361,7 @@ function TripCard({ trip, onPress }: { trip: TripSummary; onPress: () => void })
           <View style={styles.rowRail} />
         </View>
         <View style={styles.rowMain}>
-          <Text style={styles.route} numberOfLines={1}>
+          <Text style={styles.route} numberOfLines={2}>
             {trip.origin_label} → {trip.destination_label}
           </Text>
           <Text style={styles.meta}>
@@ -250,10 +379,45 @@ function TripCard({ trip, onPress }: { trip: TripSummary; onPress: () => void })
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  greeting: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  hero: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.md,
+  },
+  greeting: { flexDirection: 'row', alignItems: 'center', gap: space.md, flexShrink: 1 },
+  greetingText: { flexShrink: 1 },
   hello: { ...type.caption, color: colors.muted },
-  name: { ...type.title, color: colors.ink },
+  name: { ...type.display, fontSize: 24, color: colors.ink },
+  quick: { flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' },
+  quickAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm + 2,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primary,
+    ...lift,
+  },
+  quickActionAccent: { backgroundColor: colors.accentSoft },
+  quickPressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },
+  quickGlyph: { fontSize: 16, color: colors.primaryInk },
+  quickGlyphAccent: { color: colors.accent },
+  quickLabel: { ...type.label, color: colors.primaryInk },
+  quickLabelAccent: { color: colors.accentInk },
+
+  columns: { flex: 1, flexDirection: 'row', gap: space.xl },
+  main: { flex: 3, minWidth: 0 },
+  side: { flex: 2 },
+  sideBody: { gap: space.md, paddingTop: space.sm, paddingBottom: 120 },
+  glanceTitle: { ...type.caption, color: colors.muted, marginBottom: space.sm },
+  glanceRow: { flexDirection: 'row', justifyContent: 'space-between', gap: space.md },
+  stat: { flex: 1, gap: 2 },
+  statValue: { ...type.display, fontSize: 30, color: colors.primary },
+  statValueAccent: { color: colors.accent },
+  statLabel: { ...type.caption, color: colors.muted },
 
   list: { gap: space.md, paddingBottom: 120, paddingTop: space.sm },
   listHeader: { gap: space.md },

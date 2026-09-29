@@ -101,11 +101,19 @@ type Deps struct {
 	// go to the log instead of an SMS, and the browser is allowed to call this
 	// API cross-origin so the Expo web build can be used for testing.
 	DevMode bool
+
+	// OTPPerIPPerHour caps how many sign-in codes one address may ask for in an
+	// hour, across every number. The per-number limit stops somebody flooding
+	// one phone; it does nothing about one client asking for codes to thousands
+	// of numbers, which is how SMS pumping bills the sender. Zero leaves it off,
+	// which only tests want; the API binary always sets it.
+	OTPPerIPPerHour int
 }
 
 // NewRouter builds the versioned HTTP handler.
 func NewRouter(deps Deps) http.Handler {
 	r := chi.NewRouter()
+	r.Use(logServerErrors)
 	r.Use(middleware.Recoverer)
 	if deps.DevMode {
 		r.Use(devCORS)
@@ -121,6 +129,9 @@ func NewRouter(deps Deps) http.Handler {
 	// The few routes anybody can open without an account share one limit per
 	// address. See perIP for why it exists when the tokens cannot be guessed.
 	public := newPerIP(60, time.Minute, time.Now)
+	// Twenty messages a minute is a conversation typed fast. Each one is a push
+	// on somebody's phone, and nothing else stopped forty in two seconds.
+	chat := newPerIP(20, time.Minute, time.Now)
 	if deps.Pool != nil {
 		// A route link, as tapped in a chat. Outside /v1 because it is a page
 		// for a person, not an API for the app.
@@ -161,7 +172,12 @@ func NewRouter(deps Deps) http.Handler {
 			// three dereference deps.Signup, and a half-wired process should
 			// answer 404 rather than panic on the first sign-in.
 			if deps.Signup != nil {
-				r.Post("/otp/request", deps.handleOTPRequest)
+				if deps.OTPPerIPPerHour > 0 {
+					otpIP := newPerIP(deps.OTPPerIPPerHour, time.Hour, time.Now)
+					r.With(otpIP.middleware).Post("/otp/request", deps.handleOTPRequest)
+				} else {
+					r.Post("/otp/request", deps.handleOTPRequest)
+				}
 				r.Post("/otp/verify", deps.handleOTPVerify)
 				r.Post("/signup/complete", deps.handleSignupComplete)
 			}
@@ -297,7 +313,7 @@ func NewRouter(deps Deps) http.Handler {
 				}
 				r.Post("/rate", deps.handleRateTrip)
 				r.Get("/messages", deps.handleListMessages)
-				r.Post("/messages", deps.handlePostMessage)
+				r.With(chat.perUser).Post("/messages", deps.handlePostMessage)
 				if deps.Hub != nil {
 					r.Get("/socket", deps.handleTripSocket)
 				}
