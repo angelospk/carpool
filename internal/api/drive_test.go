@@ -130,3 +130,39 @@ func TestTheDriveCanBeChangedAndEndedOverHTTP(t *testing.T) {
 		t.Fatalf("after «Τέλος»: %+v", trip)
 	}
 }
+
+// What the driver's maps hand-off needs, read the way the app reads it: each
+// passenger's seat, pickup and drop-off, and where the road ends. A passenger
+// is given none of another's.
+func TestTheDriverIsGivenWhatTheMapsHandOffNeeds(t *testing.T) {
+	h := newHarness(t)
+	driver, passenger, occ := h.bookedTrip(t)
+
+	var asDriver struct {
+		Destination []float64 `json:"destination"`
+		Passengers  []struct {
+			BookingID *string   `json:"booking_id"`
+			Pickup    []float64 `json:"pickup"`
+			Dropoff   []float64 `json:"dropoff"`
+		} `json:"passengers"`
+	}
+	h.decode(h.do(http.MethodGet, "/v1/trips/"+occ.String(), nil, driver), &asDriver)
+	if len(asDriver.Destination) != 2 || len(asDriver.Passengers) != 1 {
+		t.Fatalf("driver's view: %+v", asDriver)
+	}
+	p := asDriver.Passengers[0]
+	if p.BookingID == nil || len(p.Pickup) != 2 || len(p.Dropoff) != 2 {
+		t.Fatalf("the driver cannot hand this seat to a maps app: %+v", p)
+	}
+
+	var asPassenger struct {
+		Destination []float64 `json:"destination"`
+		Passengers  []struct {
+			BookingID *string `json:"booking_id"`
+		} `json:"passengers"`
+	}
+	h.decode(h.do(http.MethodGet, "/v1/trips/"+occ.String(), nil, passenger), &asPassenger)
+	if asPassenger.Destination != nil || (len(asPassenger.Passengers) > 0 && asPassenger.Passengers[0].BookingID != nil) {
+		t.Fatalf("a passenger was given the driver's view: %+v", asPassenger)
+	}
+}

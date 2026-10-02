@@ -22,7 +22,9 @@ import {
 } from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
 import { athensTime } from '../../src/design/format';
-import { mapsUrl } from '../../src/drive/maps';
+import { mapsUrl, remainingStops } from '../../src/drive/maps';
+import { carPosition } from '../../src/drive/tracking';
+import { decodeRoute } from '../../src/components/RouteGlyph';
 import { getMapsApp } from '../../src/drive/mapsApp';
 import { detourText } from '../../src/design/detour';
 import { JourneySummary } from '../../src/components/JourneySummary';
@@ -98,7 +100,10 @@ export default function AskScreen() {
       const trip = await api.trip(occurrenceId);
       const seat = trip.passengers.find((p) => p.booking_id === bookingId);
       if (!trip.destination || !seat?.pickup) return;
-      await Linking.openURL(mapsUrl(await getMapsApp(), { pickup: seat.pickup, destination: trip.destination }));
+      // Every stop still ahead, not only the new one: a second passenger must
+      // not take the first one's pickup off the route.
+      const stops = remainingStops(decodeRoute(trip.route_polyline), await carPosition(), trip.passengers);
+      await Linking.openURL(mapsUrl(await getMapsApp(), { stops, destination: trip.destination }));
     } catch {
       // The seat is booked either way; the trip screen has the same button.
     }

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/domain"
+	"carpool/internal/match"
 )
 
 // TripRole is which side of a trip a user is on.
@@ -119,6 +120,9 @@ type TripParticipant struct {
 	// who hands it to their maps app, and for the passenger themselves.
 	// Nobody else on the trip is told where another passenger waits.
 	Pickup *[2]float64
+	// Dropoff is where they get out, [lon, lat], on the same terms: the
+	// driver's maps app has to stop there too.
+	Dropoff *[2]float64
 }
 
 // TripDetail is the trip card.
@@ -163,6 +167,8 @@ type TripDetail struct {
 	Destination *[2]float64
 }
 
+var pickupFrom, pickupFromF = match.DriveFrom("o", "$3::timestamptz")
+
 // ErrNotParticipant means the caller has no place on this trip. It is reported
 // as a 404 rather than a 403 so trip ids cannot be probed.
 var ErrNotParticipant = errors.New("store: not a participant of this trip")
@@ -171,7 +177,7 @@ var ErrNotParticipant = errors.New("store: not a participant of this trip")
 //
 // The driver's plate is included: SPEC.md withholds it until a booking exists,
 // and reaching this function already required one.
-func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.UUID) (TripDetail, error) {
+func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.UUID, now time.Time) (TripDetail, error) {
 	role, err := ParticipantRole(ctx, pool, occurrenceID, userID)
 	if err != nil {
 		return TripDetail{}, err
@@ -211,9 +217,12 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		       EXISTS (SELECT 1 FROM bookings b JOIN ratings r ON r.booking_id = b.id
 		               WHERE b.occurrence_id = o.id AND b.passenger_id = $2 AND r.rater_id = $2),
 		       o.drive_set_at, o.scheduled_earliest, o.scheduled_latest, COALESCE(o.drive_detour_min, o.detour_min),
+		       -- From the car's last trusted fix once it has left, the way the
+		       -- matcher timed the pickup; from the pinned minute before. A car
+		       -- that has left with no fix gives no time rather than a stale one.
 		       CASE WHEN o.drive_set_at IS NOT NULL THEN (
-		           SELECT o.depart_earliest + ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, b.pickup_point))
-		                                      * o.route_min * interval '1 minute'
+		           SELECT ` + pickupFrom + ` + (ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, b.pickup_point))
+		                                      - ` + pickupFromF + `) * o.route_min * interval '1 minute'
 		             FROM bookings b
 		            WHERE b.occurrence_id = o.id AND b.passenger_id = $2 AND b.status = 'confirmed')
 		       END,
@@ -223,7 +232,8 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		JOIN route_templates t  ON t.id = o.template_id
 		JOIN driver_profiles dp ON dp.user_id = t.driver_id
 		JOIN users u            ON u.id = t.driver_id
-		WHERE o.id = $1`, occurrenceID, userID).Scan(
+		` + match.DriveCar("o", "$3") + `
+		WHERE o.id = $1`, occurrenceID, userID, now).Scan(
 		&d.DepartEarliest, &d.DepartLatest, &d.Status, &d.RouteKm, &d.SeatsFree, &d.EndsAtPort,
 		&d.OriginLabel, &d.DestLabel, &d.TemplateID, &d.Weekday, &d.BookingID, &d.RoutePolyline,
 		&d.Driver.UserID, &d.Driver.Name, &d.Driver.PhotoVersion, &d.Driver.FacebookHandle, &d.Driver.InstagramHandle, &d.Driver.Rating,
@@ -250,7 +260,8 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		       b.price_eur, b.seats, b.pricing_basis, u.bio, b.status = 'completed',
 		       coalesce((SELECT array_agg(p.tag) FROM user_preferences p WHERE p.user_id = u.id), '{}'),
 		       EXISTS (SELECT 1 FROM ratings r WHERE r.booking_id = b.id AND r.rater_id = $2),
-		       b.arrived_at, ST_X(b.pickup_point), ST_Y(b.pickup_point), b.id
+		       b.arrived_at, ST_X(b.pickup_point), ST_Y(b.pickup_point), b.id,
+		       ST_X(b.dropoff_point), ST_Y(b.dropoff_point)
 		FROM bookings b JOIN users u ON u.id = b.passenger_id
 		WHERE b.occurrence_id = $1 AND b.status IN ('confirmed','completed')
 		ORDER BY b.created_at`, occurrenceID, userID)
@@ -263,15 +274,16 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		var p TripParticipant
 		var raw []byte
 		var completed bool
-		var lon, lat float64
+		var lon, lat, offLon, offLat float64
 		var bookingID uuid.UUID
 		if err := rows.Scan(&p.UserID, &p.Name, &p.PhotoVersion, &p.FacebookHandle, &p.InstagramHandle, &p.Rating,
 			&p.PriceEUR, &p.Seats, &raw, &p.Bio, &completed, &p.Preferences, &p.Rated,
-			&p.ArrivedAt, &lon, &lat, &bookingID); err != nil {
+			&p.ArrivedAt, &lon, &lat, &bookingID, &offLon, &offLat); err != nil {
 			return TripDetail{}, fmt.Errorf("store: scanning passenger: %w", err)
 		}
 		if role == RoleDriver || p.UserID == userID {
 			p.Pickup = &[2]float64{lon, lat}
+			p.Dropoff = &[2]float64{offLon, offLat}
 		}
 		if role == RoleDriver {
 			p.BookingID = &bookingID

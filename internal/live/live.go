@@ -194,7 +194,26 @@ func (s *Service) PutFix(ctx context.Context, occurrenceID, userID uuid.UUID, f 
 	if !t.open(now) || (t.isDriver && t.driveEnded) {
 		return ErrOutsideWindow
 	}
-	if _, err := s.pool.Exec(ctx, `
+
+	// «Τέλος» takes the trip's row, ends the drive and deletes the position in
+	// one transaction. Holding the same row in share while this writes means
+	// the two cannot interleave: an upload that waited on it reads the end
+	// and writes nothing, rather than putting the position back.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("live: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var ended bool
+	if err := tx.QueryRow(ctx, `
+		SELECT drive_ended_at IS NOT NULL FROM trip_occurrences WHERE id = $1 FOR SHARE`,
+		occurrenceID).Scan(&ended); err != nil {
+		return fmt.Errorf("live: holding the trip: %w", err)
+	}
+	if t.isDriver && ended {
+		return ErrOutsideWindow
+	}
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO trip_live_positions (occurrence_id, user_id, lat, lon, updated_at, accuracy_m, observed_at)
 		VALUES ($1, $2, $3, $4, $5, $7, $8)
 		ON CONFLICT (occurrence_id, user_id) DO UPDATE
@@ -206,6 +225,9 @@ func (s *Service) PutFix(ctx context.Context, occurrenceID, userID uuid.UUID, f 
 		occurrenceID, userID, lat, lon, now, fmt.Sprintf("%d seconds", int(minInterval.Seconds())),
 		f.AccuracyM, observed); err != nil {
 		return fmt.Errorf("live: storing the position: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("live: commit: %w", err)
 	}
 	return nil
 }

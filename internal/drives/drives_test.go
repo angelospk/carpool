@@ -531,14 +531,14 @@ func TestAPassengerSeesWhenTheCarReachesThem(t *testing.T) {
 	if _, err := start(w, at("07:05")); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	trip, err := store.GetTrip(context.Background(), w.pool, w.occ, passenger)
+	trip, err := store.GetTrip(context.Background(), w.pool, w.occ, passenger, w.clock.Now())
 	if err != nil {
 		t.Fatalf("GetTrip: %v", err)
 	}
 	if trip.PickupAt == nil || trip.PickupAt.Sub(at("07:07")).Abs() > 5*time.Second {
 		t.Fatalf("pickup at %v, want about 07:07", trip.PickupAt)
 	}
-	driver, err := store.GetTrip(context.Background(), w.pool, w.occ, w.driverID)
+	driver, err := store.GetTrip(context.Background(), w.pool, w.occ, w.driverID, w.clock.Now())
 	if err != nil {
 		t.Fatalf("GetTrip as the driver: %v", err)
 	}
@@ -714,7 +714,7 @@ func TestOnlyTheDriverSeesEveryPickup(t *testing.T) {
 	first, _ := w.book(t, "+306900000050")
 	second, _ := w.book(t, "+306900000051")
 
-	driver, err := store.GetTrip(context.Background(), w.pool, w.occ, w.driverID)
+	driver, err := store.GetTrip(context.Background(), w.pool, w.occ, w.driverID, w.clock.Now())
 	if err != nil {
 		t.Fatalf("GetTrip as the driver: %v", err)
 	}
@@ -724,7 +724,7 @@ func TestOnlyTheDriverSeesEveryPickup(t *testing.T) {
 		t.Fatalf("the driver is missing pickups or the destination: %+v", driver)
 	}
 
-	mine, err := store.GetTrip(context.Background(), w.pool, w.occ, first)
+	mine, err := store.GetTrip(context.Background(), w.pool, w.occ, first, w.clock.Now())
 	if err != nil {
 		t.Fatalf("GetTrip as a passenger: %v", err)
 	}
@@ -755,5 +755,26 @@ func TestAnEndedDriveIsNotStartedAgain(t *testing.T) {
 	}
 	if _, err := start(w, at("07:10")); !errors.Is(err, drives.ErrDeparted) {
 		t.Fatalf("Start after «Τέλος»: %v, want ErrDeparted", err)
+	}
+}
+
+// Once the car has left, a passenger's pickup time comes from where the car
+// is, the way the matcher timed it: a car running late says so.
+func TestAPassengerSeesTheCarsTimeOnceItHasLeft(t *testing.T) {
+	w := newWorld(t, at("06:55"))
+	passenger, _ := w.book(t, "+306900000060")
+	if _, err := start(w, at("07:00")); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	w.clock.Set(at("07:10"))
+	// Ten minutes after leaving, still at the start of the road.
+	w.exec(t, `INSERT INTO trip_live_positions (occurrence_id, user_id, lat, lon, updated_at, accuracy_m, observed_at)
+		VALUES ($1, $2, 40.85, 25.80, $3, 20, $3)`, w.occ, w.driverID, at("07:10"))
+	trip, err := store.GetTrip(context.Background(), w.pool, w.occ, passenger, w.clock.Now())
+	if err != nil {
+		t.Fatalf("GetTrip: %v", err)
+	}
+	if trip.PickupAt == nil || trip.PickupAt.Sub(at("07:12")).Abs() > 5*time.Second {
+		t.Fatalf("pickup at %v, want about 07:12 from where the car is", trip.PickupAt)
 	}
 }

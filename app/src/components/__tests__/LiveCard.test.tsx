@@ -130,3 +130,12 @@ test('under a minute old reads as now', async () => {
   render(wrap(<LiveCard tripId="occ-1" now={() => at} />));
   expect(await screen.findByText('Γιώργος · τώρα')).toBeTruthy();
 });
+
+// A driver on a drive already shares the car from the background task; the
+// card shows the others and offers no second, foreground share.
+test('a driver whose drive shares the car is not offered a second share', async () => {
+  (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [] });
+  render(wrap(<LiveCard tripId="occ-1" now={() => Date.parse(window.opens) + 60_000} carShared />));
+  expect(await screen.findByTestId('live-car-shared')).toBeTruthy();
+  expect(screen.queryByTestId('live-start')).toBeNull();
+});

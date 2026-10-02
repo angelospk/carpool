@@ -19,6 +19,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 
 import { api } from '../api/endpoints';
+import { ApiError } from '../api/client';
 import { storage } from '../state/secureStorage';
 
 export const DRIVE_TASK = 'carpool-drive-position';
@@ -35,12 +36,35 @@ export async function uploadLatest(locations: Fix[]): Promise<void> {
   const trip = await storage.getItemAsync(KEY).catch(() => null);
   if (!trip || locations.length === 0) return;
   const last = locations.reduce((a, b) => (b.timestamp > a.timestamp ? b : a));
-  await api
-    .putPosition(trip, last.coords.latitude, last.coords.longitude, {
+  try {
+    await api.putPosition(trip, last.coords.latitude, last.coords.longitude, {
       accuracy_m: last.coords.accuracy,
       observed_at: new Date(last.timestamp).toISOString(),
-    })
-    .catch(() => undefined);
+    });
+  } catch (e) {
+    // The server will take no more for this trip: «Τέλος» on another phone,
+    // the trip called off, or its window closed because nobody said «Τέλος».
+    // Then sampling stops here too, rather than running until the battery
+    // notices. A network failure is not that, and changes nothing.
+    if (e instanceof ApiError && (e.status === 404 || e.status === 409)) await stopSampling();
+  }
+}
+
+/** Where this phone last was, for ordering the stops ahead. Null if it does not know. */
+export async function carPosition(): Promise<[number, number] | null> {
+  if (Platform.OS === 'web') return null;
+  const last = await Location.getLastKnownPositionAsync().catch(() => null);
+  return last ? [last.coords.longitude, last.coords.latitude] : null;
+}
+
+async function stopSampling(): Promise<void> {
+  await storage.deleteItemAsync(KEY).catch(() => undefined);
+  if (
+    Platform.OS !== 'web' &&
+    (await Location.hasStartedLocationUpdatesAsync(DRIVE_TASK).catch(() => false))
+  ) {
+    await Location.stopLocationUpdatesAsync(DRIVE_TASK).catch(() => undefined);
+  }
 }
 
 // Defined when this module loads, which _layout makes happen at start: the OS
@@ -81,13 +105,7 @@ export async function startDriveTracking(
 }
 
 export async function stopDriveTracking(tripId: string): Promise<void> {
-  await storage.deleteItemAsync(KEY).catch(() => undefined);
-  if (
-    Platform.OS !== 'web' &&
-    (await Location.hasStartedLocationUpdatesAsync(DRIVE_TASK).catch(() => false))
-  ) {
-    await Location.stopLocationUpdatesAsync(DRIVE_TASK).catch(() => undefined);
-  }
+  await stopSampling();
   await api.stopPosition(tripId).catch(() => undefined);
 }
 

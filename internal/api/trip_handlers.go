@@ -81,7 +81,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	trip, err := store.GetTrip(r.Context(), d.Pool, occurrenceID, userID)
+	trip, err := store.GetTrip(r.Context(), d.Pool, occurrenceID, userID, d.now())
 	if errors.Is(err, store.ErrNotParticipant) {
 		writeError(w, http.StatusNotFound, "not_found", "no such trip")
 		return
@@ -120,7 +120,8 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 			"bio": p.Bio, "preferences": nonNil(p.Preferences),
 			"shared_groups": sharedGroups,
 			"can_rate":      p.CanRate, "rated": p.Rated,
-			"arrived_at": p.ArrivedAt, "pickup": p.Pickup,
+			"arrived_at": p.ArrivedAt, "pickup": p.Pickup, "dropoff": p.Dropoff,
+			"booking_id": p.BookingID,
 		})
 	}
 	driverGroups, ok := shared(trip.Driver.UserID)

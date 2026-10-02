@@ -211,6 +211,8 @@ export type Participant = {
   pickup?: [number, number] | null;
   /** The seat, for the driver only. */
   booking_id?: string | null;
+  /** Where they get out, [lon, lat]: for the driver, and for themselves. */
+  dropoff?: [number, number] | null;
 };
 
 /** Somebody asking for a seat on one of the caller's departures. */

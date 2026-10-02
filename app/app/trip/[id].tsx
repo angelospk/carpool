@@ -388,7 +388,14 @@ export default function TripScreen() {
                 ) : null}
 
                 {/* Only for a trip that is still going to happen. */}
-                {phase !== 'cancelled' ? <LiveCard tripId={id} /> : null}
+                {phase !== 'cancelled' ? (
+                  <LiveCard
+                    tripId={id}
+                    carShared={
+                      trip.data.role === 'driver' && !!trip.data.drive_set_at && !trip.data.drive_ended_at
+                    }
+                  />
+                ) : null}
 
                 {/* The oldest safety feature there is: tell somebody who you
                     are with. A sentence for the share sheet, nothing stored. */}

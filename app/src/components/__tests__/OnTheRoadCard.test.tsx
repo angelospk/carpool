@@ -10,7 +10,17 @@ import { stopDriveTracking } from '../../drive/tracking';
 jest.mock('../../api/endpoints', () => ({
   api: { adjustDrive: jest.fn(() => Promise.resolve()), endDrive: jest.fn(() => Promise.resolve()) },
 }));
-jest.mock('../../drive/tracking', () => ({ stopDriveTracking: jest.fn(() => Promise.resolve()) }));
+jest.mock('../../drive/tracking', () => ({
+  stopDriveTracking: jest.fn(() => Promise.resolve()),
+  carPosition: jest.fn(() => Promise.resolve([25.92, 40.85])),
+}));
+jest.mock('../RouteGlyph', () => ({
+  decodeRoute: () => [
+    [25.8, 40.85],
+    [25.9, 40.85],
+    [26.0, 40.85],
+  ],
+}));
 jest.mock('../../drive/mapsApp', () => ({ getMapsApp: jest.fn(() => Promise.resolve('google')) }));
 
 function wrap(node: ReactNode) {
@@ -65,12 +75,20 @@ test('shows who is already at their pickup', () => {
   expect(screen.getByTestId('road-passenger-u2')).not.toHaveTextContent(/στο σημείο/);
 });
 
-test("hands one passenger's pickup to the maps app", async () => {
+// One button, every stop still ahead in road order: the car has passed
+// Μαρία's pickup, so Νίκος's pickup comes first, then both drop-offs.
+test('navigates through every stop still ahead', async () => {
   const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
-  render(wrap(<OnTheRoadCard trip={trip()} now={() => at('04:05')} onChanged={jest.fn()} />));
-  fireEvent.press(screen.getByTestId('road-navigate-u2'));
+  const withDropoffs = trip({
+    passengers: [
+      { id: 'u1', name: 'Μαρία', pickup: [25.9, 40.85], dropoff: [25.99, 40.85], arrived_at: null },
+      { id: 'u2', name: 'Νίκος', pickup: [25.95, 40.85], dropoff: [25.97, 40.85], arrived_at: null },
+    ],
+  } as Partial<TripDetail>);
+  render(wrap(<OnTheRoadCard trip={withDropoffs} now={() => at('04:05')} onChanged={jest.fn()} />));
+  fireEvent.press(screen.getByTestId('road-navigate'));
   await waitFor(() => expect(open).toHaveBeenCalled());
-  expect(open.mock.calls[0][0]).toContain('waypoints=40.85%2C25.95');
+  expect(open.mock.calls[0][0]).toContain('waypoints=40.85%2C25.95%7C40.85%2C25.97%7C40.85%2C25.99');
 });
 
 test('«Τέλος» ends the drive and stops sharing the car', async () => {

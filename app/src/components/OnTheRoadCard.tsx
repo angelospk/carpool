@@ -7,9 +7,10 @@ import { api, type TripDetail } from '../api/endpoints';
 import { refusalText } from '../api/errorText';
 import { athensTime } from '../design/format';
 import { colors, space, type } from '../design/tokens';
-import { mapsUrl, type LonLat } from '../drive/maps';
+import { mapsUrl, remainingStops } from '../drive/maps';
+import { decodeRoute } from './RouteGlyph';
 import { getMapsApp } from '../drive/mapsApp';
-import { stopDriveTracking } from '../drive/tracking';
+import { carPosition, stopDriveTracking } from '../drive/tracking';
 import { Badge, Button, Card, Chip, Hint } from './ui';
 
 /**
@@ -52,9 +53,12 @@ export function OnTheRoadCard({
 
   const offering = !!trip.offers_until && Date.parse(trip.offers_until) > now();
   const destination = trip.destination ?? null;
-  const navigate = async (pickup?: LonLat) => {
+  // Every stop still ahead — pickups and drop-offs, in road order — then the
+  // end of the road. One button: in a car there is no choosing.
+  const navigate = async () => {
     if (!destination) return;
-    await Linking.openURL(mapsUrl(await getMapsApp(), { pickup, destination })).catch(() => undefined);
+    const stops = remainingStops(decodeRoute(trip.route_polyline), await carPosition(), trip.passengers);
+    await Linking.openURL(mapsUrl(await getMapsApp(), { stops, destination })).catch(() => undefined);
   };
   const busy = adjust.isPending || end.isPending;
 
@@ -98,24 +102,11 @@ export function OnTheRoadCard({
         <View key={p.id} testID={`road-passenger-${p.id}`} style={styles.passenger}>
           <Text style={styles.name}>{p.name}</Text>
           {p.arrived_at ? <Badge label={t('drive.atPickup')} tone="accent" /> : null}
-          {p.pickup && destination ? (
-            <Button
-              testID={`road-navigate-${p.id}`}
-              label={t('drive.navigate')}
-              variant="secondary"
-              onPress={() => void navigate(p.pickup ?? undefined)}
-            />
-          ) : null}
         </View>
       ))}
 
       {destination ? (
-        <Button
-          testID="road-to-end"
-          label={t('drive.toEnd')}
-          variant="secondary"
-          onPress={() => void navigate()}
-        />
+        <Button testID="road-navigate" label={t('drive.navigate')} onPress={() => void navigate()} />
       ) : null}
 
       {error ? <Hint testID="road-error">{error}</Hint> : null}

@@ -1,6 +1,7 @@
 import * as Location from 'expo-location';
 
 import { api } from '../../api/endpoints';
+import { ApiError } from '../../api/client';
 import { storage } from '../../state/secureStorage';
 import { startDriveTracking, stopDriveTracking, uploadLatest } from '../tracking';
 
@@ -12,6 +13,7 @@ jest.mock('expo-location', () => ({
   startLocationUpdatesAsync: jest.fn(() => Promise.resolve()),
   stopLocationUpdatesAsync: jest.fn(() => Promise.resolve()),
   hasStartedLocationUpdatesAsync: jest.fn(),
+  getLastKnownPositionAsync: jest.fn(),
 }));
 jest.mock('../../api/endpoints', () => ({
   api: {
@@ -98,4 +100,23 @@ test('stopping forgets the trip and the position', async () => {
   expect(Location.stopLocationUpdatesAsync).toHaveBeenCalled();
   expect(await storage.getItemAsync('carpool.driveTrip')).toBeNull();
   expect(api.stopPosition).toHaveBeenCalledWith('trip-1');
+});
+
+// «Τέλος» on another phone, or a window that closed because nobody said it:
+// the server refuses, and this phone stops sampling.
+test('a refusal from the server stops sampling', async () => {
+  await storage.setItemAsync('carpool.driveTrip', 'trip-1');
+  (api.putPosition as jest.Mock).mockRejectedValueOnce(new ApiError(409, 'not_sharing_now', 'x'));
+  (Location.hasStartedLocationUpdatesAsync as jest.Mock).mockResolvedValue(true);
+  await uploadLatest([fix(40.81, 1000)]);
+  expect(Location.stopLocationUpdatesAsync).toHaveBeenCalled();
+  expect(await storage.getItemAsync('carpool.driveTrip')).toBeNull();
+});
+
+test('a network failure changes nothing', async () => {
+  await storage.setItemAsync('carpool.driveTrip', 'trip-1');
+  (api.putPosition as jest.Mock).mockRejectedValueOnce(new TypeError('Network request failed'));
+  await uploadLatest([fix(40.81, 1000)]);
+  expect(Location.stopLocationUpdatesAsync).not.toHaveBeenCalled();
+  expect(await storage.getItemAsync('carpool.driveTrip')).toBe('trip-1');
 });

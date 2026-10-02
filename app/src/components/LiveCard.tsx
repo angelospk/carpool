@@ -24,7 +24,19 @@ import { Button, Card, Hint } from './ui';
 
 const POLL_MS = 15_000;
 
-export function LiveCard({ tripId, now = () => Date.now() }: { tripId: string; now?: () => number }) {
+export function LiveCard({
+  tripId,
+  now = () => Date.now(),
+  carShared = false,
+}: {
+  tripId: string;
+  now?: () => number;
+  /** The car's position is already being shared by the drive's background
+      task. Then this card only shows the others: a second, foreground upload
+      would write fixes without accuracy over the task's, and stopping it
+      would delete the car's position from under the drive. */
+  carShared?: boolean;
+}) {
   const { t } = useTranslation();
   const live = useQuery({
     queryKey: ['trips', tripId, 'live'],
@@ -181,7 +193,9 @@ export function LiveCard({ tripId, now = () => Date.now() }: { tripId: string; n
               </View>
             ))
           )}
-          {sharing ? (
+          {carShared ? (
+            <Hint testID="live-car-shared">{t('drive.trackBody')}</Hint>
+          ) : sharing ? (
             <>
               <Hint testID="live-sharing">{t('live.sharing')}</Hint>
               <Button testID="live-stop" label={t('live.stop')} variant="danger" onPress={() => void stop()} />

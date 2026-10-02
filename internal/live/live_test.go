@@ -319,3 +319,43 @@ func TestNothingIsWrittenForADriveThatHasEnded(t *testing.T) {
 		t.Fatalf("a passenger after the drive ended: %v", err)
 	}
 }
+
+// An upload already past its checks when «Τέλος» lands must not put the
+// position back after «Τέλος» has deleted it.
+func TestAnUploadRacingTheEndOfTheDriveIsNotWritten(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	end, err := w.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = end.Rollback(ctx) }()
+	if _, err := end.Exec(ctx, `SELECT 1 FROM trip_occurrences WHERE id = $1 FOR UPDATE`, w.trip); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- w.svc.Put(ctx, w.trip, w.driver, 40.85, 25.9) }()
+	time.Sleep(300 * time.Millisecond) // the upload is now waiting on the row
+
+	if _, err := end.Exec(ctx, `UPDATE trip_occurrences SET drive_ended_at = $2 WHERE id = $1`,
+		w.trip, w.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := end.Exec(ctx, `DELETE FROM trip_live_positions WHERE occurrence_id = $1`, w.trip); err != nil {
+		t.Fatal(err)
+	}
+	if err := end.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := <-done; !errors.Is(err, live.ErrOutsideWindow) {
+		t.Fatalf("the racing upload: %v, want ErrOutsideWindow", err)
+	}
+	var rows int
+	_ = w.pool.QueryRow(ctx, `SELECT count(*) FROM trip_live_positions WHERE user_id = $1`, w.driver).Scan(&rows)
+	if rows != 0 {
+		t.Fatalf("the position came back after «Τέλος»")
+	}
+}
