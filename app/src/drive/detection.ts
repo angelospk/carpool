@@ -127,19 +127,21 @@ export async function drivingNow(trips: TripSummary[], now: number): Promise<str
 /**
  * Keeps watching while the screen is open: a driver standing by the car when
  * the screen first looked is not news, the same driver moving off a minute
- * later is. Calls back with the departure when the phone is confidently in a
- * vehicle. Null when there is nothing to watch for.
+ * later is. On every motion update the windows are looked at again, so a
+ * window that opens while the screen is up is noticed and one that has closed
+ * stops counting. Calls back with the departure, or null when there is none
+ * to speak of. Null when no departure is still to come.
  */
 export async function watchDriving(
   trips: TripSummary[],
-  now: number,
-  onDriving: (trip: string) => void,
+  onChange: (trip: string | null) => void,
+  clock: () => number = Date.now,
 ): Promise<{ remove(): void } | null> {
-  const trip = departureNow(trips, now);
-  if (!trip) return null;
+  if (!detectionWindows(trips).some(([, end]) => end > clock())) return null;
   try {
     return await Location.watchMotionActivityAsync((o) => {
-      if (inCar(o)) onDriving(trip);
+      const trip = departureNow(trips, clock());
+      onChange(trip && inCar(o) ? trip : null);
     });
   } catch {
     return null;

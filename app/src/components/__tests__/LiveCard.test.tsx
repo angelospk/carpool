@@ -11,7 +11,9 @@ jest.mock('../../api/endpoints', () => ({
   api: { live: jest.fn(), putPosition: jest.fn(), stopPosition: jest.fn() },
 }));
 
-let mockOnPosition: ((p: { coords: { latitude: number; longitude: number } }) => void) | null = null;
+let mockOnPosition:
+  | ((p: { coords: { latitude: number; longitude: number; accuracy?: number }; timestamp?: number }) => void)
+  | null = null;
 const mockRemove = jest.fn();
 jest.mock('expo-location', () => ({
   Accuracy: { Balanced: 3 },
@@ -63,8 +65,13 @@ test('sharing sends positions, and stopping forgets them on the server', async (
 
   fireEvent.press(screen.getByTestId('live-start'));
   await waitFor(() => expect(mockOnPosition).not.toBeNull());
-  act(() => mockOnPosition!({ coords: { latitude: 40.85, longitude: 25.87 } }));
-  expect(api.putPosition).toHaveBeenCalledWith('occ-1', 40.85, 25.87);
+  act(() => mockOnPosition!({ coords: { latitude: 40.85, longitude: 25.87, accuracy: 12 }, timestamp: 1000 }));
+  // With how good the fix is and when it was taken, so the server can order
+  // it against the drive's own.
+  expect(api.putPosition).toHaveBeenCalledWith('occ-1', 40.85, 25.87, {
+    accuracy_m: 12,
+    observed_at: new Date(1000).toISOString(),
+  });
 
   fireEvent.press(screen.getByTestId('live-stop'));
   await waitFor(() => expect(api.stopPosition).toHaveBeenCalledWith('occ-1'));

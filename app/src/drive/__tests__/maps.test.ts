@@ -72,3 +72,10 @@ test('a pickup beside the road is kept while the car is level with it', () => {
     [25.99, 40.85],
   ]);
 });
+
+// Just after a pickup — the car pulled away 84 m ago — the pickup is done and
+// navigation goes on to the drop-off, not back.
+test('a pickup the car has just left is done', () => {
+  const p = { pickup: [25.9, 40.85] as [number, number], dropoff: [25.99, 40.85] as [number, number] };
+  expect(remainingStops(road, [25.901, 40.85], [p])).toEqual([[25.99, 40.85]]);
+});

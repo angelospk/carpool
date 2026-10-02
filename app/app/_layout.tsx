@@ -15,6 +15,7 @@ import { registerCategories } from '../src/push/categories';
 // Loaded at start for its side effect: the background task that receives the
 // car's position during a drive has to exist before the OS hands it anything.
 import { forgetDrive } from '../src/drive/tracking';
+import { getTokens } from '../src/state/tokens';
 import { forgetOtherAccounts } from '../src/drive/detection';
 import { restoreLanguage } from '../src/i18n/language';
 import '../src/i18n';
@@ -79,10 +80,21 @@ function AuthGate() {
   // a departure — belongs to the account that turned it on. Signed out, or
   // somebody else signed in, it stops: nobody inherits it.
   const account = useSession((s) => s.me?.id);
+  //
+  // "Signed out" also covers a launch with no network, where the credentials
+  // are kept and the next launch signs straight back in; only credentials
+  // that are actually gone count as leaving.
   useEffect(() => {
-    if (status === 'loading') return;
-    void forgetOtherAccounts(status === 'signedIn' ? account : undefined);
-    if (status === 'signedOut') void forgetDrive();
+    if (status === 'signedIn') {
+      void forgetOtherAccounts(account);
+      return;
+    }
+    if (status !== 'signedOut') return;
+    void getTokens().then((tokens) => {
+      if (tokens) return;
+      void forgetOtherAccounts(undefined);
+      void forgetDrive();
+    });
   }, [status, account]);
 
   // The buttons an offer on a drive carries, in the language in use.

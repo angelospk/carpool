@@ -45,7 +45,7 @@ export function DrivingPrompt({ trips }: { trips: TripSummary[] }) {
       const now = await drivingNow(trips, Date.now());
       if (!live) return;
       setTripId(now);
-      const w = await watchDriving(trips, Date.now(), (id) => live && setTripId(id));
+      const w = await watchDriving(trips, (id) => live && setTripId(id));
       if (live) watch = w;
       else w?.remove();
     })();

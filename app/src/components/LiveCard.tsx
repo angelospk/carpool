@@ -131,7 +131,12 @@ export function LiveCard({
         { accuracy: Location.Accuracy.Balanced, timeInterval: POLL_MS, distanceInterval: 30 },
         (pos) => {
           if (mine !== generation.current) return;
-          const put = api.putPosition(tripId, pos.coords.latitude, pos.coords.longitude);
+          // How good and when, so the server can order it against the
+          // drive's own fixes rather than stamping it with its arrival.
+          const put = api.putPosition(tripId, pos.coords.latitude, pos.coords.longitude, {
+            accuracy_m: pos.coords.accuracy,
+            observed_at: Number.isFinite(pos.timestamp) ? new Date(pos.timestamp).toISOString() : undefined,
+          });
           inFlight.current = put;
           put.then(
             () => {

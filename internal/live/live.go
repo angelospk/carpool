@@ -221,9 +221,13 @@ func (s *Service) PutFix(ctx context.Context, occurrenceID, userID uuid.UUID, f 
 		    accuracy_m = EXCLUDED.accuracy_m, observed_at = EXCLUDED.observed_at
 		WHERE trip_live_positions.updated_at <= EXCLUDED.updated_at - $6::interval
 		  AND (trip_live_positions.observed_at IS NULL
-		       OR trip_live_positions.observed_at < EXCLUDED.observed_at)`,
+		       OR trip_live_positions.observed_at < EXCLUDED.observed_at)
+		  -- A fix that does not say how good it is does not replace a fresh
+		  -- one that does; once that one is stale, anything newer will do.
+		  AND NOT (EXCLUDED.accuracy_m IS NULL AND trip_live_positions.accuracy_m IS NOT NULL
+		           AND trip_live_positions.observed_at > $5::timestamptz - $9::interval)`,
 		occurrenceID, userID, lat, lon, now, fmt.Sprintf("%d seconds", int(minInterval.Seconds())),
-		f.AccuracyM, observed); err != nil {
+		f.AccuracyM, observed, fmt.Sprintf("%d seconds", int(maxFixAge.Seconds()))); err != nil {
 		return fmt.Errorf("live: storing the position: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

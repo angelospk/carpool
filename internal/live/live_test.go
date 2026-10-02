@@ -359,3 +359,28 @@ func TestAnUploadRacingTheEndOfTheDriveIsNotWritten(t *testing.T) {
 		t.Fatalf("the position came back after «Τέλος»")
 	}
 }
+
+// A fix that does not say how good it is may not replace a fresh one that
+// does: a foreground upload still in flight when the drive's background task
+// took over would otherwise put an unqualified position over the car's.
+func TestAnUnqualifiedFixDoesNotReplaceAFreshTrustedOne(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	acc := 20.0
+	seen := w.clock.Now()
+	if err := w.svc.PutFix(ctx, w.trip, w.driver, live.Fix{Lat: 40.82, Lon: 25.82, AccuracyM: &acc, ObservedAt: &seen}); err != nil {
+		t.Fatal(err)
+	}
+	w.clock.Advance(10 * time.Second)
+	_ = w.svc.Put(ctx, w.trip, w.driver, 40.70, 25.70)
+	if lat, _, _ := storedFix(t, w); lat != 40.82 {
+		t.Fatalf("an unqualified fix replaced a trusted one: lat %v", lat)
+	}
+
+	// Once the trusted one is stale, anything newer is better than nothing.
+	w.clock.Advance(3 * time.Minute)
+	_ = w.svc.Put(ctx, w.trip, w.driver, 40.70, 25.70)
+	if lat, _, _ := storedFix(t, w); lat != 40.70 {
+		t.Fatalf("a stale trusted fix was never replaced: lat %v", lat)
+	}
+}

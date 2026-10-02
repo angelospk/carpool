@@ -17,6 +17,7 @@ jest.mock('../../state/secureStorage', () => {
 });
 jest.mock('expo-location', () => ({
   getMotionActivityAsync: jest.fn(),
+  watchMotionActivityAsync: jest.fn(),
   MotionActivityConfidence: { Low: 0, Medium: 1, High: 2 },
 }));
 
@@ -89,4 +90,28 @@ describe('whose it is', () => {
     await forgetOtherAccounts('bob');
     expect(await store.getItemAsync('carpool.detectDriving')).toBeNull();
   });
+});
+
+// The window is looked at on every update: one that opens while the screen
+// is up starts counting, one that has closed stops.
+test('the watch follows the window as time passes', async () => {
+  const { watchDriving } = jest.requireActual('../detection') as typeof import('../detection');
+  let update: ((o: unknown) => void) | null = null;
+  (Location.watchMotionActivityAsync as jest.Mock).mockImplementation(async (cb: (o: unknown) => void) => {
+    update = cb;
+    return { remove: jest.fn() };
+  });
+  let now = Date.parse('2026-08-04T02:30:00Z'); // before the window opens at 03:00
+  const seen: (string | null)[] = [];
+  await watchDriving(
+    [trip({})],
+    (t) => seen.push(t),
+    () => now,
+  );
+  update!(moving(true));
+  now = Date.parse('2026-08-04T03:10:00Z');
+  update!(moving(true));
+  now = Date.parse('2026-08-04T06:00:00Z'); // after it closed at 05:30
+  update!(moving(true));
+  expect(seen).toEqual([null, 't1', null]);
 });

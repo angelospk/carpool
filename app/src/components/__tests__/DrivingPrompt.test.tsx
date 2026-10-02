@@ -15,7 +15,7 @@ jest.mock('../../state/session', () => ({
   useSession: (pick: (s: unknown) => unknown) => pick({ me: { id: 'me' } }),
 }));
 
-let mockOnDriving: ((trip: string) => void) | null = null;
+let mockOnDriving: ((trip: string | null) => void) | null = null;
 const mockRemove = jest.fn();
 const mockOn = jest.fn((_account: string | undefined) => Promise.resolve(true));
 const mockNow = jest.fn((_trips: unknown, _at: number) => Promise.resolve<string | null>(null));
@@ -24,7 +24,7 @@ jest.mock('../../drive/detection', () => ({
   detectionOn: (account: string | undefined) => mockOn(account),
   drivingNow: (trips: unknown, at: number) => mockNow(trips, at),
   syncDetectionWindows: (trips: unknown, account: string | undefined) => mockSync(trips, account),
-  watchDriving: async (_trips: unknown, _at: number, cb: (trip: string) => void) => {
+  watchDriving: async (_trips: unknown, cb: (trip: string | null) => void) => {
     mockOnDriving = cb;
     return { remove: mockRemove };
   },
@@ -52,6 +52,9 @@ test('moving off while the screen is open brings the prompt up', async () => {
   expect(screen.queryByTestId('driving-prompt')).toBeNull();
   act(() => mockOnDriving?.('t1'));
   expect(await screen.findByTestId('driving-prompt')).toBeTruthy();
+  // The window closes, or the car stops being a car: the prompt goes.
+  act(() => mockOnDriving?.(null));
+  expect(screen.queryByTestId('driving-prompt')).toBeNull();
   unmount();
   expect(mockRemove).toHaveBeenCalled();
 });

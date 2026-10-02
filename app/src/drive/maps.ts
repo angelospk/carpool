@@ -37,9 +37,9 @@ export function mapsUrl(app: MapsApp, to: { stops: LonLat[]; destination: LonLat
  *
  * Each point is placed on the nearest segment of the road, in metres from its
  * start, which is plenty to order a handful of stops along one route. A stop
- * is only dropped once the car is well past it — PASSED_M further along — and
- * a pickup off to the side of the road, which sits level with the car as it
- * goes by, is therefore kept until the car has clearly left it behind. With
+ * is done once the car is well past it, or close to it and level or beyond —
+ * which is what having just stopped there looks like. A pickup off to the side
+ * of the road, level with the car as it drives by but not close, is kept. With
  * no position for the car nothing is dropped.
  */
 export function remainingStops(
@@ -47,17 +47,24 @@ export function remainingStops(
   car: LonLat | null,
   passengers: { pickup?: LonLat | null; dropoff?: LonLat | null }[],
 ): LonLat[] {
-  const passed = car ? metresAlong(road, car) - PASSED_M : -Infinity;
+  const carAt = car ? metresAlong(road, car) : -Infinity;
+  const done = (s: LonLat, at: number) =>
+    !!car && (at < carAt - PASSED_M || (at <= carAt + LEVEL_M && metres(car, s) < AT_STOP_M));
   return passengers
     .flatMap((p) => [p.pickup, p.dropoff])
     .filter((s): s is LonLat => !!s)
     .map((s) => ({ s, at: metresAlong(road, s) }))
-    .filter(({ at }) => at > passed)
+    .filter(({ s, at }) => !done(s, at))
     .sort((x, y) => x.at - y.at)
     .map(({ s }) => s);
 }
 
+// Well past a stop is past it. Close to one and level with it or beyond is
+// at it: the car has just stopped there. A pickup off to the side of the road
+// is neither while the car only drives level with it.
 const PASSED_M = 300;
+const AT_STOP_M = 150;
+const LEVEL_M = 30;
 
 /** Metres between two nearby points; flat-earth is exact enough within a region. */
 function metres(a: LonLat, b: LonLat): number {
