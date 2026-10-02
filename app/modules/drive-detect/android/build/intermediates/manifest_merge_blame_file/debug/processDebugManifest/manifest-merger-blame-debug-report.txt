@@ -1,0 +1,44 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="gr.carpool.drivedetect" >
+4
+5    <uses-sdk android:minSdkVersion="24" />
+6    <!-- Which way the phone is moving: walking, still, in a vehicle. Not where. -->
+7    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+7-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:3:3-77
+7-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:3:20-74
+8    <uses-permission android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION" />
+8-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:4:3-92
+8-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:4:20-89
+9    <!-- The watch is lost on reboot and on update, and put back from these. -->
+10    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+10-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:6:3-79
+10-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:6:20-76
+11
+12    <application>
+12-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:8:3-16:17
+13        <receiver
+13-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:9:5-96
+14            android:name="gr.carpool.drivedetect.VehicleReceiver"
+14-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:9:15-68
+15            android:exported="false" />
+15-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:9:69-93
+16        <receiver
+16-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:10:5-15:16
+17            android:name="gr.carpool.drivedetect.RestoreReceiver"
+17-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:10:15-68
+18            android:exported="false" >
+18-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:10:69-93
+19            <intent-filter>
+19-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:11:7-14:23
+20                <action android:name="android.intent.action.BOOT_COMPLETED" />
+20-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:12:9-71
+20-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:12:17-68
+21                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+21-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:13:9-76
+21-->/home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:13:17-73
+22            </intent-filter>
+23        </receiver>
+24    </application>
+25
+26</manifest>

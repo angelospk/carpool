@@ -1,0 +1,52 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:1:1-17:12
+INJECTED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:1:1-17:12
+	package
+		INJECTED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:1:11-69
+uses-permission#android.permission.ACTIVITY_RECOGNITION
+ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:3:3-77
+	android:name
+		ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:3:20-74
+uses-permission#com.google.android.gms.permission.ACTIVITY_RECOGNITION
+ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:4:3-92
+	android:name
+		ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:4:20-89
+uses-permission#android.permission.RECEIVE_BOOT_COMPLETED
+ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:6:3-79
+	android:name
+		ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:6:20-76
+application
+ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:8:3-16:17
+receiver#gr.carpool.drivedetect.VehicleReceiver
+ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:9:5-96
+	android:exported
+		ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:9:69-93
+	android:name
+		ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:9:15-68
+receiver#gr.carpool.drivedetect.RestoreReceiver
+ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:10:5-15:16
+	android:exported
+		ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:10:69-93
+	android:name
+		ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:10:15-68
+intent-filter#action:name:android.intent.action.BOOT_COMPLETED+action:name:android.intent.action.MY_PACKAGE_REPLACED
+ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:11:7-14:23
+action#android.intent.action.BOOT_COMPLETED
+ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:12:9-71
+	android:name
+		ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:12:17-68
+action#android.intent.action.MY_PACKAGE_REPLACED
+ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:13:9-76
+	android:name
+		ADDED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml:13:17-73
+uses-sdk
+INJECTED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml
+INJECTED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /home/harold/projects/carpool/app/modules/drive-detect/android/src/main/AndroidManifest.xml

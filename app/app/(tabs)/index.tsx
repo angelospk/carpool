@@ -8,6 +8,7 @@ import { PastTrips } from '../../src/components/PastTrips';
 import { OpenRequests, useOpenRequests } from '../../src/components/OpenRequests';
 import { Suggestions } from '../../src/components/Suggestions';
 import { PendingAsks } from '../../src/components/PendingAsks';
+import { DrivingPrompt } from '../../src/components/DrivingPrompt';
 import { useSession } from '../../src/state/session';
 import {
   AsyncState,
@@ -115,6 +116,7 @@ export default function HomeScreen() {
       {/* A question waiting on this driver comes before anything else here:
           it lapses, and everything below it will still be there later. */}
       <PendingAsks />
+      <DrivingPrompt trips={all} />
 
       <AsyncState
         loading={trips.isLoading}

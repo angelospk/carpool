@@ -41,7 +41,9 @@
           "locationWhenInUsePermission": "Η θέση σου χρειάζεται για να βρεις σημείο συνάντησης και, όταν οδηγείς και πατήσεις «Φεύγω», για να ξέρουν οι επιβάτες πότε περνάς.",
           "isIosBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true,
-          "isAndroidBackgroundLocationEnabled": false
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidMotionActivityEnabled": true,
+          "motionUsagePermission": "Μόνο αν το ενεργοποιήσεις: για να καταλάβει το κινητό ότι ξεκίνησες για μια διαδρομή σου. Τίποτα δεν στέλνεται πουθενά."
         }
       ],
       "expo-notifications",

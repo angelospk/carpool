@@ -603,5 +603,17 @@
     "maps_apple": "Apple Maps",
     "maps_waze": "Waze",
     "ended": "The drive has ended."
+  },
+  "detect": {
+    "prompt": "Looks like you are driving. Say when you leave and we ask the people waiting on your road.",
+    "promptGo": "Open the trip",
+    "toggle": "Notice when I drive",
+    "hint": "Only near your departure times, and only on your phone: where you are is not sent anywhere.",
+    "denied": "Without the activity permission the phone cannot tell when you are in a car.",
+    "notifyTitle": "Setting off on your trip?",
+    "notifyBody": "Say when you leave and we ask the people waiting on your road.",
+    "shortcutTitle": "On an iPhone, with Shortcuts",
+    "shortcutSteps": "Shortcuts → Automation → + → Driving Focus (or CarPlay) → When turning on → Run immediately → Open URL: carpool://driving",
+    "none": "You have no trip near this time."
   }
 }

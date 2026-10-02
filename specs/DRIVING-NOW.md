@@ -251,11 +251,27 @@ rule as MOBILE.md: no passive tracking.
    Known approximation: the ETA ignores earlier stops except through the
    detour budget, and after departure it is the planned one until phase 2
    adds the car's position.
-2. **Moving drive** — fresh-fix gating and position-based ETA, short-TTL
-   asks with one-tap [Πάρ' τον]/[Όχι] notification buttons, maps hand-off,
-   «Είμαι εδώ», end drive / stop offers, ad-hoc drive without a schedule,
-   background location, ETA to the passenger.
-3. **Detection** — Android module, iOS Shortcuts tip. ~2–3 days, two phones.
+2. **Moving drive** — BUILT 2026-10-02. After departure the estimate starts
+   from the car's last trusted fix (under 2 min, within 200 m, on the
+   route; none → no offers). Offers on a drive carry «Πάρ' τον» / «Όχι»
+   (push category `drive_offer`), 2 minutes to answer once moving;
+   «Πάρ' τον» accepts and opens Google Maps / Apple Maps / Waze with the
+   pickup as a stop. Stop / resume / detour mid-drive, «Τέλος»,
+   «Είμαι εδώ». Background location via expo-location + expo-task-manager,
+   When In Use only, every 150 m or 30 s, newest fix per batch.
+   Not built: adaptive sampling near a pickup (one coarse mode only),
+   ad-hoc drives without a schedule (publish a one-off route instead), and
+   a moving ETA shown to the passenger (they see the planned pickup time and
+   the driver's dot on the live map).
+3. **Detection** — BUILT 2026-10-02, opt-in («Κατάλαβε πότε οδηγώ»).
+   Android: local Expo module `app/modules/drive-detect` (Activity
+   Recognition IN_VEHICLE enter, re-registered on boot/update) shows one
+   local notification per departure, only inside the driver's own windows
+   (an hour either side), which the app writes on the phone. Any phone with
+   the app open: expo-location's motion activity (SDK 57) shows «Φαίνεται
+   ότι οδηγείς» on home. iOS: Shortcuts tip opening `carpool://driving`.
+   Nothing leaves the phone. Compiled against the Android SDK here; not
+   yet run on a device.
 
 ## Phase 1 acceptance tests (write first)
 

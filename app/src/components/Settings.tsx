@@ -9,6 +9,7 @@ import { useSession } from '../state/session';
 import { LANGUAGES, setLanguage } from '../i18n/language';
 import { MAPS_APPS, type MapsApp } from '../drive/maps';
 import { getMapsApp, setMapsApp } from '../drive/mapsApp';
+import { detectionOn, disableDetection, enableDetection } from '../drive/detection';
 import { Card, Chip } from './ui';
 import { colors, space, type } from '../design/tokens';
 
@@ -74,6 +75,22 @@ export function Settings() {
     void setMapsApp(app);
   };
   const mapsApps = MAPS_APPS.filter((a) => a !== 'apple' || Platform.OS === 'ios');
+
+  // Noticing when the driver sets off: opt-in, and the switch shows what the
+  // phone actually agreed to rather than what was tapped.
+  const [detect, setDetect] = useState(false);
+  useEffect(() => {
+    void detectionOn().then(setDetect);
+  }, []);
+  const toggleDetect = async (on: boolean) => {
+    if (!on) {
+      await disableDetection();
+      return setDetect(false);
+    }
+    const ok = await enableDetection({ title: t('detect.notifyTitle'), body: t('detect.notifyBody') });
+    setDetect(ok);
+    setError(ok ? null : t('detect.denied'));
+  };
 
   const female = me?.gender === 'female';
   const womenOnly = !!me?.women_only;
@@ -151,6 +168,26 @@ export function Settings() {
       {me?.asks_paused !== undefined ? (
         <>
           <View style={styles.divider} />
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>{t('detect.toggle')}</Text>
+            <Switch
+              testID="detect-driving"
+              value={detect}
+              onValueChange={(on) => void toggleDetect(on)}
+              trackColor={{ true: colors.primary, false: colors.line }}
+            />
+          </View>
+          <Text style={styles.hint}>{t('detect.hint')}</Text>
+          {Platform.OS === 'ios' ? (
+            <>
+              <Text style={[styles.label, styles.spaced]}>{t('detect.shortcutTitle')}</Text>
+              <Text testID="detect-shortcut" selectable style={styles.hint}>
+                {t('detect.shortcutSteps')}
+              </Text>
+            </>
+          ) : null}
+
+          <View style={styles.divider} />
           <Text style={styles.label}>{t('drive.mapsApp')}</Text>
           <View style={styles.chips}>
             {mapsApps.map((app) => (
@@ -183,4 +220,5 @@ const styles = StyleSheet.create({
   rowLabel: { ...type.body, color: colors.ink },
   divider: { height: 1, backgroundColor: colors.line, marginVertical: space.md },
   error: { ...type.caption, color: colors.danger, marginTop: space.sm },
+  spaced: { marginTop: space.md },
 });

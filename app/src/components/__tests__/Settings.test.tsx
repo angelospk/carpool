@@ -15,6 +15,14 @@ import { ApiError } from '../../api/client';
 
 jest.mock('../../api/endpoints', () => ({ api: { updateMe: jest.fn() } }));
 
+const mockEnable = jest.fn((_notice: unknown) => Promise.resolve(true));
+const mockDisable = jest.fn(() => Promise.resolve());
+jest.mock('../../drive/detection', () => ({
+  detectionOn: () => Promise.resolve(false),
+  enableDetection: (notice: unknown) => mockEnable(notice),
+  disableDetection: () => mockDisable(),
+}));
+
 let mockMe: Record<string, unknown> = {};
 const mockSetMe = jest.fn();
 jest.mock('../../state/session', () => {
@@ -190,4 +198,28 @@ test('the other controls are shut while one change is saving', async () => {
 
   await waitFor(() => expect(screen.getByTestId('gender-other')).toBeDisabled());
   expect(screen.getByTestId('women-only').props.disabled).toBe(true);
+});
+
+// Noticing when a driver sets off is theirs to turn on, and the switch shows
+// what the phone agreed to.
+test('a driver turns on noticing when they drive', async () => {
+  mockMe = { id: 'me', gender: null, women_only: false, asks_paused: false };
+  render(<Settings />);
+  fireEvent(screen.getByTestId('detect-driving'), 'valueChange', true);
+  await waitFor(() => expect(mockEnable).toHaveBeenCalled());
+  await waitFor(() => expect(screen.getByTestId('detect-driving').props.value).toBe(true));
+});
+
+test('a refused permission leaves it off and says why', async () => {
+  mockMe = { id: 'me', gender: null, women_only: false, asks_paused: false };
+  mockEnable.mockResolvedValueOnce(false);
+  render(<Settings />);
+  fireEvent(screen.getByTestId('detect-driving'), 'valueChange', true);
+  expect(await screen.findByTestId('settings-error')).toHaveTextContent(/δραστηριότητα/);
+  expect(screen.getByTestId('detect-driving').props.value).toBe(false);
+});
+
+test('somebody with no car is not offered it', () => {
+  render(<Settings />);
+  expect(screen.queryByTestId('detect-driving')).toBeNull();
 });
