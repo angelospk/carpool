@@ -102,6 +102,15 @@ jobs:
           open(path, "w").write(src)
           PY
 
+      # The generated gradle.properties gives Gradle 2 GB and 512 MB of
+      # metaspace, and the release build runs out of metaspace and thrashes
+      # until the job times out. The runner has 16 GB.
+      - name: Gradle memory
+        working-directory: app/android
+        run: |
+          sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1536m/' gradle.properties
+          grep -q '^org.gradle.jvmargs=-Xmx6g' gradle.properties
+
       - name: Build
         working-directory: app/android
         env:
