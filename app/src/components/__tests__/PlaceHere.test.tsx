@@ -89,6 +89,25 @@ describe('PlaceField «Από εδώ»', () => {
     expect(Location.getCurrentPositionAsync).not.toHaveBeenCalled();
   });
 
+  // Review found this: a slow fix could land after somebody had typed a town,
+  // and overwrite it with where the phone was.
+  it('does not overwrite a place typed while the phone was still looking', async () => {
+    let resolve: (v: unknown) => void = () => {};
+    (Location.getCurrentPositionAsync as jest.Mock).mockReturnValue(new Promise((r) => (resolve = r)));
+    const onChange = jest.fn();
+    render(<PlaceField testID="from" label="Από" value={null} onChange={onChange} here />);
+
+    fireEvent.press(screen.getByTestId('from-here'));
+    await waitFor(() => expect(Location.getCurrentPositionAsync).toHaveBeenCalled());
+    fireEvent.changeText(screen.getByTestId('from-input'), 'Φέρ');
+    resolve({ coords: { longitude: 26.3051, latitude: 41.1958 } });
+
+    await waitFor(() => expect(Location.getCurrentPositionAsync).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({ label: 'Σουφλί' }));
+    expect(screen.getByTestId('from-input').props.value).toBe('Φέρ');
+  });
+
   it('is not offered on a field that did not ask for it', () => {
     render(<PlaceField testID="to" label="Προς" value={null} onChange={jest.fn()} />);
     expect(screen.queryByTestId('to-here')).toBeNull();

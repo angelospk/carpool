@@ -162,7 +162,8 @@ func TestPlacesNearNamesTheSettlementAtACoordinate(t *testing.T) {
 	h := newHarness(t)
 	token, _ := h.signUp("+306900000509", "Νίκος")
 
-	rec := h.do(http.MethodGet, "/v1/places/near?lon=26.3051&lat=41.1958", nil, token)
+	// A POST: a phone's position in a query string ends up in access logs.
+	rec := h.do(http.MethodPost, "/v1/places/near", map[string]any{"lon": 26.3051, "lat": 41.1958}, token)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -177,12 +178,20 @@ func TestPlacesNearNamesTheSettlementAtACoordinate(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 
-	if rec := h.do(http.MethodGet, "/v1/places/near?lon=20&lat=34", nil, token); rec.Code != http.StatusNotFound {
+	if rec := h.do(http.MethodPost, "/v1/places/near", map[string]any{"lon": 20, "lat": 34}, token); rec.Code != http.StatusNotFound {
 		t.Errorf("far out at sea: status %d, want 404", rec.Code)
 	}
-	for _, q := range []string{"", "lon=abc&lat=41", "lon=26.3&lat=95"} {
-		if rec := h.do(http.MethodGet, "/v1/places/near?"+q, nil, token); rec.Code != http.StatusBadRequest {
-			t.Errorf("%q: status %d, want 400", q, rec.Code)
+	for _, body := range []any{
+		map[string]any{},
+		map[string]any{"lon": "abc", "lat": 41},
+		map[string]any{"lon": 26.3, "lat": 95},
+		map[string]any{"lon": 26.3},
+	} {
+		if rec := h.do(http.MethodPost, "/v1/places/near", body, token); rec.Code != http.StatusBadRequest {
+			t.Errorf("%v: status %d, want 400", body, rec.Code)
 		}
+	}
+	if rec := h.do(http.MethodGet, "/v1/places/near?lon=26.3&lat=41.19", nil, token); rec.Code == http.StatusOK {
+		t.Error("the query-string form still answers")
 	}
 }

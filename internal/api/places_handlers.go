@@ -1,6 +1,7 @@
 package api
 
 import (
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -93,15 +94,23 @@ func (d Deps) handleMeetingPoints(w http.ResponseWriter, r *http.Request) {
 
 // handlePlaceNear names the settlement at a coordinate, so a form can start
 // from where the phone is instead of from a typed name. 404 when nothing is
-// close enough to be the answer.
+// close enough to be the answer. A POST, because a phone's position in a query
+// string ends up in proxy and access logs.
 func handlePlaceNear(w http.ResponseWriter, r *http.Request) {
-	lon, errLon := strconv.ParseFloat(r.URL.Query().Get("lon"), 64)
-	lat, errLat := strconv.ParseFloat(r.URL.Query().Get("lat"), 64)
-	if errLon != nil || errLat != nil || lon < -180 || lon > 180 || lat < -90 || lat > 90 {
+	var body struct {
+		Lon *float64 `json:"lon"`
+		Lat *float64 `json:"lat"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.Lon == nil || body.Lat == nil ||
+		math.IsNaN(*body.Lon) || math.IsNaN(*body.Lat) ||
+		*body.Lon < -180 || *body.Lon > 180 || *body.Lat < -90 || *body.Lat > 90 {
 		writeError(w, http.StatusBadRequest, "invalid_request", "lon and lat are required")
 		return
 	}
-	p, ok := places.Nearest(lon, lat)
+	p, ok := places.Nearest(*body.Lon, *body.Lat)
 	if !ok {
 		writeError(w, http.StatusNotFound, "not_found", "no place near that point")
 		return

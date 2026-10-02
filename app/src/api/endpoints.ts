@@ -24,6 +24,14 @@ export type MyRoute = {
   origin_lat: number;
   destination_lon: number;
   destination_lat: number;
+  /** The rest of what the driver chose, so «Αλλαγή» keeps all of it. */
+  group_id: string | null;
+  vehicle_id: string | null;
+  luggage: LuggageSize;
+  luggage_capacity: number;
+  contribution_share: number;
+  allow_stops: boolean;
+  detour_km: number;
   /** How many times a person opened this route's link. */
   link_opens?: number;
   /** Told, as a departure comes up, that somebody on the road is waiting. */
@@ -419,7 +427,7 @@ export const api = {
   liveMap: () =>
     request<{ trips: { from: string; to: string; seats_free: number; polyline: string }[] }>('/v1/live/map'),
   placeNear: (lon: number, lat: number) =>
-    request<{ place: Place }>(`/v1/places/near?lon=${lon}&lat=${lat}`, { anonymous: true }),
+    request<{ place: Place }>('/v1/places/near', { method: 'POST', body: { lon, lat }, anonymous: true }),
   places: (q: string) =>
     request<{ places: Place[] }>(`/v1/places?q=${encodeURIComponent(q)}`, { anonymous: true }),
 

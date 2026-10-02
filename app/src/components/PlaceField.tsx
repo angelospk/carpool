@@ -56,6 +56,9 @@ export function PlaceField({
   // answer to the current one. Without it, typing "αλεξ" then "ορε" can leave
   // Alexandroupoli on screen under the text "ορε".
   const asked = useRef(0);
+  // Bumped by anything that changes what the field holds, so a location
+  // lookup that started before it can tell its answer is no longer wanted.
+  const touched = useRef(0);
 
   // What this field last handed upwards. Deliberately not read from the `value`
   // prop: that only comes back after the parent re-renders, and the rule below
@@ -77,11 +80,13 @@ export function PlaceField({
       // still showed. A keystroke cannot land here, because edit() lets go of
       // selected before it hands null up.
       selected.current = null;
+      touched.current++;
       setText('');
     }
   }, [outside]);
 
   const edit = (next: string) => {
+    touched.current++;
     setText(next);
     // Cleared on the first keystroke rather than on blur. In between, the field
     // would be showing one place and holding another.
@@ -149,10 +154,12 @@ export function PlaceField({
 
   // ask=false is the silent fill on opening: it uses a permission already
   // given and gives up quietly, because nobody pressed anything.
-  const pressedHere = useRef(0);
   const fromHere = async (ask: boolean) => {
-    // A press overtakes the silent attempt still running from opening.
-    const press = ask ? ++pressedHere.current : pressedHere.current;
+    // Whatever happens to the field while the phone looks — a keystroke, a
+    // choice from the list, the parent clearing it, another press — makes
+    // this attempt's answer stale. A press also overtakes the silent attempt.
+    const mine = ask ? ++touched.current : touched.current;
+    const stale = () => touched.current !== mine;
     setHereFailed(false);
     if (ask) setLocating(true);
     try {
@@ -160,17 +167,17 @@ export function PlaceField({
         ? await Location.requestForegroundPermissionsAsync()
         : await Location.getForegroundPermissionsAsync();
       if (!permission.granted) {
-        if (ask) setHereFailed(true);
+        if (ask && !stale()) setHereFailed(true);
         return;
       }
       const at = await position();
       const { place } = await api.placeNear(at.coords.longitude, at.coords.latitude);
-      // Typed into, or chosen from the list, while the phone was looking: what
-      // somebody did by hand wins over what the phone worked out.
-      if (!ask && (selected.current !== null || pressedHere.current !== press)) return;
+      // What somebody did by hand while the phone was looking wins over what
+      // the phone worked out.
+      if (stale() || (!ask && selected.current !== null)) return;
       choose(place);
     } catch {
-      if (ask) setHereFailed(true);
+      if (ask && !stale()) setHereFailed(true);
     } finally {
       if (ask) setLocating(false);
     }
@@ -186,6 +193,7 @@ export function PlaceField({
     // Same reason as the coordinate branch: choosing ends every question this
     // field has outstanding, so no answer to one may reopen the list.
     asked.current++;
+    touched.current++;
     selected.current = place.name;
     setText(place.name);
     setSuggestions(null);
