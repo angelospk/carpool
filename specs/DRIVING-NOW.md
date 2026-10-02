@@ -264,7 +264,10 @@ rule as MOBILE.md: no passive tracking.
    on the phone as the drive goes.
    Without a schedule: «Φεύγω τώρα» in Publish makes a one-off for the next
    quarter of an hour and opens its departure, where «Φεύγω» is.
-   Not built: adaptive sampling near a pickup (one mode only).
+   Not built: finer sampling near a pickup. Changing the session's options
+   from the background task means starting the location service again from
+   the background, which Android 12+ restricts; one High-accuracy mode at
+   150 m / 30 s is what runs.
 3. **Detection** — BUILT 2026-10-02, opt-in («Κατάλαβε πότε οδηγώ»).
    Android: local Expo module `app/modules/drive-detect` (Activity
    Recognition IN_VEHICLE enter, re-registered on boot/update) shows one
