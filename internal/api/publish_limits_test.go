@@ -68,3 +68,26 @@ func TestPublishingRefusesWhatCouldNeverDepart(t *testing.T) {
 		}
 	}
 }
+
+// Publishing is something a person does a few times a day. Without a ceiling
+// a script could fill the schedule with recurring routes, each materialising
+// three weeks of departures that every search then walks past.
+func TestPublishingHasAnHourlyCeilingPerPerson(t *testing.T) {
+	h := newHarnessRoutedBy(t, "http://127.0.0.1:1")
+	token, _ := h.signUp("+306900000809", "Οδηγός")
+
+	for i := range 20 {
+		if rec := h.do(http.MethodPost, "/v1/routes", routeBody(nil), token); rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("attempt %d was refused: a person publishing their week should not hit this", i+1)
+		}
+	}
+	if rec := h.do(http.MethodPost, "/v1/routes", routeBody(nil), token); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("attempt 21: %d %s, want 429", rec.Code, rec.Body.String())
+	}
+
+	// Somebody else is not held to the first person's count.
+	other, _ := h.signUp("+306900000810", "Άλλος")
+	if rec := h.do(http.MethodPost, "/v1/routes", routeBody(nil), other); rec.Code == http.StatusTooManyRequests {
+		t.Fatal("a second person was refused for the first person's publishing")
+	}
+}

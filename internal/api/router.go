@@ -142,6 +142,10 @@ func NewRouter(deps Deps) http.Handler {
 	chat := newPerIP(20, time.Minute, time.Now)
 	// Thirty searches a minute is somebody moving pins around a lot.
 	supply := newPerIP(30, time.Minute, time.Now)
+	// Publishing is a few times a day for a person. The ceiling is for a
+	// script filling the schedule with recurring routes, each of which
+	// materialises three weeks of departures.
+	publishing := newPerIP(20, time.Hour, time.Now)
 	if deps.Pool != nil {
 		// A route link, as tapped in a chat. Outside /v1 because it is a page
 		// for a person, not an API for the app.
@@ -278,7 +282,7 @@ func NewRouter(deps Deps) http.Handler {
 			})
 
 			if deps.Router != nil {
-				r.Post("/routes", deps.handleCreateRoute)
+				r.With(publishing.perUser).Post("/routes", deps.handleCreateRoute)
 				// A POST because it carries coordinates: a query string ends up
 				// in proxy logs, analytics and history, and a pair of
 				// coordinates is where somebody lives and where they go.
