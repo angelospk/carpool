@@ -7,6 +7,7 @@ import { api, type TripDetail } from '../api/endpoints';
 import { refusalText } from '../api/errorText';
 import { athensTime } from '../design/format';
 import { startDriveTracking } from '../drive/tracking';
+import type { LonLat } from '../drive/maps';
 import { colors, space, type } from '../design/tokens';
 import { Button, Card, Chip, Hint } from './ui';
 
@@ -43,7 +44,11 @@ export function DriveCard({
       // Sharing the car starts with «Φεύγω», so that once it has left the
       // people ahead of it can be timed. Refused, the drive still stands; it
       // just takes nobody new once it is moving, and the driver is told why.
-      const started = await startDriveTracking(trip.id, { title: t('drive.trackTitle'), body: t('drive.trackBody') });
+      const started = await startDriveTracking(
+        trip.id,
+        { title: t('drive.trackTitle'), body: t('drive.trackBody') },
+        trip.passengers.flatMap((p) => [p.pickup, p.dropoff]).filter((s): s is LonLat => !!s),
+      );
       if (started === 'denied') setError(t('drive.trackDenied'));
       onDone();
     },

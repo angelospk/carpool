@@ -12,10 +12,10 @@ import { useSession } from '../src/state/session';
 import { usePushRegistration } from '../src/push/usePushRegistration';
 import { useNotificationTaps } from '../src/push/useNotificationTaps';
 import { registerCategories } from '../src/push/categories';
-// Loaded at start for its side effect: the background task that receives the
-// car's position during a drive has to exist before the OS hands it anything.
-import { forgetDrive } from '../src/drive/tracking';
-import { onTokensCleared } from '../src/state/tokens';
+// Loaded at start for its side effects: the background task that receives the
+// car's position during a drive has to exist before the OS hands it anything,
+// and so does the clean-up when credentials are cleared.
+import '../src/drive/tracking';
 import { forgetOtherAccounts } from '../src/drive/detection';
 import { restoreLanguage } from '../src/i18n/language';
 import '../src/i18n';
@@ -76,23 +76,14 @@ function AuthGate() {
   usePushRegistration(status === 'signedIn');
   // And a tap on one opens what it is about, not the front page.
   useNotificationTaps(status === 'signedIn');
-  // What this phone does on its own for a driver — sharing a drive, noticing
-  // a departure — belongs to the account that turned it on. Somebody else
-  // signed in, it is not theirs; credentials cleared — a sign-out, or a
-  // session the server rejected — it stops. A launch with no network keeps
-  // the credentials, and is neither.
+  // Detection belongs to the account that turned it on: somebody else signed
+  // in has not agreed to it. Credentials being cleared is handled where the
+  // background task lives (src/drive/tracking), so it also runs when no
+  // screen is mounted.
   const account = useSession((s) => s.me?.id);
   useEffect(() => {
     if (status === 'signedIn') void forgetOtherAccounts(account);
   }, [status, account]);
-  useEffect(
-    () =>
-      onTokensCleared(() => {
-        void forgetOtherAccounts(undefined);
-        void forgetDrive();
-      }),
-    [],
-  );
 
   // The buttons an offer on a drive carries, in the language in use.
   useEffect(() => {

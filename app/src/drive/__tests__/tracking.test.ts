@@ -3,6 +3,7 @@ import * as Location from 'expo-location';
 import { api } from '../../api/endpoints';
 import { ApiError } from '../../api/client';
 import { storage } from '../../state/secureStorage';
+import { clearTokens } from '../../state/tokens';
 import {
   setDriveStops,
   startDriveTracking,
@@ -12,8 +13,10 @@ import {
 } from '../tracking';
 
 jest.mock('expo-task-manager', () => ({ defineTask: jest.fn() }));
+const mockDisableDetection = jest.fn(() => Promise.resolve());
+jest.mock('../detection', () => ({ disableDetection: () => mockDisableDetection() }));
 jest.mock('expo-location', () => ({
-  Accuracy: { Balanced: 3 },
+  Accuracy: { Balanced: 3, High: 4 },
   ActivityType: { AutomotiveNavigation: 2 },
   requestForegroundPermissionsAsync: jest.fn(),
   startLocationUpdatesAsync: jest.fn(() => Promise.resolve()),
@@ -46,6 +49,8 @@ const fix = (lat: number, ts: number, accuracy = 15) => ({
 beforeEach(async () => {
   jest.clearAllMocks();
   await storage.deleteItemAsync('carpool.driveTrip');
+  await storage.deleteItemAsync('carpool.driveStops');
+  await storage.deleteItemAsync('carpool.driveVisited');
 });
 
 test('a denied permission starts nothing and says so', async () => {
@@ -70,7 +75,7 @@ test('starts sharing the car sparingly, with the notification Android requires',
   ).toBe('started');
   const [, opts] = (Location.startLocationUpdatesAsync as jest.Mock).mock.calls[0];
   expect(opts).toMatchObject({
-    accuracy: 3,
+    accuracy: 4,
     distanceInterval: 150,
     activityType: 2,
     showsBackgroundLocationIndicator: true,
@@ -140,4 +145,32 @@ test('the fixes record the stops the car has been at', async () => {
     { coords: { latitude: 40.85, longitude: 25.93, accuracy: 10 }, timestamp: 2000 },
   ]);
   expect([...(await visitedStops())]).toEqual(['25.90000,40.85000']);
+});
+
+// A vague fix could be anywhere within its own uncertainty: it records no
+// visit, however close its centre happens to fall.
+test('a vague fix records no visit', async () => {
+  await storage.setItemAsync('carpool.driveTrip', 'trip-1');
+  await setDriveStops([[25.9, 40.85]]);
+  await uploadLatest([{ coords: { latitude: 40.85, longitude: 25.9001, accuracy: 1000 }, timestamp: 1000 }]);
+  expect((await visitedStops()).size).toBe(0);
+});
+
+test('the booked stops are kept from the moment the drive starts', async () => {
+  (Location.requestForegroundPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
+  await startDriveTracking('trip-2', { title: 't', body: 'b' }, [[25.9, 40.85]]);
+  await uploadLatest([{ coords: { latitude: 40.85, longitude: 25.9001, accuracy: 10 }, timestamp: 1000 }]);
+  expect([...(await visitedStops())]).toEqual(['25.90000,40.85000']);
+});
+
+// Credentials cleared, possibly inside the background task with no screen:
+// the drive's sampling stops and detection is turned off.
+test('clearing the credentials stops the drive and detection', async () => {
+  await storage.setItemAsync('carpool.driveTrip', 'trip-1');
+  (Location.hasStartedLocationUpdatesAsync as jest.Mock).mockResolvedValue(true);
+  await clearTokens();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(Location.stopLocationUpdatesAsync).toHaveBeenCalled();
+  expect(mockDisableDetection).toHaveBeenCalled();
+  expect(await storage.getItemAsync('carpool.driveTrip')).toBeNull();
 });

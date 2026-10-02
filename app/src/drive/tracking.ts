@@ -21,12 +21,15 @@ import * as TaskManager from 'expo-task-manager';
 import { api } from '../api/endpoints';
 import { ApiError } from '../api/client';
 import { storage } from '../state/secureStorage';
+import { onTokensCleared } from '../state/tokens';
+import { disableDetection } from './detection';
 import { markVisited, type LonLat } from './maps';
 
 export const DRIVE_TASK = 'carpool-drive-position';
 const KEY = 'carpool.driveTrip';
 const STOPS = 'carpool.driveStops';
 const VISITED = 'carpool.driveVisited';
+const VISIT_ACCURACY_M = 50;
 
 /** The part of a fix that is sent. */
 type Fix = {
@@ -83,7 +86,12 @@ async function noteVisits(locations: Fix[]): Promise<void> {
     return;
   }
   const before = await visitedStops();
-  const fixes = locations.map((l) => [l.coords.longitude, l.coords.latitude] as LonLat);
+  // Only a fix that knows where it is: a vague one could be anywhere within
+  // its own uncertainty, and a visit, once recorded, takes a stop off the
+  // route for good.
+  const fixes = locations
+    .filter((l) => l.coords.accuracy != null && l.coords.accuracy <= VISIT_ACCURACY_M)
+    .map((l) => [l.coords.longitude, l.coords.latitude] as LonLat);
   const after = markVisited(fixes, stops, before);
   if (after.size !== before.size) await storage.setItemAsync(VISITED, JSON.stringify([...after]));
 }
@@ -105,6 +113,16 @@ async function stopSampling(): Promise<void> {
   }
 }
 
+// Credentials cleared — a sign-out, or a session the server rejected, which
+// can happen inside this task with no screen mounted — end what the phone
+// does on its own for the account: the drive's sampling and detection.
+// Registered when this module loads, so it is there in a background launch
+// too.
+onTokensCleared(() => {
+  void stopSampling();
+  void disableDetection();
+});
+
 // Defined when this module loads, which _layout makes happen at start: the OS
 // may launch the app's JavaScript just to hand it positions.
 if (Platform.OS !== 'web') {
@@ -117,6 +135,7 @@ if (Platform.OS !== 'web') {
 export async function startDriveTracking(
   tripId: string,
   notice: { title: string; body: string },
+  stops: LonLat[] = [],
 ): Promise<'started' | 'denied' | 'unavailable'> {
   if (Platform.OS === 'web') return 'unavailable';
   const permission = await Location.requestForegroundPermissionsAsync();
@@ -125,8 +144,14 @@ export async function startDriveTracking(
     await storage.deleteItemAsync(VISITED).catch(() => undefined);
   }
   await storage.setItemAsync(KEY, tripId);
+  // The booked stops from the start, so a phone put away right after «Φεύγω»
+  // still records them as the car reaches them.
+  await setDriveStops(stops);
   await Location.startLocationUpdatesAsync(DRIVE_TASK, {
-    accuracy: Location.Accuracy.Balanced,
+    // GPS rather than cell towers: a visited stop is only recorded from a
+    // fix that knows where it is within 50 m, which Balanced often does not.
+    // Sparse fixes keep it affordable, and a car usually has power.
+    accuracy: Location.Accuracy.High,
     distanceInterval: 150,
     timeInterval: 30_000,
     deferredUpdatesInterval: 30_000,

@@ -33,6 +33,7 @@ function trip(over: Partial<TripDetail> = {}): TripDetail {
     depart_latest: closes,
     detour_min: 5,
     drive_set_at: null,
+    passengers: [],
     ...over,
   } as TripDetail;
 }
