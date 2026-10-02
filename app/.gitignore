@@ -42,3 +42,6 @@ yarn-error.*
 
 # Gradle output of local native modules
 modules/*/android/build/
+
+# Firebase config for push; supplied per machine and in CI, see app.config.js
+google-services.json

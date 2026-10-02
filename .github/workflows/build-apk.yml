@@ -22,6 +22,11 @@ jobs:
     defaults:
       run:
         working-directory: app
+    # Push notifications: on once both exist, off (and the build still fine)
+    # until then. See app/app.config.js and docs/PUSH.md. Job-level,
+    # because the Gradle step bundles the JS and reads the config again.
+    env:
+      EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +48,16 @@ jobs:
       # environment.
       - name: Point the app at the public API
         run: echo 'EXPO_PUBLIC_API_URL=https://carpool.haroldpoi.dev' > .env
+
+      - name: Firebase config for push
+        env:
+          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_B64" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_B64" | base64 -d > google-services.json
+          else
+            echo "no GOOGLE_SERVICES_JSON_B64 secret: this APK has push notifications off"
+          fi
 
       - name: Prebuild
         run: npx expo prebuild --platform android --no-install
