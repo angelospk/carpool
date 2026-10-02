@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Writes a pg_dump of the carpool database to stdout, and does nothing else.
+# Installed root-owned at /usr/local/bin/carpool-backup and reached through its
+# own forced-command key, separate from CI's deploy key: the key that can ship
+# code cannot read the data, and this one cannot ship code. The mini PC pulls
+# it nightly with deploy/vps/pull-backup.sh.
+set -euo pipefail
+exec docker exec carpool-db-1 pg_dump -U carpool -d carpool --format=custom

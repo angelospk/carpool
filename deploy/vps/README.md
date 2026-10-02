@@ -31,11 +31,20 @@ Cloudflare tunnel ──> Caddy 127.0.0.1:8180 ──> /get        APK in /opt/c
 | Secrets | `/opt/carpool/.env`, root-only. A copy is on the mini PC in `~/.config/carpool/vps.env` |
 | Running image | `/opt/carpool/tag.env` |
 | Deploy script | `/usr/local/bin/carpool-deploy`, run via the forced-command key in `/home/deploy/.ssh/authorized_keys` |
+| Backup script | `/usr/local/bin/carpool-backup`, the second key in the same file |
 | Caddy | `/etc/caddy/Caddyfile` (this directory's `Caddyfile`) |
 | Tunnel | `/etc/cloudflared/config.yml`, ingress `carpool.haroldpoi.dev` → `http://127.0.0.1:8180` |
 | APK signing key | GitHub secrets, and `~/.config/carpool/release.keystore` on the mini PC. Lose it and installed apps can no longer be updated. |
 
-`compose.yml`, `Caddyfile` and `carpool-deploy` are **not** synced by CI. A
+## Backups
+
+Nightly at 03:30 the mini PC pulls a `pg_dump` into `~/backups/carpool/` and
+keeps the last 30 (`carpool-backup.timer`, a systemd user timer running
+`pull-backup.sh`). It uses its own key, `~/.config/carpool/vps_backup`, forced
+to `carpool-backup`: CI's deploy key cannot read the data, and this key cannot
+ship code. Restore with `pg_restore -d <db> <file>`.
+
+`compose.yml`, `Caddyfile`, `carpool-deploy` and `carpool-backup` are **not** synced by CI. A
 change to them is copied by hand; letting CI write a compose file would let a
 leaked deploy key mount anything on the host.
 
