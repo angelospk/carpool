@@ -8,12 +8,7 @@ import { api } from '../../src/api/endpoints';
 
 // jest hoists jest.mock above these, so the names must start with "mock" —
 // that is the only prefix jest allows a factory to reference.
-const mockParams: Record<string, string> = {
-  id: 'ask-1',
-  detour_min: '6',
-  detour_km: '2.1',
-  price: '3.5',
-};
+const mockParams: Record<string, string> = { id: 'ask-1' };
 
 const mockReplace = jest.fn();
 
@@ -23,21 +18,40 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { acceptAsk: jest.fn(), declineAsk: jest.fn() },
+  api: { acceptAsk: jest.fn(), declineAsk: jest.fn(), ask: jest.fn() },
 }));
 
 function wrap(node: ReactNode) {
-  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return <QueryClientProvider client={client}>{node}</QueryClientProvider>;
 }
 
-beforeEach(() => jest.clearAllMocks());
+const theAsk = {
+  id: 'ask-1',
+  occurrence_id: 'occ-1',
+  passenger_name: 'Ελένη',
+  origin_label: 'Αλεξανδρούπολη',
+  destination_label: 'Φέρες',
+  detour_min: 6,
+  detour_km: 2.1,
+  price_eur: 3.5,
+  seats: 1,
+  depart_earliest: '2026-10-01T04:30:00Z',
+  expires_at: '2026-10-01T04:00:00Z',
+};
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  (api.ask as jest.Mock).mockResolvedValue(theAsk);
+});
 
 // The driver has to decide in one glance, so the detour has to be on screen.
-test('shows the detour the driver is being asked to make', () => {
+test('shows the detour the driver is being asked to make', async () => {
   render(wrap(<AskScreen />));
 
-  const detour = String(screen.getByTestId('ask-detour').props.children);
+  const detour = String((await screen.findByTestId('ask-detour')).props.children);
   expect(detour).toContain('6');
   expect(detour).toContain('2.1');
 });
@@ -46,7 +60,7 @@ test('accepting sends the accept and returns to the trip list', async () => {
   (api.acceptAsk as jest.Mock).mockResolvedValue({ booking_id: 'b1' });
 
   render(wrap(<AskScreen />));
-  fireEvent.press(screen.getByTestId('ask-accept'));
+  fireEvent.press(await screen.findByTestId('ask-accept'));
 
   await waitFor(() => expect(api.acceptAsk).toHaveBeenCalledWith('ask-1'));
   await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(tabs)'));
@@ -56,7 +70,7 @@ test('declining sends the decline', async () => {
   (api.declineAsk as jest.Mock).mockResolvedValue(undefined);
 
   render(wrap(<AskScreen />));
-  fireEvent.press(screen.getByTestId('ask-decline'));
+  fireEvent.press(await screen.findByTestId('ask-decline'));
 
   await waitFor(() => expect(api.declineAsk).toHaveBeenCalledWith('ask-1'));
 });
@@ -69,7 +83,7 @@ test('a stale tap on an expired ask explains what happened', async () => {
   );
 
   render(wrap(<AskScreen />));
-  fireEvent.press(screen.getByTestId('ask-accept'));
+  fireEvent.press(await screen.findByTestId('ask-accept'));
 
   await waitFor(() => expect(screen.getByTestId('ask-outcome')).toBeTruthy());
   expect(mockReplace).not.toHaveBeenCalled();
@@ -81,7 +95,7 @@ test('a trip that filled up says so rather than failing generically', async () =
   );
 
   render(wrap(<AskScreen />));
-  fireEvent.press(screen.getByTestId('ask-accept'));
+  fireEvent.press(await screen.findByTestId('ask-accept'));
 
   await waitFor(() => expect(screen.getByTestId('ask-outcome')).toBeTruthy());
 });
@@ -93,10 +107,47 @@ test('the buttons are disabled after the ask is answered', async () => {
   );
 
   render(wrap(<AskScreen />));
-  fireEvent.press(screen.getByTestId('ask-accept'));
+  fireEvent.press(await screen.findByTestId('ask-accept'));
   await waitFor(() => expect(screen.getByTestId('ask-outcome')).toBeTruthy());
 
-  fireEvent.press(screen.getByTestId('ask-accept'));
-
+  // Nothing left to press but the way out.
+  expect(screen.queryByTestId('ask-accept')).toBeNull();
+  expect(screen.getByTestId('ask-leave')).toBeTruthy();
   expect(api.acceptAsk).toHaveBeenCalledTimes(1);
+});
+
+// A notification opens this screen with only an id. The driver has to see who
+// is asking and for which journey, not a detour of zero minutes.
+test('opened by id, it says who is asking and for which journey', async () => {
+  render(wrap(<AskScreen />));
+
+  expect(await screen.findByText(/Ελένη/)).toBeTruthy();
+  expect(screen.getByText('Αλεξανδρούπολη')).toBeTruthy();
+  expect(screen.getByText('Φέρες')).toBeTruthy();
+  expect(api.ask).toHaveBeenCalledWith('ask-1');
+});
+
+// Tapped after somebody else answered it, or after it lapsed: the server no
+// longer shows it, and the screen says so instead of offering two buttons.
+test('an ask that is gone says so and offers the way back', async () => {
+  (api.ask as jest.Mock).mockRejectedValue(new ApiError(404, 'not_found', 'no such request'));
+
+  render(wrap(<AskScreen />));
+
+  expect(await screen.findByTestId('ask-gone')).toBeTruthy();
+  expect(screen.queryByTestId('ask-accept')).toBeNull();
+  fireEvent.press(screen.getByTestId('ask-leave'));
+  expect(mockReplace).toHaveBeenCalledWith('/(tabs)');
+});
+
+// A failure that may work on a second press leaves the two buttons there.
+test('a network failure keeps the answer open', async () => {
+  (api.acceptAsk as jest.Mock).mockRejectedValue(new Error('offline'));
+
+  render(wrap(<AskScreen />));
+  fireEvent.press(await screen.findByTestId('ask-accept'));
+
+  await waitFor(() => expect(screen.getByTestId('ask-outcome')).toBeTruthy());
+  expect(screen.getByTestId('ask-accept')).toBeTruthy();
+  expect(screen.queryByTestId('ask-leave')).toBeNull();
 });

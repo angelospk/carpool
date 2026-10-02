@@ -14,6 +14,8 @@ jest.mock('expo-router', () => ({
 jest.mock('../../src/api/endpoints', () => ({
   api: {
     upcomingTrips: jest.fn(),
+    supply: jest.fn(async () => ({ status: 'unknown' })),
+    pendingAsks: jest.fn(async () => ({ asks: [] })),
     pastTrips: jest.fn(),
     trip: jest.fn(),
     myRequests: jest.fn(),

@@ -92,3 +92,65 @@ func (s *Service) Export(ctx context.Context, userID, groupID uuid.UUID, month t
 	}
 	return out, rows.Err()
 }
+
+// Stats is a month of a group, counted: how many are in it, how many of them
+// offer a route, and the verified trips between members that the export would
+// list. Numbers only; the export is where the names are.
+type Stats struct {
+	Members int
+	Drivers int
+	Trips   int
+	Seats   int
+}
+
+// MonthStats counts the month containing now, for an admin, by the same rules
+// as Export: both sides confirmed, both members on the day.
+func (s *Service) MonthStats(ctx context.Context, userID, groupID uuid.UUID, now time.Time) (Stats, error) {
+	role, err := s.roleOf(ctx, s.pool, userID, groupID)
+	if err != nil {
+		return Stats{}, err
+	}
+	if role != "admin" {
+		return Stats{}, ErrNotAdmin
+	}
+
+	athens, err := time.LoadLocation("Europe/Athens")
+	if err != nil {
+		return Stats{}, fmt.Errorf("groups: time zone: %w", err)
+	}
+	local := now.In(athens)
+	first := time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, time.UTC)
+	next := first.AddDate(0, 1, 0)
+
+	var st Stats
+	err = s.pool.QueryRow(ctx, `
+		WITH live AS (
+			SELECT user_id FROM group_members WHERE group_id = $1 AND left_at IS NULL
+		), verified AS (
+			SELECT b.seats
+			FROM bookings b
+			JOIN trip_occurrences o ON o.id = b.occurrence_id
+			JOIN route_templates t  ON t.id = o.template_id
+			WHERE b.driver_confirmed AND b.passenger_confirmed
+			  AND b.status IN ('confirmed', 'completed')
+			  AND o.service_date >= $2::date AND o.service_date < $3::date
+			  AND EXISTS (SELECT 1 FROM group_members m
+			              WHERE m.group_id = $1 AND m.user_id = t.driver_id
+			                AND m.joined_at <= o.depart_earliest
+			                AND (m.left_at IS NULL OR m.left_at > o.depart_earliest))
+			  AND EXISTS (SELECT 1 FROM group_members m
+			              WHERE m.group_id = $1 AND m.user_id = b.passenger_id
+			                AND m.joined_at <= o.depart_earliest
+			                AND (m.left_at IS NULL OR m.left_at > o.depart_earliest))
+		)
+		SELECT (SELECT count(*) FROM live),
+		       (SELECT count(DISTINCT t.driver_id) FROM route_templates t
+		        WHERE t.active AND t.driver_id IN (SELECT user_id FROM live)),
+		       (SELECT count(*) FROM verified),
+		       (SELECT coalesce(sum(seats), 0) FROM verified)`,
+		groupID, first, next).Scan(&st.Members, &st.Drivers, &st.Trips, &st.Seats)
+	if err != nil {
+		return Stats{}, fmt.Errorf("groups: counting the month: %w", err)
+	}
+	return st, nil
+}

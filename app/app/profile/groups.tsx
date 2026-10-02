@@ -18,6 +18,7 @@ import { exportMonths, monthName } from '../../src/design/months';
 import { saveCsv } from '../../src/components/saveCsv';
 import { confirm } from '../../src/components/confirm';
 import { shareText } from '../../src/components/shareText';
+import { GroupStats } from '../../src/components/GroupStats';
 
 export default function GroupsScreen() {
   const { t } = useTranslation();
@@ -143,6 +144,10 @@ export default function GroupsScreen() {
               {g.role === 'admin' ? <Badge label={t('groups.admin')} tone="primary" /> : null}
             </View>
             <Text style={styles.meta}>{t('groups.members', { count: g.members })}</Text>
+
+            {/* The admin's view of the month. The code is on an admin's
+                screen only, so its presence is the admin test used here too. */}
+            {g.code ? <GroupStats groupId={g.id} /> : null}
 
             {g.code ? (
               <View style={styles.codeRow}>

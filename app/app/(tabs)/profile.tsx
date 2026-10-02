@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
+import { Settings } from '../../src/components/Settings';
 import { useRouter } from 'expo-router';
 
 import { api } from '../../src/api/endpoints';
@@ -226,14 +227,8 @@ export default function ProfileScreen() {
         ) : null}
 
         <SectionHeader title={t('profile.settings')} />
+        <Settings />
         <Card>
-          <Row
-            label={t('profile.womenOnly')}
-            value={me?.women_only ? t('common.on') : t('common.off')}
-          />
-          <View style={styles.divider} />
-          <Row label={t('profile.language')} value="Ελληνικά" />
-          <View style={styles.divider} />
           <Row
             testID="my-routes"
             label={t('profile.routes')}
@@ -253,6 +248,13 @@ export default function ProfileScreen() {
             label={t('garage.title')}
             value=""
             onPress={() => router.push('/profile/vehicles')}
+          />
+          <View style={styles.divider} />
+          <Row
+            testID="my-blocks"
+            label={t('user.blockedTitle')}
+            value=""
+            onPress={() => router.push('/profile/blocked')}
           />
         </Card>
 

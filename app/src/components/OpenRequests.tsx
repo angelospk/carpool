@@ -21,7 +21,7 @@ import { api, type OpenRequest } from '../api/endpoints';
 import { useSession } from '../state/session';
 import { Card } from './ui';
 import { colors, space, type } from '../design/tokens';
-import { athensDay, athensTime } from '../design/format';
+import { JourneySummary } from './JourneySummary';
 
 /**
  * What the caller is waiting on, asked the same way everywhere.
@@ -78,16 +78,14 @@ export function OpenRequests() {
           testID={`request-${request.id}`}
           onPress={() => router.push(`/request/${request.id}`)}
         >
-          <Text style={styles.route} numberOfLines={1}>
-            {request.origin_label} → {request.destination_label}
-          </Text>
-          <Text style={styles.when}>
-            {athensDay(request.window_start)} · {athensTime(request.window_start)}–
-            {athensTime(request.window_end)}
-          </Text>
-          <Text testID={`request-${request.id}-progress`} style={styles.progress}>
-            {requestProgress(request, t)}
-          </Text>
+          <JourneySummary
+            from={request.origin_label}
+            to={request.destination_label}
+            start={request.window_start}
+            end={request.window_end}
+            status={requestProgress(request, t)}
+            statusTestID={`request-${request.id}-progress`}
+          />
         </Card>
       ))}
     </View>
@@ -130,8 +128,5 @@ function progressOf(request: OpenRequest, t: TFunction): string {
 const styles = StyleSheet.create({
   wrap: { gap: space.sm },
   heading: { ...type.caption, color: colors.muted, marginLeft: space.xs },
-  route: { ...type.body, color: colors.ink },
-  when: { ...type.caption, color: colors.muted, marginTop: 2 },
-  progress: { ...type.caption, color: colors.accent, marginTop: space.xs, fontWeight: '700' },
   failed: { ...type.caption, color: colors.muted, marginLeft: space.xs },
 });

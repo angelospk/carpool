@@ -249,7 +249,7 @@ export function Badge({
   testID,
 }: {
   label: string;
-  tone?: 'quiet' | 'accent' | 'primary';
+  tone?: 'quiet' | 'accent' | 'primary' | 'success' | 'danger';
   testID?: string;
 }) {
   return (
@@ -259,6 +259,8 @@ export function Badge({
         styles.badge,
         tone === 'accent' && styles.badgeAccent,
         tone === 'primary' && styles.badgePrimary,
+        tone === 'success' && styles.badgeSuccess,
+        tone === 'danger' && styles.badgeDanger,
       ]}
     >
       <Text
@@ -266,6 +268,8 @@ export function Badge({
           styles.badgeLabel,
           tone === 'accent' && styles.badgeLabelAccent,
           tone === 'primary' && styles.badgeLabelPrimary,
+          tone === 'success' && styles.badgeLabelSuccess,
+          tone === 'danger' && styles.badgeLabelDanger,
         ]}
       >
         {label}
@@ -536,6 +540,7 @@ export function Chip({
   onPress,
   testID,
   fit,
+  disabled,
 }: {
   label: string;
   /** Sized to the label rather than an equal share of the row, for words too
@@ -548,6 +553,8 @@ export function Chip({
   selected: boolean;
   onPress: () => void;
   testID?: string;
+  /** Shut while whatever it sets is still being saved. */
+  disabled?: boolean;
 }) {
   return (
     <Pressable
@@ -555,8 +562,15 @@ export function Chip({
       accessibilityRole="button"
       accessibilityLabel={label}
       aria-selected={selected}
+      aria-disabled={!!disabled}
+      disabled={disabled}
       onPress={onPress}
-      style={[styles.chip, fit && styles.chipFit, selected && styles.chipSelected]}
+      style={[
+        styles.chip,
+        fit && styles.chipFit,
+        selected && styles.chipSelected,
+        disabled && styles.buttonDisabled,
+      ]}
     >
       {glyph ? (
         <Text
@@ -689,6 +703,10 @@ const styles = StyleSheet.create({
   badgeLabel: { ...type.caption, color: colors.muted },
   badgeLabelAccent: { color: '#8A4A12' },
   badgeLabelPrimary: { color: colors.primaryInk },
+  badgeSuccess: { backgroundColor: '#E1EEE5' },
+  badgeLabelSuccess: { color: colors.success },
+  badgeDanger: { backgroundColor: '#F6E0DB' },
+  badgeLabelDanger: { color: colors.danger },
 
   pips: { flexDirection: 'row', gap: 5, alignItems: 'center' },
   pip: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.line },

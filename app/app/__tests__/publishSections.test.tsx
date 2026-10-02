@@ -3,10 +3,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
 import PublishScreen from '../(tabs)/publish';
+import { athensDate, nextDate } from '../../src/design/when';
 import { api } from '../../src/api/endpoints';
 
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+  // Focus is once, on mount, which is what a test screen gets.
+  useFocusEffect: (effect: () => void) => require('react').useEffect(effect, []),
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
@@ -68,6 +71,36 @@ async function fillRoute(garage = [car]) {
 beforeEach(() => jest.clearAllMocks());
 
 describe('the schedule is when the car goes, and nothing else', () => {
+  // "Σάββατο στη Θεσσαλονίκη" had no way in: every route went out as a
+  // recurring one, though the server has always taken a date.
+  test('a one-off trip goes out with its date and no days', async () => {
+    await fillRoute();
+
+    fireEvent.press(screen.getByTestId('schedule-oneoff'));
+    fireEvent.press(screen.getByTestId('oneoff-date-1'));
+    fireEvent.press(screen.getByTestId('publish-submit'));
+
+    await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
+    const body = (api.publishRoute as jest.Mock).mock.calls[0][0];
+    expect(body.kind).toBe('oneoff');
+    // Calendar arithmetic, not 24 hours: a day with a clock change is not 24 hours.
+    expect(body.oneoff_date).toBe(nextDate(athensDate(new Date())));
+    expect(body.weekdays).toBeUndefined();
+  });
+
+  test('switching back to every week sends the days again', async () => {
+    await fillRoute();
+
+    fireEvent.press(screen.getByTestId('schedule-oneoff'));
+    fireEvent.press(screen.getByTestId('schedule-recurring'));
+    fireEvent.press(screen.getByTestId('publish-submit'));
+
+    await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
+    const body = (api.publishRoute as jest.Mock).mock.calls[0][0];
+    expect(body.kind).toBe('recurring');
+    expect(body.oneoff_date).toBeUndefined();
+  });
+
   // Seats, bags and the fuel used to live in the schedule card, which made
   // "πρόγραμμα" the name of the box holding everything with no home.
   test('a preset replaces the days rather than adding to them', async () => {

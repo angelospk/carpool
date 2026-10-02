@@ -132,6 +132,8 @@ func NewRouter(deps Deps) http.Handler {
 	// Twenty messages a minute is a conversation typed fast. Each one is a push
 	// on somebody's phone, and nothing else stopped forty in two seconds.
 	chat := newPerIP(20, time.Minute, time.Now)
+	// Thirty searches a minute is somebody moving pins around a lot.
+	supply := newPerIP(30, time.Minute, time.Now)
 	if deps.Pool != nil {
 		// A route link, as tapped in a chat. Outside /v1 because it is a page
 		// for a person, not an API for the app.
@@ -276,6 +278,12 @@ func NewRouter(deps Deps) http.Handler {
 				r.Delete("/requests/{id}", deps.handleCancelRequest)
 				r.Get("/requests/{id}/alternatives", deps.handleRequestAlternatives)
 				r.Post("/bookings/{id}/again", deps.handleAgain)
+				// Rate limited per person, on its own budget so that searching
+				// cannot use up somebody's chat: each call is a spatial query,
+				// and asking in a loop is how a floor is probed.
+				r.With(supply.perUser).Post("/supply", deps.handleSupply)
+				r.Get("/asks/pending", deps.handlePendingAsks)
+				r.Get("/asks/{id}", deps.handleGetAsk)
 				r.Post("/asks/{id}/accept", deps.handleAcceptAsk)
 				r.Post("/asks/{id}/decline", deps.handleDeclineAsk)
 			}
@@ -304,6 +312,7 @@ func NewRouter(deps Deps) http.Handler {
 				r.Delete("/groups/{id}/membership", deps.handleLeaveGroup)
 				r.Post("/groups/{id}/code", deps.handleRotateGroupCode)
 				r.Get("/groups/{id}/trips.csv", deps.handleGroupExport)
+				r.Get("/groups/{id}/stats", deps.handleGroupStats)
 			}
 			r.Route("/trips/{id}", func(r chi.Router) {
 				r.Get("/", deps.handleGetTrip)
@@ -324,6 +333,7 @@ func NewRouter(deps Deps) http.Handler {
 				}
 			})
 
+			r.Get("/me/blocks", deps.handleMyBlocks)
 			r.Route("/users/{id}", func(r chi.Router) {
 				r.Get("/photo", deps.handleGetPhoto)
 				r.Head("/photo", deps.handleGetPhoto)

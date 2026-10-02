@@ -8,7 +8,15 @@
     "noSeats": "No free seats left",
     "suggested": "suggested contribution",
     "title": "Passenger request",
-    "waiting": "Waiting for an answer"
+    "waiting": "Waiting for an answer",
+    "gone": "This request is no longer waiting for an answer: it lapsed or was already answered.",
+    "who_one": "{{name}} is asking for a seat",
+    "who_other": "{{name}} is asking for {{count}} seats",
+    "answerBy": "Answer by {{time}}",
+    "backHome": "Back to home",
+    "forYou": "Asking you",
+    "open": "Open",
+    "noDetour": "No detour"
   },
   "auth": {
     "accountSuspended": "This account cannot be used. Write to us if you think that is wrong.",
@@ -264,7 +272,9 @@
     "upcomingTrips_other": "{{count}} scheduled trips",
     "womenOnly": "Women only",
     "you": "You",
-    "bioHasContactDetails": "Take the contact details out of your profile. Everybody can see it, not only whoever travels with you, and your passenger can reach you through the app."
+    "bioHasContactDetails": "Take the contact details out of your profile. Everybody can see it, not only whoever travels with you, and your passenger can reach you through the app.",
+    "linkOpens_one": "Link opened once",
+    "linkOpens_other": "Link opened {{count}} times"
   },
   "publish": {
     "allowStops": "I accept stops",
@@ -299,7 +309,12 @@
     "addCar": "Add a car",
     "changeCar": "Change",
     "carFailed": "Your garage did not load.",
-    "bootFullHint": "Your own luggage fills the boot. Pick “None” for luggage to publish with no space, or leave one place free."
+    "bootFullHint": "Your own luggage fills the boot. Pick “None” for luggage to publish with no space, or leave one place free.",
+    "everyWeek": "Every week",
+    "once": "Once",
+    "onDate": "Which day",
+    "today": "Today",
+    "tomorrow": "Tomorrow"
   },
   "request": {
     "alreadyMatched": "A driver took your ride, so the request was not cancelled. If you can no longer go, cancel the booking from the trip.",
@@ -328,7 +343,8 @@
     "title": "Ask for a seat",
     "to": "To",
     "when": "When",
-    "whatHappens": "We ask drivers heading that way, one at a time, and tell you as soon as somebody says yes. Nothing is charged."
+    "whatHappens": "We ask drivers heading that way, one at a time, and tell you as soon as somebody says yes. Nothing is charged.",
+    "supply": "At least three drivers go this way that day"
   },
   "share": {
     "button": "Share this route",
@@ -369,7 +385,21 @@
     "socialSelfDeclared": "Self-declared, we have not verified it",
     "title": "Trip",
     "portTitle": "The trip ends at the port",
-    "portBody": "The rest of the way is by boat. The ferry ticket is not part of the price and is arranged separately."
+    "portBody": "The rest of the way is by boat. The ferry ticket is not part of the price and is arranged separately.",
+    "leave": "I can't make it",
+    "leaveConfirm": "Your seat goes back and {{name}} will be told.",
+    "leaveGone": "That seat is no longer yours",
+    "statusScheduled": "Scheduled",
+    "statusUnderway": "Departure time",
+    "statusCancelled": "Cancelled",
+    "statusConfirmed": "You confirmed it",
+    "statusToConfirm": "Did it happen? Confirm it",
+    "rateSend": "Send rating",
+    "rateStars_one": "{{count}} star",
+    "rateStars_other": "{{count}} stars",
+    "ratedDone": "Rated",
+    "openProfile": "Profile: {{name}}",
+    "sendFailed": "The message was not sent. Press Send again."
   },
   "user": {
     "block": "Block",
@@ -390,7 +420,12 @@
       "money": "Asked for more money",
       "fake_profile": "Fake profile",
       "other": "Something else"
-    }
+    },
+    "unblock": "Unblock",
+    "unblocked": "Unblocked",
+    "blockHint": "You will not be matched on a trip again. A trip you have already booked is not cancelled: do that from the trip itself.",
+    "blockedTitle": "Blocked",
+    "blockedEmpty": "You have not blocked anybody."
   },
   "weekdays": {
     "1": "Monday",
@@ -449,7 +484,12 @@
     "everybody": "Everybody",
     "onlyGroup": "Only “{{name}}”",
     "export": "Trips {{month}} (CSV)",
-    "exportHint": "Confirmed trips between members, for whoever pays for them."
+    "exportHint": "Confirmed trips between members, for whoever pays for them.",
+    "statsTitle": "This month",
+    "stats_trips": "confirmed trips",
+    "stats_seats": "seats",
+    "stats_drivers": "members driving",
+    "stats_members": "members"
   },
   "tripShare": {
     "button": "Send the trip to someone",
@@ -496,6 +536,28 @@
     "already_aboard": "This passenger already has a seat on this trip.",
     "invalid_name": "That name cannot be used. Write your name in letters, up to 80 characters.",
     "women_only_needs_female": "Women drivers only is a setting for women. Set your gender first.",
-    "rate_limited": "Too many at once. Wait a moment and try again."
+    "rate_limited": "Too many at once. Wait a moment and try again.",
+    "outside_country": "That point is outside Greece. The app only works for journeys within the country."
+  },
+  "shareRequest": {
+    "button": "Send it to a group",
+    "lookingFor_one": "Looking for a seat",
+    "lookingFor_other": "Looking for {{count}} seats",
+    "callToAction": "If you're going, send me a message.",
+    "hint": "Someone you know may drive this road and not have the app yet."
+  },
+  "settings": {
+    "gender": "Gender",
+    "gender_female": "Woman",
+    "gender_male": "Man",
+    "gender_other": "Other",
+    "genderHint": "Optional. Nobody else sees it; it is only needed for women drivers only.",
+    "womenOnlyHint": "You will only be matched with cars a woman is driving.",
+    "womenOnlyNeedsGender": "This is a setting for women. Choose a gender above first.",
+    "language_el": "Ελληνικά",
+    "language_en": "English",
+    "asksPaused": "Pause requests",
+    "asksPausedOff": "Away for a while? Pause here. Your routes stay as they are.",
+    "asksPausedOn": "Nobody will ask you for a seat until you turn this off. Your routes stay as they are."
   }
 }

@@ -425,6 +425,95 @@ func TestDriverCanRateEachPassengerSeparately(t *testing.T) {
 	}
 }
 
+// The trip card says, for whoever is looking, which of the others they can
+// still rate and whether they have confirmed. Without it the app offered a
+// rating to people whose booking was not yet complete, and offered it again
+// after it had been given.
+func TestTripSaysWhoTheCallerCanStillRate(t *testing.T) {
+	h := newHarness(t)
+	driver, passenger, occurrenceID := h.bookedTrip(t)
+	second := h.addSecondPassenger(t, occurrenceID)
+	h.departed()
+	path := "/v1/trips/" + occurrenceID.String()
+	h.do(http.MethodPost, path+"/confirm", nil, driver)
+	h.do(http.MethodPost, path+"/confirm", nil, passenger)
+	// The second passenger has not confirmed, so their booking is not complete.
+
+	type person struct {
+		ID      string `json:"id"`
+		CanRate bool   `json:"can_rate"`
+		Rated   bool   `json:"rated"`
+	}
+	type card struct {
+		ConfirmedByMe bool     `json:"confirmed_by_me"`
+		Driver        person   `json:"driver"`
+		Passengers    []person `json:"passengers"`
+	}
+	get := func(token string) card {
+		t.Helper()
+		rec := h.do(http.MethodGet, path, nil, token)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET trip: status = %d, body %s", rec.Code, rec.Body.String())
+		}
+		var c card
+		h.decode(rec, &c)
+		return c
+	}
+
+	var firstID, secondID uuid.UUID
+	h.mustQuery(`SELECT id FROM users WHERE phone = '+306900000032'`, &firstID)
+	h.mustQuery(`SELECT id FROM users WHERE phone = '+306900000033'`, &secondID)
+	byID := func(c card) map[string]person {
+		out := map[string]person{}
+		for _, p := range c.Passengers {
+			out[p.ID] = p
+		}
+		return out
+	}
+
+	d := get(driver)
+	if !d.ConfirmedByMe {
+		t.Error("driver confirmed, but the card says they have not")
+	}
+	if p := byID(d)[firstID.String()]; !p.CanRate || p.Rated {
+		t.Errorf("completed passenger: %+v, want ratable and not yet rated", p)
+	}
+	if p := byID(d)[secondID.String()]; p.CanRate {
+		t.Errorf("unconfirmed passenger offered for rating: %+v", p)
+	}
+
+	rec := h.do(http.MethodPost, path+"/rate",
+		map[string]any{"stars": 3, "ratee_id": firstID.String()}, driver)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("rating: status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if p := byID(get(driver))[firstID.String()]; p.CanRate || !p.Rated {
+		t.Errorf("after rating: %+v, want rated and no longer ratable", p)
+	}
+
+	if c := get(passenger); !c.ConfirmedByMe || !c.Driver.CanRate {
+		t.Errorf("completed passenger's card: %+v, want confirmed and driver ratable", c)
+	}
+	if c := get(second); c.ConfirmedByMe || c.Driver.CanRate {
+		t.Errorf("unconfirmed passenger's card: %+v, want neither", c)
+	}
+	// A passenger's own rating of the driver is about the driver: it must not
+	// mark any passenger row, their own included, as rated.
+	rec = h.do(http.MethodPost, path+"/rate", map[string]any{"stars": 5}, passenger)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("passenger rating: status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if c := get(passenger); !c.Driver.Rated || c.Driver.CanRate {
+		t.Errorf("after rating the driver: %+v, want driver rated", c.Driver)
+	}
+	// Another passenger is not somebody a passenger rates.
+	for _, p := range get(passenger).Passengers {
+		if p.CanRate || p.Rated {
+			t.Errorf("passenger offered a fellow passenger to rate: %+v", p)
+		}
+	}
+}
+
 // A cursor with a time but no id must not silently skip every message sharing
 // that timestamp.
 func TestChatRejectsAHalfSpecifiedCursor(t *testing.T) {

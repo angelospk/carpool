@@ -119,6 +119,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 			"rating":        p.Rating, "price_eur": p.PriceEUR, "seats": p.Seats,
 			"bio": p.Bio, "preferences": nonNil(p.Preferences),
 			"shared_groups": sharedGroups,
+			"can_rate":      p.CanRate, "rated": p.Rated,
 		})
 	}
 	driverGroups, ok := shared(trip.Driver.UserID)
@@ -140,6 +141,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		"template_id":       trip.TemplateID,
 		"weekday":           trip.Weekday,
 		"booking_id":        trip.BookingID,
+		"confirmed_by_me":   trip.ConfirmedByMe,
 		"driver": map[string]any{
 			"id": trip.Driver.UserID, "name": trip.Driver.Name,
 			"photo_url": avatarURL(trip.Driver.UserID, trip.Driver.PhotoVersion), "rating": trip.Driver.Rating,
@@ -151,6 +153,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 			// Revealed only here, and only to people already on the trip.
 			"car_plate":     trip.Driver.CarPlate,
 			"shared_groups": driverGroups,
+			"can_rate":      trip.Driver.CanRate, "rated": trip.Driver.Rated,
 		},
 		"passengers": passengers,
 	}
@@ -334,6 +337,28 @@ func (d Deps) handleUnblockUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleMyBlocks is the caller's block list, so a block can be undone without
+// having the other person's profile open.
+func (d Deps) handleMyBlocks(w http.ResponseWriter, r *http.Request) {
+	userID, ok := callerID(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
+		return
+	}
+	list, err := store.BlockedBy(r.Context(), d.Pool, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not list blocks")
+		return
+	}
+	out := make([]map[string]any, 0, len(list))
+	for _, b := range list {
+		out = append(out, map[string]any{
+			"id": b.ID, "name": b.Name, "photo_url": avatarURL(b.ID, b.PhotoVersion),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"blocked": out})
 }
 
 func (d Deps) handleReportUser(w http.ResponseWriter, r *http.Request) {

@@ -5,16 +5,16 @@ import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { api, type LuggageSize } from '../../src/api/endpoints';
-import { ApiError } from '../../src/api/client';
 import { refusalText } from '../../src/api/errorText';
 import { Button, Card, Hint, Screen, Stepper, Title } from '../../src/components/ui';
 import { PlaceField } from '../../src/components/PlaceField';
 import { LuggagePicker } from '../../src/components/LuggagePicker';
 import { WhenPicker } from '../../src/components/WhenPicker';
 import { Estimate } from '../../src/components/Estimate';
+import { Supply } from '../../src/components/Supply';
 import { colors, space, type } from '../../src/design/tokens';
 import { pinsFromParams, type Pin } from '../../src/design/pin';
-import { departureWindow, type Band, type Day } from '../../src/design/when';
+import { athensDate, departureWindow, nextDate, type Band, type Day } from '../../src/design/when';
 
 export default function SearchScreen() {
   const { t } = useTranslation();
@@ -82,10 +82,7 @@ export default function SearchScreen() {
       router.push(`/request/${res.request_id}`);
     },
     onError: (e) =>
-      setOutcome(
-        refusalText(e) ??
-          (e instanceof ApiError && e.code === 'outside_region' ? e.message : t('common.error')),
-      ),
+      setOutcome(refusalText(e) ?? t('common.error')),
   });
 
   return (
@@ -128,6 +125,12 @@ export default function SearchScreen() {
               setDay(next.day);
               setBand(next.band);
             }}
+          />
+
+          <Supply
+            from={from}
+            to={to}
+            date={day === 'today' ? athensDate(new Date()) : nextDate(athensDate(new Date()))}
           />
 
           <LuggagePicker

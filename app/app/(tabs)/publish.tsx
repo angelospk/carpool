@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useFocusEffect } from 'expo-router';
 import { useMutation, useQuery } from '@tanstack/react-query';
 
 import {
@@ -33,6 +34,8 @@ import { MeetingPointField } from '../../src/components/MeetingPointField';
 import { ShareRouteButton } from '../../src/components/ShareRouteButton';
 import { Demand } from '../../src/components/Demand';
 import type { ShareableRoute } from '../../src/design/shareRoute';
+import { athensDate, nextDate } from '../../src/design/when';
+import { calendarDay } from '../../src/design/format';
 
 // The three answers that cover almost every published route. They replace the
 // set rather than adding to it: "καθημερινές" is a whole schedule, not five
@@ -61,6 +64,25 @@ export default function PublishScreen() {
   const [from, setFrom] = useState<Pin | null>(null);
   const [to, setTo] = useState<Pin | null>(null);
   const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]);
+  // A trip that happens once — Saturday to Θεσσαλονίκη — rather than a commute.
+  // The date defaults to tomorrow, the likeliest answer when somebody opens
+  // this to offer a single journey.
+  const [kind, setKind] = useState<'recurring' | 'oneoff'>('recurring');
+  // The tab stays mounted, possibly overnight, so "today" is read again every
+  // time the screen comes back into view rather than once when it was built.
+  const [today, setToday] = useState(() => athensDate(new Date()));
+  useFocusEffect(
+    useCallback(() => {
+      setToday(athensDate(new Date()));
+    }, []),
+  );
+  const dates = useMemo(() => nextDates(today, ONEOFF_DAYS), [today]);
+  const [oneoffDate, setOneoffDate] = useState(dates[1]);
+  // A choice that is still on offer stays; one that the day has passed moves to
+  // the first day there is, rather than going out and being refused as past.
+  useEffect(() => {
+    if (!dates.includes(oneoffDate)) setOneoffDate(dates[0]);
+  }, [dates, oneoffDate]);
   const [earliest, setEarliest] = useState('07:30');
   const [latest, setLatest] = useState('08:00');
   const [seats, setSeats] = useState(3);
@@ -115,8 +137,10 @@ export default function PublishScreen() {
         origin_label: snap.origin_label,
         destination_label: snap.destination_label,
         seats: snap.seats,
-        kind: 'recurring',
-        weekdays: snap.weekdays,
+        kind: snap.kind === 'oneoff' ? 'oneoff' : 'recurring',
+        ...(snap.kind === 'oneoff'
+          ? { oneoff_date: snap.oneoff_date }
+          : { weekdays: snap.weekdays }),
         depart_earliest: snap.depart_earliest,
         depart_latest: latest,
         ...(allowStops !== null ? { allow_stops: allowStops } : {}),
@@ -226,30 +250,67 @@ export default function PublishScreen() {
             for. */}
         <SectionHeader title={t('publish.schedule')} />
         <Card>
-          <Text style={styles.label}>{t('publish.recurring')}</Text>
-          <View style={[styles.days, styles.wrap]}>
-            {PRESETS.map((p) => (
-              <Chip
-                fit
-                key={p.key}
-                testID={`preset-${p.key}`}
-                label={t(`publish.${p.key}`)}
-                selected={sameDays(weekdays, p.days)}
-                onPress={() => setWeekdays([...p.days])}
-              />
-            ))}
-          </View>
           <View style={styles.days}>
-            {WEEKDAYS.map((d) => (
-              <Chip
-                key={d.iso}
-                testID={`weekday-${d.iso}`}
-                label={d.label}
-                selected={weekdays.includes(d.iso)}
-                onPress={() => toggle(d.iso)}
-              />
-            ))}
+            <Chip
+              testID="schedule-recurring"
+              label={t('publish.everyWeek')}
+              selected={kind === 'recurring'}
+              onPress={() => setKind('recurring')}
+            />
+            <Chip
+              testID="schedule-oneoff"
+              label={t('publish.once')}
+              selected={kind === 'oneoff'}
+              onPress={() => setKind('oneoff')}
+            />
           </View>
+
+          {kind === 'oneoff' ? (
+            <>
+              <Text style={styles.label}>{t('publish.onDate')}</Text>
+              <View style={[styles.days, styles.wrap]}>
+                {dates.map((d, i) => (
+                  <Chip
+                    fit
+                    key={d}
+                    testID={`oneoff-date-${i}`}
+                    label={
+                      i === 0 ? t('publish.today') : i === 1 ? t('publish.tomorrow') : calendarDay(d)
+                    }
+                    selected={oneoffDate === d}
+                    onPress={() => setOneoffDate(d)}
+                  />
+                ))}
+              </View>
+            </>
+          ) : (
+            <>
+            <Text style={styles.label}>{t('publish.recurring')}</Text>
+            <View style={[styles.days, styles.wrap]}>
+              {PRESETS.map((p) => (
+                <Chip
+                  fit
+                  key={p.key}
+                  testID={`preset-${p.key}`}
+                  label={t(`publish.${p.key}`)}
+                  selected={sameDays(weekdays, p.days)}
+                  onPress={() => setWeekdays([...p.days])}
+                />
+              ))}
+            </View>
+            <View style={styles.days}>
+              {WEEKDAYS.map((d) => (
+                <Chip
+                  key={d.iso}
+                  testID={`weekday-${d.iso}`}
+                  label={d.label}
+                  selected={weekdays.includes(d.iso)}
+                  onPress={() => toggle(d.iso)}
+                />
+              ))}
+            </View>
+            </>
+          )}
 
           <Text style={styles.label}>{t('publish.departWindow')}</Text>
           <View style={styles.times}>
@@ -429,8 +490,8 @@ export default function PublishScreen() {
             publish.mutate({
               origin_label: label(from as Pin, fromPoint),
               destination_label: label(to as Pin, toPoint),
-              kind: 'recurring',
-              weekdays: [...weekdays],
+              kind,
+              ...(kind === 'oneoff' ? { oneoff_date: oneoffDate } : { weekdays: [...weekdays] }),
               depart_earliest: earliest,
               seats,
             })
@@ -440,7 +501,7 @@ export default function PublishScreen() {
           // route would go out to everybody without the driver having seen
           // the question.
           disabled={
-            !from || !to || !weekdays.length || noCar || noBootLeft || publish.isPending || !myGroups.isSuccess
+            !from || !to || (kind === 'recurring' && !weekdays.length) || noCar || noBootLeft || publish.isPending || !myGroups.isSuccess
           }
         />
       </ScrollView>
@@ -466,6 +527,18 @@ const styles = StyleSheet.create({
 // this trip. Until then nothing is shown and nothing is sent, so this is never
 // mistaken for what their profile holds.
 const defaultDetourKm = 10;
+
+// Two weeks of dates for a one-off. The server takes up to three, but a
+// fortnight of chips is already a long row, and a trip further out than that
+// is rarely settled enough to offer.
+const ONEOFF_DAYS = 14;
+
+/** `n` Athens calendar dates, starting with `today`. */
+function nextDates(today: string, n: number): string[] {
+  const out = [today];
+  while (out.length < n) out.push(nextDate(out[out.length - 1]));
+  return out;
+}
 
 // Whether the days chosen are exactly a preset's, so the preset can read as
 // selected. Order is not part of the answer: the day chips keep the list

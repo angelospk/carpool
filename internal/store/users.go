@@ -191,12 +191,28 @@ type UserUpdate struct {
 	// non-nil slice is the whole new set, because "untick the one I ticked by
 	// mistake" has to be expressible and a merge cannot express it.
 	Preferences *[]string
+	// AsksPaused stops the matcher asking this driver without retiring a
+	// route. Somebody with no car has nothing to pause: ErrNotADriver.
+	AsksPaused *bool
 }
 
+// ErrNotADriver refuses a driver-only setting for somebody with no car.
+var ErrNotADriver = errors.New("store: not a driver")
+
 // UpdateUser applies a partial profile update and returns the new state.
+//
+// Everything asked for is written in one transaction, so a refusal of any part
+// leaves every field as it was: unpausing asks alongside a profile change that
+// is then rejected must not unpause them anyway.
 func UpdateUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, up UserUpdate) (User, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return User{}, fmt.Errorf("store: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var u User
-	err := pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		UPDATE users SET
 			name             = COALESCE($2, name),
 			gender           = COALESCE($3, gender),
@@ -227,9 +243,23 @@ func UpdateUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, up UserUp
 	// Replaced wholesale rather than merged, in one statement pair, so that a
 	// half-applied set is not a state anybody can observe.
 	if up.Preferences != nil {
-		if err := replacePreferences(ctx, pool, id, *up.Preferences); err != nil {
+		if err := replacePreferences(ctx, tx, id, *up.Preferences); err != nil {
 			return User{}, err
 		}
+	}
+	if up.AsksPaused != nil {
+		tag, err := tx.Exec(ctx,
+			`UPDATE driver_profiles SET notifications_muted = $2, updated_at = now() WHERE user_id = $1`,
+			id, *up.AsksPaused)
+		if err != nil {
+			return User{}, fmt.Errorf("store: pausing asks: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return User{}, ErrNotADriver
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return User{}, fmt.Errorf("store: commit: %w", err)
 	}
 	if u.Preferences, err = preferencesOf(ctx, pool, id); err != nil {
 		return User{}, err
@@ -237,13 +267,9 @@ func UpdateUser(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, up UserUp
 	return u, nil
 }
 
-func replacePreferences(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, tags []string) error {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("store: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
+// replacePreferences runs inside the caller's transaction, so the new set and
+// the rest of the profile land together or not at all.
+func replacePreferences(ctx context.Context, tx pgx.Tx, id uuid.UUID, tags []string) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM user_preferences WHERE user_id = $1`, id); err != nil {
 		return fmt.Errorf("store: clearing preferences: %w", err)
 	}
@@ -252,10 +278,6 @@ func replacePreferences(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, t
 			`INSERT INTO user_preferences (user_id, tag) VALUES ($1, $2)`, id, tag); err != nil {
 			return fmt.Errorf("store: saving preference %q: %w", tag, err)
 		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("store: commit: %w", err)
 	}
 	return nil
 }

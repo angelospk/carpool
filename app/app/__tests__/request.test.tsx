@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import RequestScreen from '../request/[id]';
 import { ApiError } from '../../src/api/client';
 import { api } from '../../src/api/endpoints';
+import { shareText } from '../../src/components/shareText';
 
 const mockReplace = jest.fn();
 
@@ -15,6 +16,10 @@ jest.mock('expo-router', () => ({
 
 jest.mock('../../src/api/endpoints', () => ({
   api: { cancelRequest: jest.fn(), myRequests: jest.fn(), requestAlternatives: jest.fn() },
+}));
+
+jest.mock('../../src/components/shareText', () => ({
+  shareText: jest.fn(async () => 'shared'),
 }));
 
 jest.mock('../../src/state/session', () => ({
@@ -115,6 +120,8 @@ test('a driver taking the ride keeps them on the screen and says so', async () =
 
   await waitFor(() => expect(screen.getByTestId('request-outcome')).toBeTruthy());
   expect(mockReplace).not.toHaveBeenCalled();
+  // "Looking for a seat" is no longer true, so it is no longer offered.
+  expect(screen.queryByTestId('request-share')).toBeNull();
 });
 
 test('a failure to cancel is not read as a cancellation', async () => {
@@ -189,4 +196,24 @@ test('alternatives that fail to load say so and can be retried', async () => {
   render(wrap(<RequestScreen />));
   await waitFor(() => expect(screen.getByTestId('request-alternatives-failed')).toBeTruthy());
   expect(screen.getByTestId('request-alternatives-retry')).toBeTruthy();
+});
+
+// The driver's side has always had a sentence to paste into the village group.
+// The passenger, who is the larger side, had nothing to send.
+test('a request can be sent to a group as a sentence', async () => {
+  (api.myRequests as jest.Mock).mockResolvedValue({ requests: [asking] });
+
+  render(wrap(<RequestScreen />));
+  fireEvent.press(await screen.findByTestId('request-share'));
+
+  await waitFor(() => expect(shareText).toHaveBeenCalled());
+  const [message] = (shareText as jest.Mock).mock.calls[0];
+  expect(message).toMatch(/^Ψάχνω θέση · Αλεξανδρούπολη → Κομοτηνή · /);
+});
+
+test('there is nothing to share for a request that is no longer open', async () => {
+  render(wrap(<RequestScreen />));
+
+  await screen.findByTestId('request-closed');
+  expect(screen.queryByTestId('request-share')).toBeNull();
 });

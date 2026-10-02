@@ -7,6 +7,7 @@ import { api, type TripSummary } from '../../src/api/endpoints';
 import { PastTrips } from '../../src/components/PastTrips';
 import { OpenRequests, useOpenRequests } from '../../src/components/OpenRequests';
 import { Suggestions } from '../../src/components/Suggestions';
+import { PendingAsks } from '../../src/components/PendingAsks';
 import { useSession } from '../../src/state/session';
 import {
   AsyncState,
@@ -110,6 +111,10 @@ export default function HomeScreen() {
         onAsk={() => router.push('/search')}
         onOffer={() => router.push('/publish')}
       />
+
+      {/* A question waiting on this driver comes before anything else here:
+          it lapses, and everything below it will still be there later. */}
+      <PendingAsks />
 
       <AsyncState
         loading={trips.isLoading}

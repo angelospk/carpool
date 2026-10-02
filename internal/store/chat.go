@@ -112,6 +112,37 @@ func UnblockUser(ctx context.Context, pool *pgxpool.Pool, blockerID, blockedID u
 	return nil
 }
 
+// BlockedUser is somebody the caller blocked, as their block list shows them.
+type BlockedUser struct {
+	ID           uuid.UUID
+	Name         string
+	PhotoVersion *string
+}
+
+// BlockedBy lists the people this user has blocked, most recent first. Only
+// that direction: who has blocked you is not yours to know.
+func BlockedBy(ctx context.Context, pool *pgxpool.Pool, blockerID uuid.UUID) ([]BlockedUser, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT u.id, u.name,
+		       (SELECT encode(substring(sha256 from 1 for 6), 'hex') FROM profile_photos WHERE user_id = u.id)
+		FROM blocks b JOIN users u ON u.id = b.blocked_id
+		WHERE b.blocker_id = $1
+		ORDER BY b.created_at DESC`, blockerID)
+	if err != nil {
+		return nil, fmt.Errorf("store: listing blocks: %w", err)
+	}
+	defer rows.Close()
+	out := []BlockedUser{}
+	for rows.Next() {
+		var b BlockedUser
+		if err := rows.Scan(&b.ID, &b.Name, &b.PhotoVersion); err != nil {
+			return nil, fmt.Errorf("store: scanning block: %w", err)
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 // ReportUser files a report. Reports are append-only: they are an audit record,
 // so nothing here updates or removes an earlier one.
 func ReportUser(ctx context.Context, pool *pgxpool.Pool, reporterID, reportedID uuid.UUID, reason string) error {

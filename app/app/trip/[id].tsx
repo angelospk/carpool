@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
-import { FlatList, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useEffect, useState, type ReactNode } from 'react';
+import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { api, type Message } from '../../src/api/endpoints';
+import { api, type Message, type TripDetail } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import { useSession } from '../../src/state/session';
 import {
@@ -20,6 +20,7 @@ import {
 } from '../../src/components/ui';
 import { RouteGlyph, decodeRoute } from '../../src/components/RouteGlyph';
 import { RepeatCard } from '../../src/components/RepeatCard';
+import { RatingRow } from '../../src/components/RatingRow';
 import { SocialLinks } from '../../src/components/SocialLink';
 import { PortNotice } from '../../src/components/PortNotice';
 import { PriceBreakdown } from '../../src/components/PriceBreakdown';
@@ -39,11 +40,19 @@ export default function TripScreen() {
   const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const me = useSession((s) => s.me);
   const [draft, setDraft] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
 
-  const trip = useQuery({ queryKey: ['trips', id], queryFn: () => api.trip(id) });
+  const trip = useQuery({
+    queryKey: ['trips', id],
+    queryFn: () => api.trip(id),
+    // After the trip, what can be done here waits on the other side: rating
+    // opens once they confirm too. Polled until nothing is left to wait for,
+    // so it appears without leaving and coming back.
+    refetchInterval: (q) => (awaitingOthers(q.state.data) ? 30_000 : false),
+  });
   const messages = useQuery({
     queryKey: ['trips', id, 'messages'],
     queryFn: () => api.messages(id),
@@ -52,13 +61,23 @@ export default function TripScreen() {
     refetchInterval: 10_000,
   });
 
+  // A message that did not go says so, and stays in the box so sending it
+  // again is one tap. It used to vanish without a word.
+  const [sendFailed, setSendFailed] = useState(false);
   const send = useMutation({
     mutationFn: (body: string) => api.postMessage(id, body),
     onSuccess: () => {
       setDraft('');
+      setSendFailed(false);
       void queryClient.invalidateQueries({ queryKey: ['trips', id, 'messages'] });
     },
+    onError: () => setSendFailed(true),
   });
+  const sendFailedLine = sendFailed ? (
+    <Text testID="message-failed" style={styles.sendFailed}>
+      {t('trip.sendFailed')}
+    </Text>
+  ) : null;
 
   const confirm = useMutation({
     mutationFn: () => api.confirmTrip(id),
@@ -71,23 +90,47 @@ export default function TripScreen() {
       ),
   });
 
-  // The trip has set off when its earliest departure is behind us. Compared
-  // against the device clock, which is the only one the screen has; the server
-  // decides for real and answers not_departed if this is optimistic.
+  // Where the trip stands, by the device clock, which is the only one the
+  // screen has; the server decides for real and answers if this is optimistic.
+  //
+  // Two edges, because the server uses two. Cancelling stops at the near end of
+  // the departure window: from then on the car may be at the kerb. Confirming
+  // starts at the far end: a trip that may leave any time until 07:30 has not
+  // happened at 07:01. Between them there is nothing to do but go.
   //
   // Re-evaluated on a timer as well as on render, because somebody sitting on
-  // this screen at 07:29 waiting to set off would otherwise still be offered
-  // cancel at 07:31 and no way to confirm.
+  // this screen at 07:29 would otherwise still be offered cancel at 07:31.
   const [now, setNow] = useState(() => Date.now());
-  const departAt = trip.data ? new Date(trip.data.depart_earliest).getTime() : null;
+  const earliestAt = trip.data ? new Date(trip.data.depart_earliest).getTime() : null;
+  const latestAt = trip.data ? new Date(trip.data.depart_latest).getTime() : null;
+  const nextEdge = [earliestAt, latestAt].find((at) => at !== null && at > now) ?? null;
   useEffect(() => {
-    if (departAt === null || departAt <= now) return;
-    const timer = setTimeout(() => setNow(Date.now()), departAt - now + 1000);
+    if (nextEdge === null) return;
+    const timer = setTimeout(() => setNow(Date.now()), nextEdge - now + 1000);
     return () => clearTimeout(timer);
-  }, [departAt, now]);
-  const departed = departAt !== null && departAt <= now;
-  const hasCompany =
-    trip.data?.role === 'driver' ? (trip.data.passengers.length ?? 0) > 0 : true;
+  }, [nextEdge, now]);
+  const phase: 'cancelled' | 'before' | 'underway' | 'after' =
+    trip.data?.status === 'cancelled'
+      ? 'cancelled'
+      : earliestAt !== null && now < earliestAt
+        ? 'before'
+        : latestAt !== null && now < latestAt
+          ? 'underway'
+          : 'after';
+
+  // Who the caller can still rate: the driver rates each passenger, a
+  // passenger rates the driver. The server says who, per booking, because a
+  // booking is only ratable once both sides have confirmed it.
+  const toRate = trip.data
+    ? trip.data.role === 'driver'
+      ? trip.data.passengers.filter((p) => p.can_rate || p.rated)
+      : [trip.data.driver].filter((p) => p.can_rate || p.rated)
+    : [];
+
+  // Somebody on the trip, pressable through to where they can be blocked or
+  // reported. Never yourself.
+  const openPerson = (p: { id: string; name: string }) =>
+    router.push({ pathname: '/user/[id]', params: { id: p.id, name: p.name } });
 
   const cancel = useMutation({
     mutationFn: () => api.cancelTrip(id),
@@ -104,11 +147,29 @@ export default function TripScreen() {
       ),
   });
 
-  const rate = useMutation({
-    mutationFn: (stars: number) =>
-      api.rateTrip(id, stars, trip.data?.role === 'driver' ? trip.data.passengers[0]?.id : undefined),
-    onSuccess: () => setNotice(t('trip.rated')),
-    onError: () => setNotice(t('common.error')),
+  // A passenger giving back their seat. The server releases it and tells the
+  // driver; the trip is then no longer theirs, and asking for it again is a
+  // 404, so the screen leaves and forgets what it held.
+  const leave = useMutation({
+    mutationFn: (bookingId: string) => api.cancelBooking(bookingId),
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: ['trips', id] });
+      void queryClient.invalidateQueries({ queryKey: ['trips'] });
+      void queryClient.invalidateQueries({ queryKey: ['requests'] });
+      // Opened from a notification there is no screen behind this one.
+      if (router.canGoBack()) router.back();
+      else router.replace('/(tabs)');
+    },
+    onError: (e) => {
+      setNotice(
+        e instanceof ApiError && e.code === 'departed'
+          ? t('trip.notCancellable')
+          : e instanceof ApiError && (e.code === 'not_yours' || e.code === 'not_found')
+            ? t('trip.leaveGone')
+            : t('common.error'),
+      );
+      void trip.refetch();
+    },
   });
 
   const wide = useBreakpoint() === 'wide';
@@ -129,6 +190,8 @@ export default function TripScreen() {
               );
             };
   const composerView = (
+      <>
+      {sendFailedLine}
       <View style={styles.composer}>
       <TextInput
         testID="message-input"
@@ -145,6 +208,7 @@ export default function TripScreen() {
         disabled={!draft.trim() || send.isPending}
       />
     </View>
+      </>
   );
 
   const details = trip.data ? (
@@ -163,12 +227,15 @@ export default function TripScreen() {
                     <View style={styles.heroSide}>
                       <Text style={styles.time}>{athensTime(trip.data.depart_earliest)}</Text>
                       <Text style={styles.date}>{athensDay(trip.data.depart_earliest)}</Text>
-                      <Badge
-                        label={
-                          trip.data.role === 'driver' ? t('home.asDriver') : t('home.asPassenger')
-                        }
-                        tone={trip.data.role === 'driver' ? 'primary' : 'quiet'}
-                      />
+                      <View style={styles.badges}>
+                        <Badge
+                          label={
+                            trip.data.role === 'driver' ? t('home.asDriver') : t('home.asPassenger')
+                          }
+                          tone={trip.data.role === 'driver' ? 'primary' : 'quiet'}
+                        />
+                        <TripStatus phase={phase} confirmed={!!trip.data.confirmed_by_me} />
+                      </View>
                     </View>
                   </View>
 
@@ -208,6 +275,12 @@ export default function TripScreen() {
                 </Card>
 
                 <Card>
+                  <PersonLink
+                    testID={`person-${trip.data.driver.id}`}
+                    self={trip.data.driver.id === me?.id}
+                    label={t('trip.openProfile', { name: trip.data.driver.name })}
+                    onPress={() => openPerson(trip.data.driver)}
+                  >
                   <View style={styles.person}>
                     <Avatar
                       name={trip.data.driver.name}
@@ -223,10 +296,6 @@ export default function TripScreen() {
                         {trip.data.driver.car_model}
                         {trip.data.driver.car_color ? ` · ${trip.data.driver.car_color}` : ''}
                       </Text>
-                      <SocialLinks
-                        facebook={trip.data.driver.facebook_url}
-                        instagram={trip.data.driver.instagram_url}
-                      />
                       <SharedGroups testID="driver-shared-groups" names={trip.data.driver.shared_groups} />
                     </View>
                     {/* The plate only exists in this payload once a booking is made. */}
@@ -236,6 +305,13 @@ export default function TripScreen() {
                       </View>
                     ) : null}
                   </View>
+                  </PersonLink>
+                  {/* Outside the pressable card, so tapping a link opens the
+                      link rather than the profile. */}
+                  <SocialLinks
+                    facebook={trip.data.driver.facebook_url}
+                    instagram={trip.data.driver.instagram_url}
+                  />
 
                   {/* What the two hours will be like, which the photo and the
                       rating do not say. */}
@@ -252,7 +328,14 @@ export default function TripScreen() {
                 {trip.data.role === 'driver' && trip.data.passengers.length > 0 ? (
                   <Card>
                     {trip.data.passengers.map((p) => (
-                      <View key={p.id} testID={`passenger-${p.id}`} style={styles.person}>
+                      <PersonLink
+                        key={p.id}
+                        testID={`person-${p.id}`}
+                        self={p.id === me?.id}
+                        label={t('trip.openProfile', { name: p.name })}
+                        onPress={() => openPerson(p)}
+                      >
+                      <View testID={`passenger-${p.id}`} style={styles.person}>
                         <Avatar name={p.name} photoUrl={p.photo_url} size={40} />
                         <View style={styles.personText}>
                           <Text style={styles.personName}>
@@ -262,12 +345,13 @@ export default function TripScreen() {
                           <SharedGroups names={p.shared_groups} />
                         </View>
                       </View>
+                      </PersonLink>
                     ))}
                   </Card>
                 ) : null}
 
                 {/* Only for a trip that is still going to happen. */}
-                {trip.data.status !== 'cancelled' ? <LiveCard tripId={id} /> : null}
+                {phase !== 'cancelled' ? <LiveCard tripId={id} /> : null}
 
                 {/* The oldest safety feature there is: tell somebody who you
                     are with. A sentence for the share sheet, nothing stored. */}
@@ -292,35 +376,35 @@ export default function TripScreen() {
 
                 {/* Which questions belong here depends on when it is and who
                     is asking. Before the trip has set off, whether it happened
-                    is not a question anybody can answer, and a driver with an
-                    empty car has nothing to rate; what they need is a way to
-                    call it off. Asking all four things at all times is how a
-                    driver ended up being asked to rate a trip nobody had taken
-                    yet. */}
-                {departed ? (
-                  <View style={styles.actions}>
-                    <View style={styles.action}>
-                      <Button
-                        testID="trip-confirm"
-                        label={t('trip.confirm')}
-                        onPress={() => confirm.mutate()}
-                        disabled={confirm.isPending}
+                    is not a question anybody can answer; what the people on it
+                    need is a way out. After it, the question is whether it
+                    happened, and then how it was. A cancelled trip asks
+                    nothing at all. */}
+                {phase === 'after' && !trip.data.confirmed_by_me ? (
+                  <Button
+                    testID="trip-confirm"
+                    label={t('trip.confirm')}
+                    onPress={() => confirm.mutate()}
+                    disabled={confirm.isPending}
+                  />
+                ) : null}
+
+                {phase === 'after' && toRate.length > 0 ? (
+                  <Card>
+                    <Text style={styles.cardLabel}>{t('trip.rate')}</Text>
+                    {toRate.map((p) => (
+                      <RatingRow
+                        key={p.id}
+                        tripId={id}
+                        person={p}
+                        rated={!!p.rated}
+                        onRated={() => void queryClient.invalidateQueries({ queryKey: ['trips', id] })}
                       />
-                    </View>
-                    {/* Nobody to rate in an empty car. */}
-                    {hasCompany ? (
-                      <View style={styles.action}>
-                        <Button
-                          testID="trip-rate"
-                          label={`${t('trip.rate')} ★`}
-                          variant="secondary"
-                          onPress={() => rate.mutate(5)}
-                          disabled={rate.isPending}
-                        />
-                      </View>
-                    ) : null}
-                  </View>
-                ) : trip.data.role === 'driver' ? (
+                    ))}
+                  </Card>
+                ) : null}
+
+                {phase === 'before' && trip.data.role === 'driver' ? (
                   <Button
                     testID="trip-cancel"
                     label={t('trip.cancel')}
@@ -339,6 +423,27 @@ export default function TripScreen() {
                         onConfirm: () => cancel.mutate(),
                       })
                     }
+                  />
+                ) : null}
+
+                {phase === 'before' && trip.data.role === 'passenger' && trip.data.booking_id ? (
+                  <Button
+                    testID="trip-leave"
+                    label={t('trip.leave')}
+                    variant="danger"
+                    disabled={leave.isPending}
+                    onPress={() => {
+                      const bookingId = trip.data.booking_id;
+                      if (!bookingId) return;
+                      askFirst({
+                        title: t('trip.leave'),
+                        message: t('trip.leaveConfirm', { name: trip.data.driver.name }),
+                        confirmLabel: t('trip.leave'),
+                        cancelLabel: t('common.cancel'),
+                        destructive: true,
+                        onConfirm: () => leave.mutate(bookingId),
+                      });
+                    }}
                   />
                 ) : null}
 
@@ -401,6 +506,7 @@ export default function TripScreen() {
         ) : null}
       </AsyncState>
 
+      {sendFailedLine}
       <View style={styles.composer}>
         <TextInput
           testID="message-input"
@@ -458,8 +564,9 @@ const styles = StyleSheet.create({
   plateText: { ...type.mono, color: colors.ink },
 
   notice: { ...type.body, color: colors.danger },
-  actions: { flexDirection: 'row', gap: space.sm },
-  action: { flex: 1 },
+  sendFailed: { ...type.caption, color: colors.danger, marginBottom: space.xs },
+  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
+  cardLabel: { ...type.label, color: colors.muted },
   chatLabel: { ...type.label, color: colors.muted, marginTop: space.sm },
 
   bubbleRow: { alignItems: 'flex-start' },
@@ -500,6 +607,68 @@ const styles = StyleSheet.create({
     paddingVertical: space.md,
   },
 });
+
+// A finished trip where the caller has confirmed but somebody they could rate
+// has not: the one state in which this screen changes because of someone else.
+function awaitingOthers(trip: TripDetail | undefined): boolean {
+  if (!trip || trip.status === 'cancelled' || !trip.confirmed_by_me) return false;
+  if (Date.now() < new Date(trip.depart_latest).getTime()) return false;
+  const others = trip.role === 'driver' ? trip.passengers : [trip.driver];
+  return others.some((p) => !p.can_rate && !p.rated);
+}
+
+// Where the trip stands, said once, in the hero. A cancelled trip used to look
+// exactly like a live one.
+function TripStatus({
+  phase,
+  confirmed,
+}: {
+  phase: 'cancelled' | 'before' | 'underway' | 'after';
+  confirmed: boolean;
+}) {
+  const { t } = useTranslation();
+  const [label, tone] =
+    phase === 'cancelled'
+      ? [t('trip.statusCancelled'), 'danger' as const]
+      : phase === 'before'
+        ? [t('trip.statusScheduled'), 'quiet' as const]
+        : phase === 'underway'
+          ? [t('trip.statusUnderway'), 'accent' as const]
+          : confirmed
+            ? [t('trip.statusConfirmed'), 'success' as const]
+            : [t('trip.statusToConfirm'), 'accent' as const];
+  return <Badge testID="trip-status" label={label} tone={tone} />;
+}
+
+// Somebody on the trip, as a card row that opens their profile, where they can
+// be blocked or reported. Your own row is not a link: there is nothing there
+// for you to do to yourself.
+function PersonLink({
+  self,
+  label,
+  onPress,
+  testID,
+  children,
+}: {
+  self: boolean;
+  label: string;
+  onPress: () => void;
+  testID: string;
+  children: ReactNode;
+}) {
+  if (self) return <>{children}</>;
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => (pressed ? { opacity: 0.7 } : undefined)}
+    >
+      {children}
+    </Pressable>
+  );
+}
 
 // Where to point the map: the first coordinate of the route as it was snapped.
 // The two endpoint labels are names, not positions, and the polyline is the

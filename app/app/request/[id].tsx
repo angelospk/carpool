@@ -16,7 +16,10 @@ import {
   Title,
 } from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
-import { athensDay, athensTime } from '../../src/design/format';
+import { athensTime } from '../../src/design/format';
+import { JourneySummary } from '../../src/components/JourneySummary';
+import { shareText } from '../../src/components/shareText';
+import { shareRequestMessage } from '../../src/design/shareRequest';
 
 export default function RequestScreen() {
   const { t } = useTranslation();
@@ -100,13 +103,13 @@ export default function RequestScreen() {
           <Hint testID="request-failed">{t('home.requestsFailed')}</Hint>
         ) : mine ? (
           <>
-            <Text testID="request-route" style={styles.route}>
-              {mine.origin_label} → {mine.destination_label}
-            </Text>
-            <Text style={styles.when}>
-              {athensDay(mine.window_start)} · {athensTime(mine.window_start)}–
-              {athensTime(mine.window_end)}
-            </Text>
+            <JourneySummary
+              routeTestID="request-route"
+              from={mine.origin_label}
+              to={mine.destination_label}
+              start={mine.window_start}
+              end={mine.window_end}
+            />
             <View style={styles.status}>
               {/* Asking is sequential and one driver at a time, so waiting is
                   the normal state here rather than a failure. */}
@@ -168,6 +171,25 @@ export default function RequestScreen() {
         </Card>
       ) : null}
 
+      {/* The passenger's half of the village group. Somebody who drives this
+          road may not have the app yet, and the chat the sentence lands in is
+          where they would answer. */}
+      {mine && !matched ? (
+        <Card>
+          <Hint>{t('shareRequest.hint')}</Hint>
+          <Button
+            testID="request-share"
+            label={t('shareRequest.button')}
+            variant="secondary"
+            onPress={() =>
+              void shareText(shareRequestMessage(mine, t))
+                .then((how) => how === 'copied' && setOutcome(t('share.copied')))
+                .catch(() => setOutcome(t('common.error')))
+            }
+          />
+        </Card>
+      ) : null}
+
       {/* Nobody should sit here watching. Saying so is the difference between a
           waiting room and a thing you can walk away from. */}
       <Hint>{t('request.leaveOk')}</Hint>
@@ -220,10 +242,6 @@ const KTEL_URL = 'https://ktelevrou.gr/';
 const styles = StyleSheet.create({
   strandedTitle: { ...type.body, color: colors.ink, fontWeight: '700' },
   alternative: { ...type.body, color: colors.ink },
-  // Place names wrap rather than truncate: "Αλεξανδρούπολη → Πεπλος" cut at
-  // one line is a journey nobody can check.
-  route: { ...type.title, color: colors.ink },
-  when: { ...type.body, color: colors.muted, marginTop: 2 },
   status: { flexDirection: 'row', alignItems: 'center', gap: space.xs, marginTop: space.md },
   core: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },
   progress: { ...type.caption, color: colors.accent, fontWeight: '700', flex: 1 },

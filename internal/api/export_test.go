@@ -124,3 +124,36 @@ func TestANameThatIsAFormulaArrivesAsText(t *testing.T) {
 		t.Fatalf("passenger cell = %q, want it defused with a leading apostrophe", got)
 	}
 }
+
+type groupStats struct {
+	Members int `json:"members"`
+	Drivers int `json:"drivers"`
+	Trips   int `json:"trips"`
+	Seats   int `json:"seats"`
+}
+
+// The pitch to an organisation is "here is what your people did", and the only
+// way to see it was to download a spreadsheet. The same trips the export would
+// list, counted, for the same admin, this month.
+func TestAnAdminSeesTheMonthCounted(t *testing.T) {
+	w := newExportWorld(t)
+
+	rec := w.h.do(http.MethodGet, "/v1/groups/"+w.group.ID+"/stats", nil, w.driver)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stats: %d %s", rec.Code, rec.Body.String())
+	}
+	var s groupStats
+	w.h.decode(rec, &s)
+	// Two members; one of them drives a route; one verified trip between
+	// members, not the seat beside it taken by an outsider.
+	if s.Members != 2 || s.Drivers != 1 || s.Trips != 1 || s.Seats != 1 {
+		t.Errorf("stats = %+v, want 2 members, 1 driver, 1 trip, 1 seat", s)
+	}
+
+	if rec := w.h.do(http.MethodGet, "/v1/groups/"+w.group.ID+"/stats", nil, w.passenger); rec.Code != http.StatusForbidden {
+		t.Errorf("a member: %d, want 403", rec.Code)
+	}
+	if rec := w.h.do(http.MethodGet, "/v1/groups/"+w.group.ID+"/stats", nil, w.outsider); rec.Code != http.StatusNotFound {
+		t.Errorf("an outsider: %d, want 404", rec.Code)
+	}
+}

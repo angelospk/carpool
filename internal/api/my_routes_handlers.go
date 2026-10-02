@@ -31,6 +31,9 @@ type myRoute struct {
 	// UpcomingTrips is what makes retiring an informed decision rather than a
 	// guess: it says how many materialised departures are still ahead.
 	UpcomingTrips int `json:"upcoming_trips"`
+	// LinkOpens is how many times a person opened the route's link: whether
+	// sharing it reached anybody.
+	LinkOpens int `json:"link_opens"`
 }
 
 func (d Deps) handleMyRoutes(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +54,8 @@ func (d Deps) handleMyRoutes(w http.ResponseWriter, r *http.Request) {
 		       (SELECT count(*) FROM trip_occurrences o
 		         WHERE o.template_id = rt.id
 		           AND o.depart_earliest > now()
-		           AND o.status <> 'cancelled')
+		           AND o.status <> 'cancelled'),
+		       rt.share_opens
 		  FROM route_templates rt
 		  JOIN route_schedules rs ON rs.template_id = rt.id
 		 WHERE rt.driver_id = $1 AND rt.active
@@ -71,7 +75,7 @@ func (d Deps) handleMyRoutes(w http.ResponseWriter, r *http.Request) {
 		var oneoff *string
 		if err := rows.Scan(&m.ID, &m.OriginLabel, &m.DestinationLabel, &m.RouteKm,
 			&m.Seats, &m.PricingMode, &m.Kind, &m.Weekdays, &oneoff,
-			&m.DepartEarliest, &m.DepartLatest, &m.UpcomingTrips); err != nil {
+			&m.DepartEarliest, &m.DepartLatest, &m.UpcomingTrips, &m.LinkOpens); err != nil {
 			slog.Error("reading a route", "driver", userID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal", "could not read your routes")
 			return

@@ -10,6 +10,8 @@ import { resolveBaseUrl } from '../src/api/baseUrl';
 import { takeReturn } from '../src/state/returnTo';
 import { useSession } from '../src/state/session';
 import { usePushRegistration } from '../src/push/usePushRegistration';
+import { useNotificationTaps } from '../src/push/useNotificationTaps';
+import { restoreLanguage } from '../src/i18n/language';
 import '../src/i18n';
 
 // See src/api/baseUrl.ts. On a device this is configuration; on web the API is
@@ -58,6 +60,7 @@ function AuthGate() {
 
   useEffect(() => {
     void restore();
+    void restoreLanguage();
   }, [restore]);
 
   // Every launch while signed in, not once at sign-up: a token changes on
@@ -65,6 +68,8 @@ function AuthGate() {
   // that has gone two years without a delivery, and somebody who turned
   // notifications on in Settings after refusing never tells the app.
   usePushRegistration(status === 'signedIn');
+  // And a tap on one opens what it is about, not the front page.
+  useNotificationTaps(status === 'signedIn');
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -95,6 +100,7 @@ function AuthGate() {
       <Stack.Screen name="profile/routes" options={{ title: t('profile.routes') }} />
       <Stack.Screen name="profile/vehicles" options={{ title: t('garage.title') }} />
       <Stack.Screen name="profile/groups" options={{ title: t('groups.title') }} />
+      <Stack.Screen name="profile/blocked" options={{ title: t('user.blockedTitle') }} />
       <Stack.Screen name="r/[token]" options={{ title: t('sharedRoute.title') }} />
     </Stack>
   );

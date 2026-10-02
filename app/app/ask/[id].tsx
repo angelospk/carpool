@@ -6,12 +6,13 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import { refusalText } from '../../src/api/errorText';
 import {
+  AsyncState,
   Badge,
   Button,
   Card,
@@ -20,36 +21,55 @@ import {
   Title,
 } from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
+import { athensTime } from '../../src/design/format';
+import { detourText } from '../../src/design/detour';
+import { JourneySummary } from '../../src/components/JourneySummary';
 
 export default function AskScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { id, detour_min, detour_km, price } = useLocalSearchParams<{
-    id: string;
-    detour_min?: string;
-    detour_km?: string;
-    price?: string;
-  }>();
+  const { id } = useLocalSearchParams<{ id: string }>();
   const [outcome, setOutcome] = useState<string | null>(null);
+  // The ask can no longer be answered: expired, taken, full, or gone. Other
+  // failures may work on a second press, so they leave the buttons.
+  const [closed, setClosed] = useState(false);
 
+  // Loaded by id, because a notification carries nothing else. The screen used
+  // to read the detour and price off its route params, so every way in except
+  // one that nothing used showed a detour of zero minutes to nobody.
+  const ask = useQuery({ queryKey: ['asks', id], queryFn: () => api.ask(id) });
+  // Gone is a normal answer here: the push may be minutes old, and the ask
+  // lapsed or somebody else took the seat.
+  const gone = ask.error instanceof ApiError && ask.error.status === 404;
+
+  const home = () => router.replace('/(tabs)');
   const answered = () => {
     void queryClient.invalidateQueries({ queryKey: ['trips'] });
-    router.replace('/(tabs)');
+    void queryClient.invalidateQueries({ queryKey: ['asks'] });
+    home();
   };
 
   // A stale tap is normal: the push may be minutes old and the ask may have
   // expired or been taken. Each case gets its own message rather than a generic
   // failure.
   const onError = (e: unknown) => {
+    void queryClient.invalidateQueries({ queryKey: ['asks', 'pending'] });
     if (!(e instanceof ApiError)) return setOutcome(t('common.error'));
     switch (e.code) {
       case 'ask_expired':
+        setClosed(true);
         return setOutcome(t('ask.expired'));
       case 'no_seats':
+        setClosed(true);
         return setOutcome(t('ask.noSeats'));
       case 'ask_closed':
+        setClosed(true);
         return setOutcome(t('ask.closed'));
+      case 'trip_departed':
+      case 'not_yours':
+        setClosed(true);
+        return setOutcome(refusalText(e) ?? t('ask.closed'));
       default:
         return setOutcome(refusalText(e) ?? t('common.error'));
     }
@@ -67,27 +87,56 @@ export default function AskScreen() {
   });
 
   const busy = accept.isPending || decline.isPending;
+  // Once the answer is known to be refused, the two buttons are the wrong
+  // question. A network failure is not that: it may work on a second press.
+  const settled = gone || closed;
 
   return (
     <Screen>
       <Title>{t('ask.title')}</Title>
 
-      {/* The detour is the decision. It gets the size, and everything else
-          arranges itself around it. */}
-      <Card tone="accent">
-        <Badge label={t('ask.waiting')} tone="accent" />
-        <Text testID="ask-detour" style={styles.detour}>
-          {t('ask.detour', {
-            minutes: Math.round(Number(detour_min ?? 0)),
-            km: Number(detour_km ?? 0).toFixed(1),
-          })}
-        </Text>
-        {price ? (
-          <Text style={styles.price}>
-            {Number(price).toFixed(2)} € <Text style={styles.suggested}>{t('ask.suggested')}</Text>
-          </Text>
+      <AsyncState
+        loading={ask.isLoading}
+        error={gone ? null : ask.error}
+        onRetry={() => void ask.refetch()}
+      >
+        {gone ? (
+          <Card>
+            <Text testID="ask-gone" style={styles.gone}>
+              {t('ask.gone')}
+            </Text>
+          </Card>
+        ) : ask.data ? (
+          <>
+            {/* The detour is the decision. It gets the size, and everything
+                else arranges itself around it. */}
+            <Card tone="accent">
+              <Badge label={t('ask.waiting')} tone="accent" />
+              <Text style={styles.who}>
+                {t('ask.who', { name: ask.data.passenger_name, count: ask.data.seats })}
+              </Text>
+              <Text testID="ask-detour" style={styles.detour}>
+                {detourText(ask.data.detour_min, ask.data.detour_km, t)}
+              </Text>
+              {ask.data.price_eur > 0 ? (
+                <Text style={styles.price}>
+                  {ask.data.price_eur.toFixed(2)} €{' '}
+                  <Text style={styles.suggested}>{t('ask.suggested')}</Text>
+                </Text>
+              ) : null}
+            </Card>
+            <Card>
+              <JourneySummary
+                from={ask.data.origin_label}
+                to={ask.data.destination_label}
+                start={ask.data.depart_earliest}
+                status={t('ask.answerBy', { time: athensTime(ask.data.expires_at) })}
+                statusTone="muted"
+              />
+            </Card>
+          </>
         ) : null}
-      </Card>
+      </AsyncState>
 
       {outcome ? (
         <Text testID="ask-outcome" style={styles.outcome}>
@@ -97,19 +146,25 @@ export default function AskScreen() {
 
       <Spacer />
 
-      <Button
-        testID="ask-accept"
-        label={t('ask.accept')}
-        onPress={() => accept.mutate()}
-        disabled={busy || !!outcome}
-      />
-      <Button
-        testID="ask-decline"
-        label={t('ask.decline')}
-        variant="secondary"
-        onPress={() => decline.mutate()}
-        disabled={busy || !!outcome}
-      />
+      {settled ? (
+        <Button testID="ask-leave" label={t('ask.backHome')} onPress={home} />
+      ) : ask.data ? (
+        <View style={styles.actions}>
+          <Button
+            testID="ask-accept"
+            label={t('ask.accept')}
+            onPress={() => accept.mutate()}
+            disabled={busy}
+          />
+          <Button
+            testID="ask-decline"
+            label={t('ask.decline')}
+            variant="secondary"
+            onPress={() => decline.mutate()}
+            disabled={busy}
+          />
+        </View>
+      ) : null}
     </Screen>
   );
 }
@@ -120,4 +175,7 @@ const styles = StyleSheet.create({
   // Never "fare": the app suggests a contribution, it does not charge one.
   suggested: { ...type.caption, color: colors.muted },
   outcome: { ...type.body, color: colors.danger },
+  who: { ...type.body, color: colors.ink },
+  gone: { ...type.body, color: colors.ink },
+  actions: { gap: space.sm },
 });

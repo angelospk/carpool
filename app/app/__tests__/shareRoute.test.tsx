@@ -189,3 +189,21 @@ test('the message carries the route link when there is one', async () => {
   expect(message.split('\n').pop()).toBe('https://carpool.test/r/tok');
   expect(api.shareRouteLink).toHaveBeenCalledWith('r1');
 });
+
+// Whether the share reached anybody was a question for the proxy's logs.
+test('a route says how often its link was opened', async () => {
+  (api.myRoutes as jest.Mock).mockResolvedValue({ routes: [route({ link_opens: 12 })] });
+
+  render(wrap(<MyRoutesScreen />));
+
+  expect(await screen.findByTestId('link-opens-r1')).toHaveTextContent(/12/);
+});
+
+test('a link nobody opened yet says nothing about it', async () => {
+  (api.myRoutes as jest.Mock).mockResolvedValue({ routes: [route({ link_opens: 0 })] });
+
+  render(wrap(<MyRoutesScreen />));
+
+  await screen.findByTestId('share-r1');
+  expect(screen.queryByTestId('link-opens-r1')).toBeNull();
+});

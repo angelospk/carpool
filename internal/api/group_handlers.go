@@ -124,6 +124,23 @@ func (d Deps) groupError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
+// handleGroupStats is this month of a group, counted, for an admin.
+func (d Deps) handleGroupStats(w http.ResponseWriter, r *http.Request) {
+	userID, _ := callerID(r.Context())
+	groupID, err := uuid.Parse(chiURLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "no such group")
+		return
+	}
+	st, err := d.Groups.MonthStats(r.Context(), userID, groupID, d.now())
+	if d.groupError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"members": st.Members, "drivers": st.Drivers, "trips": st.Trips, "seats": st.Seats,
+	})
+}
+
 // handleGroupExport is the month's verified trips between members, as CSV,
 // for an admin to hand to whoever pays for them. See groups.Export for what
 // counts as a trip and what is left out.

@@ -12,7 +12,13 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { upcomingTrips: jest.fn(), pastTrips: jest.fn(), trip: jest.fn(), myRequests: jest.fn() },
+  api: {
+    upcomingTrips: jest.fn(),
+    pastTrips: jest.fn(),
+    trip: jest.fn(),
+    myRequests: jest.fn(),
+    pendingAsks: jest.fn(async () => ({ asks: [] })),
+  },
 }));
 
 // Prefixed `mock` because jest.mock's factory may not close over anything else.

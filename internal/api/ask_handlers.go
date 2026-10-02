@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"carpool/internal/asks"
+	"carpool/internal/store"
 )
 
 // askErrorStatus maps a lifecycle error to its HTTP shape. The app shows a
@@ -83,4 +84,59 @@ func (d Deps) askRouteParams(w http.ResponseWriter, r *http.Request) (uuid.UUID,
 		return uuid.Nil, uuid.Nil, false
 	}
 	return userID, askID, true
+}
+
+// handlePendingAsks lists the asks waiting on the caller as a driver.
+func (d Deps) handlePendingAsks(w http.ResponseWriter, r *http.Request) {
+	userID, ok := callerID(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
+		return
+	}
+	list, err := store.PendingAsks(r.Context(), d.Pool, userID, d.now())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not list asks")
+		return
+	}
+	out := make([]map[string]any, 0, len(list))
+	for _, a := range list {
+		out = append(out, askJSON(a))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"asks": out})
+}
+
+// handleGetAsk is what a notification tap opens.
+func (d Deps) handleGetAsk(w http.ResponseWriter, r *http.Request) {
+	userID, askID, ok := d.askRouteParams(w, r)
+	if !ok {
+		return
+	}
+	a, err := store.AskFor(r.Context(), d.Pool, askID, userID, d.now())
+	if errors.Is(err, store.ErrNotParticipant) {
+		writeError(w, http.StatusNotFound, "not_found", "no such request")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not load the request")
+		return
+	}
+	writeJSON(w, http.StatusOK, askJSON(a))
+}
+
+// askJSON is built field by field, so a new field on the store type does not
+// reach a driver's phone because somebody exported it.
+func askJSON(a store.PendingAsk) map[string]any {
+	return map[string]any{
+		"id":                a.ID,
+		"occurrence_id":     a.OccurrenceID,
+		"passenger_name":    a.PassengerName,
+		"origin_label":      a.OriginLabel,
+		"destination_label": a.DestinationLabel,
+		"detour_min":        a.DetourMin,
+		"detour_km":         a.DetourKm,
+		"price_eur":         a.PriceEUR,
+		"seats":             a.Seats,
+		"depart_earliest":   a.DepartEarliest,
+		"expires_at":        a.ExpiresAt,
+	}
 }

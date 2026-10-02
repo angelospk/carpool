@@ -18,6 +18,8 @@ export type MyRoute = {
   depart_earliest: string;
   depart_latest: string;
   upcoming_trips: number;
+  /** How many times a person opened this route's link. */
+  link_opens?: number;
 };
 
 /** A road somebody is waiting on, and how many people are. Never who. */
@@ -148,7 +150,11 @@ export type Me = {
   name: string;
   photo_url: string | null;
   home_region_id: string;
+  /** Asked only for women drivers only; never shown to anybody else. */
+  gender?: 'female' | 'male' | 'other' | null;
   women_only: boolean;
+  /** A driver not taking asks for now. Absent for somebody with no car. */
+  asks_paused?: boolean;
   bio: string | null;
   preferences: PreferenceTag[];
   facebook_handle: string | null;
@@ -192,6 +198,26 @@ export type Participant = {
    * reckoned from the caller's side.
    */
   shared_groups?: string[];
+  /** Relative to whoever is looking: this person's booking with you is
+      complete and you have not rated them yet. */
+  can_rate?: boolean;
+  /** You have already rated this person for this trip. */
+  rated?: boolean;
+};
+
+/** Somebody asking for a seat on one of the caller's departures. */
+export type PendingAsk = {
+  id: string;
+  occurrence_id: string;
+  passenger_name: string;
+  origin_label: string;
+  destination_label: string;
+  detour_min: number;
+  detour_km: number;
+  price_eur: number;
+  seats: number;
+  depart_earliest: string;
+  expires_at: string;
 };
 
 /** A route as its link shows it: the share sentence's facts, no driver. */
@@ -267,6 +293,8 @@ export type TripDetail = TripSummary & {
   booking_id: string | null;
   /** The route ran into a ferry and was cut at the port. */
   ends_at_port: boolean;
+  /** The caller has said the ride happened. */
+  confirmed_by_me?: boolean;
   /** The caller's own seat, explained. Absent for the driver. */
   price_breakdown?: PriceBreakdownData;
 };
@@ -413,7 +441,14 @@ export const api = {
     patch: Partial<
       Pick<
         Me,
-        'name' | 'women_only' | 'facebook_handle' | 'instagram_handle' | 'bio' | 'preferences'
+        | 'name'
+        | 'gender'
+        | 'women_only'
+        | 'asks_paused'
+        | 'facebook_handle'
+        | 'instagram_handle'
+        | 'bio'
+        | 'preferences'
       >
     >,
   ) => request<Me>('/v1/me', { method: 'PATCH', body: patch }),
@@ -439,6 +474,9 @@ export const api = {
 
   /** A driver calling off one departure. Retiring a route is the other act. */
   cancelTrip: (id: string) => request<void>(`/v1/trips/${id}`, { method: 'DELETE' }),
+  /** A passenger gives back their own seat. The trip carries on for the rest. */
+  cancelBooking: (bookingId: string) =>
+    request<void>(`/v1/bookings/${bookingId}`, { method: 'DELETE' }),
 
   /**
    * Which roads people are waiting on, for a driver deciding whether to
@@ -584,6 +622,22 @@ export const api = {
 
   cancelRequest: (id: string) => request<void>(`/v1/requests/${id}`, { method: 'DELETE' }),
 
+  /** Whether at least three drivers go this way on a day. Never how many. */
+  supply: (body: {
+    origin_lon: number;
+    origin_lat: number;
+    destination_lon: number;
+    destination_lat: number;
+    date: string;
+  }) =>
+    request<{ status: 'several' | 'unknown' }>('/v1/supply', {
+      method: 'POST',
+      body,
+    }),
+  /** The asks waiting on the caller as a driver, soonest to lapse first. */
+  pendingAsks: () => request<{ asks: PendingAsk[] }>('/v1/asks/pending'),
+  /** One ask, for the driver it was sent to. 404 once it is answered or lapsed. */
+  ask: (id: string) => request<PendingAsk>(`/v1/asks/${id}`),
   acceptAsk: (id: string) =>
     request<{ booking_id: string }>(`/v1/asks/${id}/accept`, { method: 'POST' }),
   declineAsk: (id: string) => request<void>(`/v1/asks/${id}/decline`, { method: 'POST' }),
@@ -638,12 +692,23 @@ export const api = {
     request<SharedRoute>(`/v1/shared-routes/${encodeURIComponent(token)}`, { anonymous: true }),
 
   /** A month of verified trips between members, as CSV. Admins only. */
+  /** This month of a group, counted. Admins only. */
+  groupStats: (id: string) =>
+    request<{ members: number; drivers: number; trips: number; seats: number }>(
+      `/v1/groups/${id}/stats`,
+    ),
   groupTripsCSV: (id: string, month: string) =>
     request<string>(`/v1/groups/${id}/trips.csv?month=${encodeURIComponent(month)}`, { text: true }),
   rotateGroupCode: (id: string) =>
     request<{ code: string }>(`/v1/groups/${id}/code`, { method: 'POST' }),
 
   blockUser: (id: string) => request<void>(`/v1/users/${id}/block`, { method: 'POST' }),
+  unblockUser: (id: string) => request<void>(`/v1/users/${id}/block`, { method: 'DELETE' }),
+  /** The people the caller blocked. Never who blocked them. */
+  myBlocks: () =>
+    request<{ blocked: { id: string; name: string; photo_url: string | null }[] }>(
+      '/v1/me/blocks',
+    ),
   reportUser: (id: string, reason: string) =>
     request<void>(`/v1/users/${id}/report`, { method: 'POST', body: { reason } }),
 };

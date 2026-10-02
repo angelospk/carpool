@@ -11,7 +11,7 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { blockUser: jest.fn(), reportUser: jest.fn() },
+  api: { blockUser: jest.fn(), unblockUser: jest.fn(), reportUser: jest.fn() },
 }));
 
 // A fresh client per render, so a mutation left in flight by one test cannot
@@ -25,6 +25,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   (api.reportUser as jest.Mock).mockResolvedValue(undefined);
   (api.blockUser as jest.Mock).mockResolvedValue(undefined);
+  (api.unblockUser as jest.Mock).mockResolvedValue(undefined);
 });
 
 describe('reporting somebody', () => {
@@ -121,4 +122,15 @@ it('blocks on one tap', async () => {
   fireEvent.press(screen.getByTestId('block-user'));
 
   await waitFor(() => expect(api.blockUser).toHaveBeenCalledWith('u-1'));
+});
+
+// Reversible was the promise; the undo was an endpoint nothing called.
+it('a block can be undone from the same screen', async () => {
+  render(<UserScreen />);
+
+  fireEvent.press(screen.getByTestId('block-user'));
+  fireEvent.press(await screen.findByTestId('unblock-user'));
+
+  await waitFor(() => expect(api.unblockUser).toHaveBeenCalledWith('u-1'));
+  expect(await screen.findByTestId('block-user')).toBeTruthy();
 });

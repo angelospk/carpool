@@ -18,7 +18,11 @@ jest.mock('../../src/state/session', () => ({
   useSession: (select: (s: unknown) => unknown) => select({ status: mockStatus }),
 }));
 jest.mock('../../src/api/endpoints', () => ({
-  api: { sharedRoute: jest.fn(), places: jest.fn() },
+  api: {
+    sharedRoute: jest.fn(),
+    places: jest.fn(),
+    supply: jest.fn(async () => ({ status: 'unknown' })),
+  },
 }));
 
 function wrap(node: ReactNode) {

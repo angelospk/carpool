@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -193,6 +194,15 @@ func (d Deps) handleRoutePage(w http.ResponseWriter, r *http.Request) {
 		// unsafe URL. The token is base64url, so it cannot carry anything but
 		// itself.
 		data["AppLink"] = template.URL("carpool://r/" + token)
+		if r.Method == http.MethodGet && openedByAPerson(r.UserAgent()) {
+			// Best effort: a count that misses one open is better than a page
+			// that fails to show the route.
+			if _, err := d.Pool.Exec(r.Context(),
+				`UPDATE route_templates SET share_opens = share_opens + 1 WHERE share_token = $1`,
+				token); err != nil {
+				slog.Warn("counting a link open", "error", err)
+			}
+		}
 	}
 	_ = routePage.Execute(w, data)
 }
@@ -205,4 +215,31 @@ func (d Deps) safeInstallURL() string {
 		return d.InstallURL
 	}
 	return ""
+}
+
+// previewAgents are the fetchers that open a link without anybody reading it:
+// chat apps building a preview card once per chat, and crawlers. Counting them
+// would make every paste look like a reader.
+var previewAgents = []string{
+	"bot", "crawler", "spider", "preview", "facebookexternalhit", "whatsapp",
+	"viber", "telegram", "slack", "discord", "skype", "embedly", "curl", "wget",
+}
+
+// openedByAPerson is a guess from the User-Agent, and it errs towards the
+// smaller number: anything that names itself a fetcher is left out, and so is a
+// request that names nothing at all, which no browser sends. An in-app browser
+// that names its chat app is left out with the previews. A count that says two
+// when it was three still answers "is anybody opening this"; one that counts
+// every preview card answers nothing.
+func openedByAPerson(ua string) bool {
+	ua = strings.ToLower(strings.TrimSpace(ua))
+	if ua == "" {
+		return false
+	}
+	for _, p := range previewAgents {
+		if strings.Contains(ua, p) {
+			return false
+		}
+	}
+	return true
 }

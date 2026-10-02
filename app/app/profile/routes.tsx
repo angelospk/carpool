@@ -14,7 +14,16 @@ import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api, type MyRoute } from '../../src/api/endpoints';
-import { Button, Card, Hint, Screen, SectionHeader, Title } from '../../src/components/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  Hint,
+  RouteSpine,
+  Screen,
+  SectionHeader,
+  Title,
+} from '../../src/components/ui';
 import { ShareRouteButton } from '../../src/components/ShareRouteButton';
 import { confirm } from '../../src/components/confirm';
 import { colors, space, type } from '../../src/design/tokens';
@@ -79,31 +88,46 @@ export default function MyRoutesScreen() {
                 needs to be recognised by its ends is a lot of payload for a
                 decoration. */}
             <View style={styles.head}>
+              <View style={styles.when}>
+                <Text style={styles.time}>{r.depart_earliest}</Text>
+                <Text style={styles.meta}>–{r.depart_latest}</Text>
+              </View>
               <View style={styles.where}>
-                <Text style={styles.route}>
-                  {r.origin_label} → {r.destination_label}
-                </Text>
-                <Text style={styles.meta}>
-                  {r.depart_earliest}–{r.depart_latest} · {r.route_km.toFixed(1)} χλμ ·{' '}
-                  {t('publish.seatsN', { count: r.seats })}
-                </Text>
-                <Text style={styles.meta}>
-                  {r.kind === 'recurring'
-                    ? r.weekdays.map((d) => t(`weekdaysShort.${d}`)).join(' ')
-                    : r.oneoff_date
-                      ? calendarDay(r.oneoff_date)
-                      : ''}
-                </Text>
+                <RouteSpine from={r.origin_label} to={r.destination_label} />
               </View>
             </View>
 
-            {/* The number that makes retiring an informed decision rather than
-                a guess about what else it touches. */}
-            {r.upcoming_trips > 0 ? (
-              <Text style={styles.upcoming}>
-                {t('profile.upcomingTrips', { count: r.upcoming_trips })}
-              </Text>
-            ) : null}
+            {/* The days as the same pills the publish form picks them with,
+                read-only, so the route reads the way it was set. */}
+            <View style={styles.days}>
+              {r.kind === 'recurring' ? (
+                r.weekdays.map((d) => <Badge key={d} label={t(`weekdaysShort.${d}`)} tone="primary" />)
+              ) : r.oneoff_date ? (
+                <Badge label={calendarDay(r.oneoff_date)} tone="primary" />
+              ) : null}
+            </View>
+
+            <Text style={styles.meta}>
+              {r.route_km.toFixed(1)} χλμ · {t('publish.seatsN', { count: r.seats })}
+            </Text>
+
+            <View style={styles.badges}>
+              {/* The number that makes retiring an informed decision rather
+                  than a guess about what else it touches. */}
+              {r.upcoming_trips > 0 ? (
+                <Badge label={t('profile.upcomingTrips', { count: r.upcoming_trips })} />
+              ) : null}
+              {/* Whether sharing reached anybody. Opens, not people: one
+                  person opening it twice is two. Nothing until there is one,
+                  because "0" beside a link just shared reads as a failure. */}
+              {r.link_opens ? (
+                <Badge
+                  testID={`link-opens-${r.id}`}
+                  label={t('profile.linkOpens', { count: r.link_opens })}
+                  tone="accent"
+                />
+              ) : null}
+            </View>
 
             <ShareRouteButton route={r} testID={`share-${r.id}`} failedTestID={`share-failed-${r.id}`} />
             <Button
@@ -124,10 +148,12 @@ export default function MyRoutesScreen() {
 
 const styles = StyleSheet.create({
   body: { gap: space.md, paddingBottom: 140 },
-  head: { flexDirection: 'row', gap: space.md, alignItems: 'center', marginBottom: space.sm },
-  where: { flex: 1, gap: 2 },
-  route: { ...type.body, color: colors.ink },
+  head: { flexDirection: 'row', gap: space.lg, alignItems: 'center', marginBottom: space.sm },
+  when: { alignItems: 'flex-start' },
+  time: { ...type.display, fontSize: 26, color: colors.ink },
+  where: { flex: 1 },
+  days: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, marginBottom: space.sm },
+  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, marginVertical: space.sm },
   meta: { ...type.caption, color: colors.muted },
   failed: { gap: space.sm },
-  upcoming: { ...type.caption, color: colors.muted, marginBottom: space.sm },
 });

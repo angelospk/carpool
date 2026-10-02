@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"carpool/internal/domain"
 	"carpool/internal/store"
@@ -27,7 +28,12 @@ func (d Deps) handleGetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, userResponse(user))
+	out := userResponse(user)
+	if !d.addAsksPaused(r, out) {
+		writeError(w, http.StatusInternalServerError, "internal", "could not load the profile")
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (d Deps) handlePatchMe(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +56,9 @@ func (d Deps) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		RegionID        *string   `json:"home_region_id"`
 		Bio             *string   `json:"bio"`
 		Preferences     *[]string `json:"preferences"`
+		// AsksPaused stops the matcher asking this driver, without retiring
+		// any route. Only meaningful for somebody with a car.
+		AsksPaused *bool `json:"asks_paused"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -160,7 +169,13 @@ func (d Deps) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		up.RegionID = &regionID
 	}
 
+	up.AsksPaused = body.AsksPaused
+
 	user, err := store.UpdateUser(r.Context(), d.Pool, userID, up)
+	if errors.Is(err, store.ErrNotADriver) {
+		writeError(w, http.StatusConflict, "not_a_driver", "only a driver has asks to pause")
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "the account no longer exists")
 		return
@@ -170,7 +185,12 @@ func (d Deps) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, userResponse(user))
+	out := userResponse(user)
+	if !d.addAsksPaused(r, out) {
+		writeError(w, http.StatusInternalServerError, "internal", "could not load the profile")
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (d Deps) handleListRegions(w http.ResponseWriter, r *http.Request) {
@@ -245,4 +265,25 @@ func nonNil(in []string) []string {
 		return []string{}
 	}
 	return in
+}
+
+// addAsksPaused puts the driver's pause switch on a profile response, and
+// leaves it absent for somebody with no car: there is nothing to pause, and a
+// false there would read as a switch they could turn on.
+func (d Deps) addAsksPaused(r *http.Request, out map[string]any) bool {
+	userID, ok := callerID(r.Context())
+	if !ok {
+		return true
+	}
+	var paused bool
+	err := d.Pool.QueryRow(r.Context(),
+		`SELECT notifications_muted FROM driver_profiles WHERE user_id = $1`, userID).Scan(&paused)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	out["asks_paused"] = paused
+	return true
 }

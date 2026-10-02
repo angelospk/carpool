@@ -14,6 +14,7 @@ jest.mock('../../src/api/endpoints', () => ({
     leaveGroup: jest.fn(),
     rotateGroupCode: jest.fn(),
     groupTripsCSV: jest.fn(),
+    groupStats: jest.fn(async () => ({ members: 2, drivers: 1, trips: 0, seats: 0 })),
   },
 }));
 

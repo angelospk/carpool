@@ -10,6 +10,8 @@ import { api } from '../../src/api/endpoints';
 
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+  // Focus is once, on mount, which is what a test screen gets.
+  useFocusEffect: (effect: () => void) => require('react').useEffect(effect, []),
 }));
 
 jest.mock('../../src/api/endpoints', () => ({

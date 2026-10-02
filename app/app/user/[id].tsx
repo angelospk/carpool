@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
@@ -43,9 +43,26 @@ export default function UserScreen() {
   const [detail, setDetail] = useState('');
   const [reporting, setReporting] = useState(false);
 
+  // Known only for this visit: the screen is opened from a trip, where the
+  // block has not happened yet. Older blocks are undone from the block list.
+  const [blocked, setBlocked] = useState(false);
+  const queryClient = useQueryClient();
   const block = useMutation({
     mutationFn: () => api.blockUser(id),
-    onSuccess: () => setDone(t('user.blocked')),
+    onSuccess: () => {
+      setBlocked(true);
+      setDone(t('user.blocked'));
+      void queryClient.invalidateQueries({ queryKey: ['blocks'] });
+    },
+    onError: () => setDone(t('common.error')),
+  });
+  const unblock = useMutation({
+    mutationFn: () => api.unblockUser(id),
+    onSuccess: () => {
+      setBlocked(false);
+      setDone(t('user.unblocked'));
+      void queryClient.invalidateQueries({ queryKey: ['blocks'] });
+    },
     onError: () => setDone(t('common.error')),
   });
 
@@ -128,12 +145,25 @@ export default function UserScreen() {
 
       <Spacer />
 
-      <Button
-        testID="block-user"
-        label={t('user.block')}
-        variant="danger"
-        onPress={() => block.mutate()}
-      />
+      {blocked ? (
+        <Button
+          testID="unblock-user"
+          label={t('user.unblock')}
+          variant="secondary"
+          disabled={unblock.isPending}
+          onPress={() => unblock.mutate()}
+        />
+      ) : (
+        <Button
+          testID="block-user"
+          label={t('user.block')}
+          variant="danger"
+          disabled={block.isPending}
+          onPress={() => block.mutate()}
+        />
+      )}
+      {/* What a block does and does not do, said where it is pressed. */}
+      <Text style={styles.hint}>{t('user.blockHint')}</Text>
       {!reporting ? (
         <Button
           testID="report-user"
