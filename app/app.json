@@ -35,7 +35,15 @@
       "@maplibre/maplibre-react-native",
       "expo-router",
       "expo-secure-store",
-      "expo-location",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Η θέση σου χρειάζεται για να βρεις σημείο συνάντησης και, όταν οδηγείς και πατήσεις «Φεύγω», για να ξέρουν οι επιβάτες πότε περνάς.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true,
+          "isAndroidBackgroundLocationEnabled": false
+        }
+      ],
       "expo-notifications",
       [
         "expo-build-properties",

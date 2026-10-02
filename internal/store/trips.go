@@ -112,6 +112,9 @@ type TripParticipant struct {
 	Rated   bool
 	// ArrivedAt is the passenger's «Είμαι εδώ» on a drive.
 	ArrivedAt *time.Time
+	// BookingID is the seat, for the driver: it is what an accepted offer
+	// returns, and how the app finds the pickup to hand to a maps app.
+	BookingID *uuid.UUID
 	// Pickup is where the passenger gets in, as [lon, lat]: for the driver,
 	// who hands it to their maps app, and for the passenger themselves.
 	// Nobody else on the trip is told where another passenger waits.
@@ -247,7 +250,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		       b.price_eur, b.seats, b.pricing_basis, u.bio, b.status = 'completed',
 		       coalesce((SELECT array_agg(p.tag) FROM user_preferences p WHERE p.user_id = u.id), '{}'),
 		       EXISTS (SELECT 1 FROM ratings r WHERE r.booking_id = b.id AND r.rater_id = $2),
-		       b.arrived_at, ST_X(b.pickup_point), ST_Y(b.pickup_point)
+		       b.arrived_at, ST_X(b.pickup_point), ST_Y(b.pickup_point), b.id
 		FROM bookings b JOIN users u ON u.id = b.passenger_id
 		WHERE b.occurrence_id = $1 AND b.status IN ('confirmed','completed')
 		ORDER BY b.created_at`, occurrenceID, userID)
@@ -261,13 +264,17 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		var raw []byte
 		var completed bool
 		var lon, lat float64
+		var bookingID uuid.UUID
 		if err := rows.Scan(&p.UserID, &p.Name, &p.PhotoVersion, &p.FacebookHandle, &p.InstagramHandle, &p.Rating,
 			&p.PriceEUR, &p.Seats, &raw, &p.Bio, &completed, &p.Preferences, &p.Rated,
-			&p.ArrivedAt, &lon, &lat); err != nil {
+			&p.ArrivedAt, &lon, &lat, &bookingID); err != nil {
 			return TripDetail{}, fmt.Errorf("store: scanning passenger: %w", err)
 		}
 		if role == RoleDriver || p.UserID == userID {
 			p.Pickup = &[2]float64{lon, lat}
+		}
+		if role == RoleDriver {
+			p.BookingID = &bookingID
 		}
 		// Only the driver rates passengers, and only once each booking is
 		// complete, which is what RateTrip itself insists on.

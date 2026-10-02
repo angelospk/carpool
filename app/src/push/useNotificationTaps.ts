@@ -3,7 +3,9 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 
+import { api } from '../api/endpoints';
 import { destinationOf } from './destination';
+import { SKIP, TAKE } from './categories';
 
 /**
  * Opens what a tapped notification is about.
@@ -23,13 +25,22 @@ function useNativeNotificationTaps(signedIn: boolean) {
 
   useEffect(() => {
     if (!signedIn || !response) return;
-    if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
+    const action = response.actionIdentifier;
+    if (action !== Notifications.DEFAULT_ACTION_IDENTIFIER && action !== TAKE && action !== SKIP) return;
     const key = response.notification.request.identifier;
     if (handled.current === key) return;
     handled.current = key;
-    const to = destinationOf(response.notification.request.content.data);
+    const data = response.notification.request.content.data;
     Notifications.clearLastNotificationResponse();
-    if (to) router.push(to as never);
+    const ask = typeof data?.ask_id === 'string' ? data.ask_id : null;
+    if (action === SKIP) {
+      // Best effort. If it fails the offer lapses, and no answer is no.
+      if (ask) void api.declineAsk(ask).catch(() => undefined);
+      return;
+    }
+    const to = destinationOf(data);
+    if (!to) return;
+    router.push((action === TAKE && to.startsWith('/ask/') ? `${to}?take=1` : to) as never);
   }, [signedIn, response, router]);
 }
 

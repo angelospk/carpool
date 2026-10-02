@@ -28,6 +28,7 @@ import { PreferenceChips } from '../../src/components/Preferences';
 import { SharedGroups } from '../../src/components/SharedGroups';
 import { LiveCard } from '../../src/components/LiveCard';
 import { DriveCard, driveCardShown } from '../../src/components/DriveCard';
+import { OnTheRoadCard, onTheRoad } from '../../src/components/OnTheRoadCard';
 import { tripShareMessage } from '../../src/design/tripShare';
 import { confirm as askFirst } from '../../src/components/confirm';
 import { shareText } from '../../src/components/shareText';
@@ -132,6 +133,12 @@ export default function TripScreen() {
   // reported. Never yourself.
   const openPerson = (p: { id: string; name: string }) =>
     router.push({ pathname: '/user/[id]', params: { id: p.id, name: p.name } });
+
+  // «Είμαι εδώ»: the passenger is at the pickup, and the driver is told.
+  const here = useMutation({
+    mutationFn: () => api.here(id),
+    onSuccess: () => void trip.refetch(),
+  });
 
   const cancel = useMutation({
     mutationFn: () => api.cancelTrip(id),
@@ -357,8 +364,27 @@ export default function TripScreen() {
                   </Card>
                 ) : null}
 
-                {driveCardShown(trip.data, now) ? (
+                {onTheRoad(trip.data, now) ? (
+                  <OnTheRoadCard trip={trip.data} onChanged={() => void trip.refetch()} />
+                ) : driveCardShown(trip.data, now) ? (
                   <DriveCard trip={trip.data} onDone={() => void trip.refetch()} />
+                ) : null}
+
+                {herePossible(trip.data, me?.id) ? (
+                  <View style={styles.here}>
+                    {ownSeat(trip.data, me?.id)?.arrived_at || here.isSuccess ? (
+                      <Text testID="here-done" style={styles.pickupAt}>
+                        {t('drive.hereDone')}
+                      </Text>
+                    ) : (
+                      <Button
+                        testID="here"
+                        label={t('drive.here')}
+                        disabled={here.isPending}
+                        onPress={() => here.mutate()}
+                      />
+                    )}
+                  </View>
                 ) : null}
 
                 {/* Only for a trip that is still going to happen. */}
@@ -541,6 +567,7 @@ export default function TripScreen() {
 
 const styles = StyleSheet.create({
   pickupAt: { ...type.body, color: colors.ink, fontWeight: '600', marginTop: space.sm },
+  here: { marginTop: space.sm },
   list: { gap: space.sm, paddingBottom: space.lg },
   columns: { flex: 1, flexDirection: 'row', gap: space.xl },
   detailsColumn: { flex: 1 },
@@ -688,4 +715,23 @@ function PersonLink({
 function startOf(encoded: string) {
   const [first] = polyline.decode(encoded, 6);
   return first ? { lon: first[1], lat: first[0] } : { lon: 23.7275, lat: 37.9838 };
+}
+
+/** The caller's own place on the trip, as a passenger. */
+function ownSeat(trip: TripDetail, me: string | undefined) {
+  return trip.passengers.find((p) => p.id === me);
+}
+
+/**
+ * «Είμαι εδώ» belongs to a passenger with a seat on a drive that is still
+ * going: the driver has said when they leave and has not said «Τέλος».
+ */
+function herePossible(trip: TripDetail, me: string | undefined): boolean {
+  return (
+    trip.role === 'passenger' &&
+    trip.status === 'scheduled' &&
+    !!trip.drive_set_at &&
+    !trip.drive_ended_at &&
+    !!ownSeat(trip, me)
+  );
 }

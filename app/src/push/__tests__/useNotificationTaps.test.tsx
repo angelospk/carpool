@@ -4,6 +4,8 @@ import * as Notifications from 'expo-notifications';
 import { useNotificationTaps } from '../useNotificationTaps';
 
 const mockPush = jest.fn();
+const mockDecline = jest.fn((_id: string) => Promise.resolve());
+jest.mock('../../api/endpoints', () => ({ api: { declineAsk: (id: string) => mockDecline(id) } }));
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
 
 let mockResponse: unknown = null;
@@ -53,4 +55,21 @@ test('dismissing a notification opens nothing', () => {
   mockResponse = { ...tap('n-3', { ask_id: 'a-3' }), actionIdentifier: 'dismiss' };
   renderHook(() => useNotificationTaps(true));
   expect(mockPush).not.toHaveBeenCalled();
+});
+
+// «Πάρ' τον» on an offer during a drive opens the offer and accepts it there,
+// where the maps hand-off follows.
+test('«Πάρ\' τον» opens the offer to take it', () => {
+  mockResponse = { ...tap('n-4', { ask_id: 'a-4' }), actionIdentifier: 'take' };
+  renderHook(() => useNotificationTaps(true));
+  expect(mockPush).toHaveBeenCalledWith('/ask/a-4?take=1');
+});
+
+// «Όχι» opens nothing and says no on the spot. If that call never runs, the
+// offer simply lapses: no answer is no.
+test('«Όχι» declines without opening the app', () => {
+  mockResponse = { ...tap('n-5', { ask_id: 'a-5' }), actionIdentifier: 'skip' };
+  renderHook(() => useNotificationTaps(true));
+  expect(mockPush).not.toHaveBeenCalled();
+  expect(mockDecline).toHaveBeenCalledWith('a-5');
 });

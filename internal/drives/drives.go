@@ -128,6 +128,7 @@ func (s *Service) Start(ctx context.Context, driverID, occurrenceID uuid.UUID, i
 		earliest, latest       time.Time
 		scheduledE, scheduledL time.Time
 		driveSet               bool
+		ended                  bool
 		detourMin              *int
 		booked                 bool
 	)
@@ -135,12 +136,12 @@ func (s *Service) Start(ctx context.Context, driverID, occurrenceID uuid.UUID, i
 		SELECT t.driver_id, o.status, o.depart_earliest, o.depart_latest,
 		       COALESCE(o.scheduled_earliest, o.depart_earliest),
 		       COALESCE(o.scheduled_latest, o.depart_latest),
-		       o.drive_set_at IS NOT NULL, o.drive_detour_min
+		       o.drive_set_at IS NOT NULL, o.drive_detour_min, o.drive_ended_at IS NOT NULL
 		  FROM trip_occurrences o
 		  JOIN route_templates t ON t.id = o.template_id
 		 WHERE o.id = $1
 		 FOR UPDATE OF o`, occurrenceID).Scan(
-		&owner, &occStatus, &earliest, &latest, &scheduledE, &scheduledL, &driveSet, &detourMin)
+		&owner, &occStatus, &earliest, &latest, &scheduledE, &scheduledL, &driveSet, &detourMin, &ended)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && owner != driverID) {
 		return time.Time{}, ErrNotYours
 	}
@@ -149,6 +150,10 @@ func (s *Service) Start(ctx context.Context, driverID, occurrenceID uuid.UUID, i
 	}
 	if occStatus != "scheduled" {
 		return time.Time{}, ErrNotScheduled
+	}
+	// «Τέλος» is final: a drive that ended is not started again.
+	if ended {
+		return time.Time{}, ErrDeparted
 	}
 	// Its own statement, after the lock. A subquery in the locking statement
 	// keeps the snapshot it started with, so a booking committed while this

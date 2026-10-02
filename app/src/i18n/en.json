@@ -542,7 +542,8 @@
     "outside_window": "That time is too far from the route's published time.",
     "drive_departed": "You have already left. The time can no longer change.",
     "trip_not_running": "This trip has been called off.",
-    "bad_detour": "The detour must be 0 to 30 minutes."
+    "bad_detour": "The detour must be 0 to 30 minutes.",
+    "not_driving": "That drive is not under way."
   },
   "shareRequest": {
     "button": "Send it to a group",
@@ -580,6 +581,27 @@
     "failed": "Not saved. Try again.",
     "pickupAt": "The driver reaches your pickup around {{time}}",
     "nudge": "Tell me when somebody on my road is waiting",
-    "nudgeHint": "Shortly before you leave, if you have a free seat."
+    "nudgeHint": "Shortly before you leave, if you have a free seat.",
+    "take": "Take them",
+    "skip": "No",
+    "trackTitle": "Sharing the car's position",
+    "trackBody": "For this drive only, until you tap «End».",
+    "trackDenied": "Without your position we cannot tell anyone when you pass, so no passengers are sent to you while you drive.",
+    "driving": "You are driving",
+    "offeringUntil": "Taking people until {{time}}",
+    "notOffering": "Not taking anyone now",
+    "offering": "Taking people",
+    "end": "End drive",
+    "navigate": "Navigate",
+    "navigateTo": "Navigate: {{name}}",
+    "toEnd": "Navigate to the destination",
+    "here": "I'm here",
+    "hereDone": "The driver knows you are at the pickup.",
+    "atPickup": "at the pickup",
+    "mapsApp": "Maps app for navigation",
+    "maps_google": "Google Maps",
+    "maps_apple": "Apple Maps",
+    "maps_waze": "Waze",
+    "ended": "The drive has ended."
   }
 }

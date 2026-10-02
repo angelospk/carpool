@@ -719,7 +719,8 @@ func TestOnlyTheDriverSeesEveryPickup(t *testing.T) {
 		t.Fatalf("GetTrip as the driver: %v", err)
 	}
 	if driver.Destination == nil || len(driver.Passengers) != 2 ||
-		driver.Passengers[0].Pickup == nil || driver.Passengers[1].Pickup == nil {
+		driver.Passengers[0].Pickup == nil || driver.Passengers[1].Pickup == nil ||
+		driver.Passengers[0].BookingID == nil {
 		t.Fatalf("the driver is missing pickups or the destination: %+v", driver)
 	}
 
@@ -731,11 +732,28 @@ func TestOnlyTheDriverSeesEveryPickup(t *testing.T) {
 		t.Errorf("a passenger was given the driver's destination")
 	}
 	for _, p := range mine.Passengers {
+		if p.BookingID != nil {
+			t.Errorf("a passenger was given a booking id from the driver's view")
+		}
 		if p.UserID == second && p.Pickup != nil {
 			t.Errorf("a passenger was told where another passenger waits")
 		}
 		if p.UserID == first && p.Pickup == nil {
 			t.Errorf("a passenger was not told their own pickup")
 		}
+	}
+}
+
+// «Τέλος» is final, even before the minute it was pinned to.
+func TestAnEndedDriveIsNotStartedAgain(t *testing.T) {
+	w := newWorld(t, at("06:55"))
+	if _, err := start(w, at("07:05")); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := w.svc.End(context.Background(), w.driverID, w.occ); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+	if _, err := start(w, at("07:10")); !errors.Is(err, drives.ErrDeparted) {
+		t.Fatalf("Start after «Τέλος»: %v, want ErrDeparted", err)
 	}
 }

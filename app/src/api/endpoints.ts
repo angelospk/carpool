@@ -205,6 +205,12 @@ export type Participant = {
   can_rate?: boolean;
   /** You have already rated this person for this trip. */
   rated?: boolean;
+  /** A passenger's «Είμαι εδώ» on a drive. */
+  arrived_at?: string | null;
+  /** Where they get in, [lon, lat]: for the driver, and for themselves. */
+  pickup?: [number, number] | null;
+  /** The seat, for the driver only. */
+  booking_id?: string | null;
 };
 
 /** Somebody asking for a seat on one of the caller's departures. */
@@ -307,6 +313,11 @@ export type TripDetail = TripSummary & {
   detour_min?: number;
   /** On a drive, when the car reaches the caller's own pickup. */
   pickup_at?: string | null;
+  /** The driver's «Τέλος», and how long the drive takes new passengers. */
+  drive_ended_at?: string | null;
+  offers_until?: string | null;
+  /** End of the driver's road, [lon, lat]. The driver's only. */
+  destination?: [number, number] | null;
 };
 
 export type PastTrip = TripSummary & {
@@ -666,10 +677,23 @@ export const api = {
   /** When sharing is open for this trip, and where the others you may see are. */
   live: (id: string) =>
     request<{ opens: string; closes: string; positions: LivePosition[] }>(`/v1/trips/${id}/live`),
-  putPosition: (id: string, lat: number, lon: number) =>
-    request<void>(`/v1/trips/${id}/position`, { method: 'PUT', body: { lat, lon } }),
+  /** accuracy_m and observed_at are what let a moving drive take people:
+      a fix without them still shows a dot, but times no pickup. */
+  putPosition: (
+    id: string,
+    lat: number,
+    lon: number,
+    fix?: { accuracy_m?: number | null; observed_at?: string },
+  ) => request<void>(`/v1/trips/${id}/position`, { method: 'PUT', body: { lat, lon, ...fix } }),
   /** Pins the minute the driver leaves. A time, not "in five minutes", so a
       retry is the same request. */
+  /** On the road: stop or resume taking people, or a new off-road limit. */
+  adjustDrive: (id: string, body: { offering?: boolean; detour_min?: number }) =>
+    request<void>(`/v1/trips/${id}/drive`, { method: 'PATCH', body }),
+  /** «Τέλος». */
+  endDrive: (id: string) => request<void>(`/v1/trips/${id}/drive/end`, { method: 'POST' }),
+  /** The passenger's «Είμαι εδώ». */
+  here: (id: string) => request<void>(`/v1/trips/${id}/here`, { method: 'POST' }),
   startDrive: (id: string, departsAt: string, detourMin?: number) =>
     request<{ departs_at: string }>(`/v1/trips/${id}/drive`, {
       method: 'POST',

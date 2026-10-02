@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import { Linking } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
@@ -18,7 +19,7 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { acceptAsk: jest.fn(), declineAsk: jest.fn(), ask: jest.fn() },
+  api: { acceptAsk: jest.fn(), declineAsk: jest.fn(), ask: jest.fn(), trip: jest.fn() },
 }));
 
 function wrap(node: ReactNode) {
@@ -44,6 +45,7 @@ const theAsk = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  delete mockParams.take;
   (api.ask as jest.Mock).mockResolvedValue(theAsk);
 });
 
@@ -150,4 +152,28 @@ test('a network failure keeps the answer open', async () => {
   await waitFor(() => expect(screen.getByTestId('ask-outcome')).toBeTruthy());
   expect(screen.getByTestId('ask-accept')).toBeTruthy();
   expect(screen.queryByTestId('ask-leave')).toBeNull();
+});
+
+// «Πάρ' τον» on the notification, in a car: the offer is accepted without
+// another tap, the app is left on the trip, and the new pickup goes to the
+// maps app as a stop on the way to the end of the road.
+test('«Πάρ\' τον» accepts and hands the pickup to the maps app', async () => {
+  mockParams.take = '1';
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+  (api.acceptAsk as jest.Mock).mockResolvedValue({ booking_id: 'b1' });
+  (api.trip as jest.Mock).mockResolvedValue({
+    destination: [26.0, 40.86],
+    passengers: [
+      { booking_id: 'b0', pickup: [25.85, 40.85] },
+      { booking_id: 'b1', pickup: [25.9, 40.85] },
+    ],
+  });
+  render(wrap(<AskScreen />));
+
+  await waitFor(() => expect(api.acceptAsk).toHaveBeenCalledWith('ask-1'));
+  await waitFor(() => expect(open).toHaveBeenCalled());
+  expect(open.mock.calls[0][0]).toContain('40.85%2C25.9');
+  expect(open.mock.calls[0][0]).toContain('40.86%2C26');
+  expect(mockReplace).toHaveBeenCalledWith({ pathname: '/trip/[id]', params: { id: 'occ-1' } });
+  expect(api.acceptAsk).toHaveBeenCalledTimes(1);
 });

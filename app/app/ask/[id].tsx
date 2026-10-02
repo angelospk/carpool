@@ -2,8 +2,8 @@
 // notification and must answer "is this worth it?" in one glance and one
 // round trip.
 
-import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Linking, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -22,6 +22,8 @@ import {
 } from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
 import { athensTime } from '../../src/design/format';
+import { mapsUrl } from '../../src/drive/maps';
+import { getMapsApp } from '../../src/drive/mapsApp';
 import { detourText } from '../../src/design/detour';
 import { JourneySummary } from '../../src/components/JourneySummary';
 
@@ -29,7 +31,9 @@ export default function AskScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // take=1 is «Πάρ' τον» on the notification: accept as soon as the offer
+  // has loaded, and hand the pickup to the driver's maps app.
+  const { id, take } = useLocalSearchParams<{ id: string; take?: string }>();
   const [outcome, setOutcome] = useState<string | null>(null);
   // The ask can no longer be answered: expired, taken, full, or gone. Other
   // failures may work on a second press, so they leave the buttons.
@@ -77,9 +81,34 @@ export default function AskScreen() {
 
   const accept = useMutation({
     mutationFn: () => api.acceptAsk(id),
-    onSuccess: answered,
+    onSuccess: (result) => {
+      if (take === '1' && ask.data) return void handOff(ask.data.occurrence_id, result.booking_id);
+      answered();
+    },
     onError,
   });
+
+  // From the notification, in a car: the pickup goes straight to the maps app,
+  // and the app is left on the trip, where the next stop and «Τέλος» are.
+  const handOff = async (occurrenceId: string, bookingId: string) => {
+    void queryClient.invalidateQueries({ queryKey: ['trips'] });
+    void queryClient.invalidateQueries({ queryKey: ['asks'] });
+    router.replace({ pathname: '/trip/[id]', params: { id: occurrenceId } });
+    try {
+      const trip = await api.trip(occurrenceId);
+      const seat = trip.passengers.find((p) => p.booking_id === bookingId);
+      if (!trip.destination || !seat?.pickup) return;
+      await Linking.openURL(mapsUrl(await getMapsApp(), { pickup: seat.pickup, destination: trip.destination }));
+    } catch {
+      // The seat is booked either way; the trip screen has the same button.
+    }
+  };
+  const tried = useRef(false);
+  useEffect(() => {
+    if (take !== '1' || !ask.data || tried.current) return;
+    tried.current = true;
+    accept.mutate();
+  }, [take, ask.data, accept]);
   const decline = useMutation({
     mutationFn: () => api.declineAsk(id),
     onSuccess: answered,

@@ -1,13 +1,14 @@
-import { useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { useTranslation } from "react-i18next";
-import { useMutation } from "@tanstack/react-query";
+import { useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import { useMutation } from '@tanstack/react-query';
 
-import { api, type TripDetail } from "../api/endpoints";
-import { refusalText } from "../api/errorText";
-import { athensTime } from "../design/format";
-import { colors, space, type } from "../design/tokens";
-import { Button, Card, Chip, Hint } from "./ui";
+import { api, type TripDetail } from '../api/endpoints';
+import { refusalText } from '../api/errorText';
+import { athensTime } from '../design/format';
+import { startDriveTracking } from '../drive/tracking';
+import { colors, space, type } from '../design/tokens';
+import { Button, Card, Chip, Hint } from './ui';
 
 /**
  * «Φεύγω»: the driver says the minute they leave.
@@ -32,37 +33,37 @@ export function DriveCard({
 }) {
   const { t } = useTranslation();
   const [inMin, setInMin] = useState<number>(0);
-  const [detour, setDetour] = useState<number>(
-    nearestDetour(trip.detour_min ?? 5),
-  );
+  const [detour, setDetour] = useState<number>(nearestDetour(trip.detour_min ?? 5));
   const [error, setError] = useState<string | null>(null);
 
   const go = useMutation({
-    mutationFn: (v: { departsAt: string; detour: number }) =>
-      api.startDrive(trip.id, v.departsAt, v.detour),
-    onSuccess: () => {
+    mutationFn: (v: { departsAt: string; detour: number }) => api.startDrive(trip.id, v.departsAt, v.detour),
+    onSuccess: async () => {
       setError(null);
+      // Sharing the car starts with «Φεύγω», so that once it has left the
+      // people ahead of it can be timed. Refused, the drive still stands; it
+      // just takes nobody new once it is moving, and the driver is told why.
+      const started = await startDriveTracking(trip.id, { title: t('drive.trackTitle'), body: t('drive.trackBody') });
+      if (started === 'denied') setError(t('drive.trackDenied'));
       onDone();
     },
-    onError: (e) => setError(refusalText(e) ?? t("drive.failed")),
+    onError: (e) => setError(refusalText(e) ?? t('drive.failed')),
   });
 
   const pinned = !!trip.drive_set_at;
   return (
     <Card testID="drive-card">
       <Text style={styles.title}>
-        {pinned
-          ? t("drive.leavingAt", { time: athensTime(trip.depart_earliest) })
-          : t("drive.title")}
+        {pinned ? t('drive.leavingAt', { time: athensTime(trip.depart_earliest) }) : t('drive.title')}
       </Text>
 
-      <Text style={styles.label}>{t("drive.when")}</Text>
+      <Text style={styles.label}>{t('drive.when')}</Text>
       <View style={styles.row}>
         {WHEN.map((m) => (
           <Chip
             key={m}
             testID={`drive-when-${m}`}
-            label={m === 0 ? t("drive.now") : t("drive.inMin", { n: m })}
+            label={m === 0 ? t('drive.now') : t('drive.inMin', { n: m })}
             selected={inMin === m}
             onPress={() => setInMin(m)}
             disabled={go.isPending}
@@ -70,13 +71,13 @@ export function DriveCard({
         ))}
       </View>
 
-      <Text style={styles.label}>{t("drive.detour")}</Text>
+      <Text style={styles.label}>{t('drive.detour')}</Text>
       <View style={styles.row}>
         {DETOURS.map((m) => (
           <Chip
             key={m}
             testID={`drive-detour-${m}`}
-            label={m === 0 ? t("drive.onMyRoad") : t("drive.plusMin", { n: m })}
+            label={m === 0 ? t('drive.onMyRoad') : t('drive.plusMin', { n: m })}
             selected={detour === m}
             onPress={() => setDetour(m)}
             disabled={go.isPending}
@@ -84,7 +85,7 @@ export function DriveCard({
         ))}
       </View>
 
-      <Hint>{t("drive.hint")}</Hint>
+      <Hint>{t('drive.hint')}</Hint>
       {error ? (
         <Text testID="drive-error" style={styles.error}>
           {error}
@@ -92,13 +93,11 @@ export function DriveCard({
       ) : null}
       <Button
         testID="drive-go"
-        label={pinned ? t("drive.change") : t("drive.go")}
+        label={pinned ? t('drive.change') : t('drive.go')}
         disabled={go.isPending}
         onPress={() =>
           go.mutate({
-            departsAt: new Date(
-              Math.floor((now() + inMin * 60_000) / 60_000) * 60_000,
-            ).toISOString(),
+            departsAt: new Date(Math.floor((now() + inMin * 60_000) / 60_000) * 60_000).toISOString(),
             detour,
           })
         }
@@ -112,10 +111,7 @@ const DETOURS = [0, 3, 5, 10] as const;
 const HOUR = 60 * 60_000;
 
 function nearestDetour(min: number): number {
-  return DETOURS.reduce(
-    (best, d) => (Math.abs(d - min) < Math.abs(best - min) ? d : best),
-    5,
-  );
+  return DETOURS.reduce((best, d) => (Math.abs(d - min) < Math.abs(best - min) ? d : best), 5);
 }
 
 /**
@@ -124,7 +120,8 @@ function nearestDetour(min: number): number {
  * the server holds an empty car to — and, once a minute is pinned, until it.
  */
 export function driveCardShown(trip: TripDetail, at: number): boolean {
-  if (trip.role !== "driver" || trip.status !== "scheduled") return false;
+  if (trip.role !== 'driver' || trip.status !== 'scheduled') return false;
+  if (trip.drive_ended_at) return false;
   if (trip.drive_set_at) return at < Date.parse(trip.depart_earliest);
   const opens = Date.parse(trip.scheduled_earliest ?? trip.depart_earliest);
   const closes = Date.parse(trip.scheduled_latest ?? trip.depart_latest);
@@ -135,8 +132,8 @@ const styles = StyleSheet.create({
   title: { ...type.title, color: colors.ink },
   label: { ...type.label, color: colors.muted, marginTop: space.md },
   row: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: space.sm,
     marginTop: space.xs,
   },

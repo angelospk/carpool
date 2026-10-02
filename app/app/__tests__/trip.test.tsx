@@ -29,6 +29,7 @@ jest.mock('../../src/api/endpoints', () => ({
     cancelTrip: jest.fn(),
     cancelBooking: jest.fn(),
     rateTrip: jest.fn(),
+    here: jest.fn(),
   },
 }));
 
@@ -342,4 +343,27 @@ describe('the chat', () => {
     await waitFor(() => expect(screen.queryByTestId('message-failed')).toBeNull());
     expect(screen.getByTestId('message-input').props.value).toBe('');
   });
+});
+
+// On a drive a passenger says when they are at the pickup, once, and the
+// screen then says the driver knows.
+test('a passenger on a drive says «Είμαι εδώ»', async () => {
+  (api.here as jest.Mock).mockResolvedValue(undefined);
+  (api.trip as jest.Mock).mockResolvedValue(
+    tripOf({
+      drive_set_at: new Date().toISOString(),
+      passengers: [person('me', 'Εγώ', { arrived_at: null })],
+    }),
+  );
+  render(<TripScreen />);
+  fireEvent.press(await screen.findByTestId('here'));
+  await waitFor(() => expect(api.here).toHaveBeenCalledWith('occ-1'));
+  expect(await screen.findByTestId('here-done')).toBeTruthy();
+});
+
+test('there is no «Είμαι εδώ» without a drive', async () => {
+  (api.trip as jest.Mock).mockResolvedValue(tripOf({ passengers: [person('me', 'Εγώ')] }));
+  render(<TripScreen />);
+  await screen.findByTestId('route-glyph');
+  expect(screen.queryByTestId('here')).toBeNull();
 });

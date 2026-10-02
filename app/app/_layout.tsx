@@ -11,6 +11,10 @@ import { takeReturn } from '../src/state/returnTo';
 import { useSession } from '../src/state/session';
 import { usePushRegistration } from '../src/push/usePushRegistration';
 import { useNotificationTaps } from '../src/push/useNotificationTaps';
+import { registerCategories } from '../src/push/categories';
+// Loaded at start for its side effect: the background task that receives the
+// car's position during a drive has to exist before the OS hands it anything.
+import '../src/drive/tracking';
 import { restoreLanguage } from '../src/i18n/language';
 import '../src/i18n';
 
@@ -70,6 +74,10 @@ function AuthGate() {
   usePushRegistration(status === 'signedIn');
   // And a tap on one opens what it is about, not the front page.
   useNotificationTaps(status === 'signedIn');
+  // The buttons an offer on a drive carries, in the language in use.
+  useEffect(() => {
+    void registerCategories(t);
+  }, [t]);
 
   useEffect(() => {
     if (status === 'loading') return;

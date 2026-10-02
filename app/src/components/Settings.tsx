@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { StyleSheet, Switch, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Platform, StyleSheet, Switch, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 
@@ -7,6 +7,8 @@ import { api, type Me } from '../api/endpoints';
 import { refusalText } from '../api/errorText';
 import { useSession } from '../state/session';
 import { LANGUAGES, setLanguage } from '../i18n/language';
+import { MAPS_APPS, type MapsApp } from '../drive/maps';
+import { getMapsApp, setMapsApp } from '../drive/mapsApp';
 import { Card, Chip } from './ui';
 import { colors, space, type } from '../design/tokens';
 
@@ -15,8 +17,8 @@ const GENDERS = ['female', 'male', 'other'] as const;
 type Patch = Partial<Pick<Me, 'gender' | 'women_only' | 'asks_paused'>>;
 
 /**
- * The profile's settings card: gender, women drivers only, pausing asks, and
- * language.
+ * The profile's settings card: gender, women drivers only, pausing asks,
+ * language, and for a driver the maps app a drive's pickups open in.
  *
  * Each saves on the tap rather than waiting for the profile's save button. A
  * switch that shows "on" before anything is stored is the thing this setting
@@ -60,6 +62,18 @@ export function Settings() {
   const change = (patch: Patch) => {
     if (me) update.mutate({ patch, account: me.id });
   };
+
+  // Which maps app a drive's pickups go to. On the device, like the
+  // language: it is about this phone. Apple Maps only where there is one.
+  const [mapsApp, setMapsAppState] = useState<MapsApp | null>(null);
+  useEffect(() => {
+    void getMapsApp().then(setMapsAppState);
+  }, []);
+  const chooseMaps = (app: MapsApp) => {
+    setMapsAppState(app);
+    void setMapsApp(app);
+  };
+  const mapsApps = MAPS_APPS.filter((a) => a !== 'apple' || Platform.OS === 'ios');
 
   const female = me?.gender === 'female';
   const womenOnly = !!me?.women_only;
@@ -133,6 +147,24 @@ export function Settings() {
           />
         ))}
       </View>
+
+      {me?.asks_paused !== undefined ? (
+        <>
+          <View style={styles.divider} />
+          <Text style={styles.label}>{t('drive.mapsApp')}</Text>
+          <View style={styles.chips}>
+            {mapsApps.map((app) => (
+              <Chip
+                key={app}
+                testID={`maps-${app}`}
+                label={t(`drive.maps_${app}`)}
+                selected={mapsApp === app}
+                onPress={() => chooseMaps(app)}
+              />
+            ))}
+          </View>
+        </>
+      ) : null}
 
       {error ? (
         <Text testID="settings-error" style={styles.error}>
