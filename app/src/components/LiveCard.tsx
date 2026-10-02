@@ -214,7 +214,7 @@ export function LiveCard({
             ))
           )}
           {carShared ? (
-            <Hint testID="live-car-shared">{t('drive.trackBody')}</Hint>
+            <Hint testID="live-car-shared">{t('drive.carShared')}</Hint>
           ) : sharing ? (
             <>
               <Hint testID="live-sharing">{t('live.sharing')}</Hint>

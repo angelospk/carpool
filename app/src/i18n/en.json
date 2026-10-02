@@ -574,8 +574,8 @@
     "when": "When you leave",
     "now": "Now",
     "inMin": "In {{n}}′",
-    "detour": "How far off your road for a passenger",
-    "onMyRoad": "0′, my road only",
+    "detour": "How far off your road for a passenger (0′: your road only)",
+    "onMyRoad": "0′",
     "plusMin": "+{{n}}′",
     "hint": "We only ask people who will be at the road before you pass. You never wait.",
     "go": "I'm leaving",
@@ -605,7 +605,8 @@
     "maps_apple": "Apple Maps",
     "maps_waze": "Waze",
     "ended": "The drive has ended.",
-    "bookedFrom": "With passengers booked you can leave from {{time}} on, as agreed."
+    "bookedFrom": "With passengers booked you can leave from {{time}} on, as agreed.",
+    "carShared": "Your car's position is shared with your passengers, for this drive only and until you tap «End»."
   },
   "detect": {
     "prompt": "Looks like you are driving. Say when you leave and we ask the people waiting on your road.",

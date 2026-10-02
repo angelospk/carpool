@@ -87,6 +87,7 @@ export function OnTheRoadCard({
         />
       </View>
 
+      {offering ? <Text style={styles.label}>{t('drive.detour')}</Text> : null}
       {offering ? (
         <View style={styles.row}>
           {DETOURS.map((m) => (
@@ -147,6 +148,7 @@ const styles = StyleSheet.create({
   title: { ...type.title, color: colors.ink },
   toggle: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: space.md },
   toggleLabel: { ...type.body, color: colors.ink, flex: 1 },
+  label: { ...type.label, color: colors.muted, marginTop: space.md },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.sm },
   passenger: {
     flexDirection: 'row',
