@@ -178,6 +178,14 @@ export default function PublishScreen() {
     onSuccess: (r, snap) => {
       setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`);
       setPublished({ ...snap, id: r.template_id });
+      // The places go, so a second press cannot publish the same route again
+      // and the next route starts from empty. Schedule, seats and car stay: a
+      // driver's next route usually shares them.
+      setFrom(null);
+      setTo(null);
+      setFromPoint(null);
+      setToPoint(null);
+      setLeavingNow(false);
       if (nowWindow.current && r.first_occurrence_id) {
         router.push({ pathname: '/trip/[id]', params: { id: r.first_occurrence_id } });
       }

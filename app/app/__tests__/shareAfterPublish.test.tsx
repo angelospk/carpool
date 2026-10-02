@@ -83,7 +83,10 @@ afterEach(() => {
 
 async function pickBothEnds() {
   render(wrap(<PublishScreen />));
+  await pickEnds();
+}
 
+async function pickEnds() {
   fireEvent.changeText(screen.getByTestId('publish-origin-input'), 'αλεξ');
   await waitFor(() => screen.getByTestId('publish-origin-node/Αλεξανδρούπολη'));
   fireEvent.press(screen.getByTestId('publish-origin-node/Αλεξανδρούπολη'));
@@ -148,6 +151,7 @@ test('a second publish replaces what is offered for sharing', async () => {
   fireEvent.press(screen.getByTestId('publish-submit'));
   await waitFor(() => expect(screen.getByTestId('publish-share-route')).toBeTruthy());
 
+  await pickEnds();
   fireEvent.press(screen.getByTestId('preset-presetWeekend'));
   fireEvent.press(screen.getByTestId('publish-submit'));
   await waitFor(() => expect(api.publishRoute).toHaveBeenCalledTimes(2));
@@ -158,6 +162,33 @@ test('a second publish replaces what is offered for sharing', async () => {
   const message = share.mock.calls[0][0].message as string;
   expect(message).toContain('Σαββατοκύριακα');
   expect(message).not.toContain('καθημερινές');
+});
+
+// A published form used to stay filled in, so a second press published the
+// same route again, and starting the next route meant clearing the old one by
+// hand. The places go; the schedule, seats and car stay, because a driver's
+// next route usually shares them.
+test('a route just published empties the places, so it cannot go out twice', async () => {
+  await pickBothEnds();
+
+  fireEvent.press(screen.getByTestId('publish-submit'));
+  await waitFor(() => expect(screen.getByTestId('publish-share-route')).toBeTruthy());
+
+  expect(screen.getByTestId('publish-origin-input').props.value).toBe('');
+  expect(screen.getByTestId('publish-destination-input').props.value).toBe('');
+  fireEvent.press(screen.getByTestId('publish-submit'));
+  expect(api.publishRoute).toHaveBeenCalledTimes(1);
+});
+
+// A failure is the opposite case: the driver fixes one thing and tries again.
+test('a failed publish keeps the places for another try', async () => {
+  (api.publishRoute as jest.Mock).mockRejectedValue(new Error('nope'));
+  await pickBothEnds();
+
+  fireEvent.press(screen.getByTestId('publish-submit'));
+  await waitFor(() => expect(screen.getByText(el.common.error)).toBeTruthy());
+
+  expect(screen.getByTestId('publish-origin-input').props.value).not.toBe('');
 });
 
 // Nothing exists yet, so there is nothing to tell anybody about.
@@ -197,6 +228,7 @@ test('a failed second publish does not leave a stale share behind an error', asy
   await waitFor(() => expect(screen.getByTestId('publish-share-route')).toBeTruthy());
 
   (api.publishRoute as jest.Mock).mockRejectedValue(new Error('nope'));
+  await pickEnds();
   fireEvent.press(screen.getByTestId('preset-presetWeekend'));
   fireEvent.press(screen.getByTestId('publish-submit'));
 

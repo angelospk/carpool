@@ -64,6 +64,12 @@ export function PlaceField({
     if (outside !== null && outside !== selected.current) {
       selected.current = outside;
       setText(outside);
+    } else if (outside === null && selected.current !== null) {
+      // And taken away from outside: the parent cleared a place this field
+      // still showed. A keystroke cannot land here, because edit() lets go of
+      // selected before it hands null up.
+      selected.current = null;
+      setText('');
     }
   }, [outside]);
 
