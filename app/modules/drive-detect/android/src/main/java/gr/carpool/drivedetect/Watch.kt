@@ -52,9 +52,14 @@ internal object Watch {
     return PendingIntent.getBroadcast(context, 0, intent, flags)
   }
 
-  /** Registers for "started moving in a vehicle". Returns false without permission. */
-  fun register(context: Context): Boolean {
-    if (!permitted(context)) return false
+  /**
+   * Registers for "started moving in a vehicle" and reports, through [done],
+   * whether Play services accepted it. False without permission, and false if
+   * Play services refuses: the request is answered asynchronously, so success
+   * is not known until it says so.
+   */
+  fun register(context: Context, done: (Boolean) -> Unit) {
+    if (!permitted(context)) return done(false)
     val request = ActivityTransitionRequest(
       listOf(
         ActivityTransition.Builder()
@@ -64,20 +69,28 @@ internal object Watch {
       )
     )
     try {
-      ActivityRecognition.getClient(context).requestActivityTransitionUpdates(request, pendingIntent(context))
+      ActivityRecognition.getClient(context)
+        .requestActivityTransitionUpdates(request, pendingIntent(context))
+        .addOnSuccessListener { done(true) }
+        .addOnFailureListener { done(false) }
     } catch (e: SecurityException) {
-      return false
+      done(false)
     }
-    return true
   }
 
-  fun start(context: Context, title: String, body: String): Boolean {
-    prefs(context).edit().putBoolean(KEY_ON, true).putString(KEY_TITLE, title).putString(KEY_BODY, body).apply()
-    return register(context)
+  /** Turns the watch on, and only records it as on once Play services accepted it. */
+  fun start(context: Context, title: String, body: String, done: (Boolean) -> Unit) {
+    register(context) { ok ->
+      if (ok) {
+        prefs(context).edit().putBoolean(KEY_ON, true).putString(KEY_TITLE, title).putString(KEY_BODY, body).apply()
+      }
+      done(ok)
+    }
   }
 
+  /** Off, and the windows forgotten: they were somebody's departures. */
   fun stop(context: Context) {
-    prefs(context).edit().putBoolean(KEY_ON, false).apply()
+    prefs(context).edit().putBoolean(KEY_ON, false).putString(KEY_WINDOWS, "[]").apply()
     if (permitted(context)) {
       try {
         ActivityRecognition.getClient(context).removeActivityTransitionUpdates(pendingIntent(context))
@@ -106,16 +119,19 @@ internal object Watch {
       val occurrence = w.optString(2)
       if (now < start || now > end || occurrence.isEmpty()) continue
       // Once per departure: a stop at the lights and off again is not news.
+      // Marked only once it was actually shown, so a notification the system
+      // refused does not use up the departure.
       if (p.getLong(KEY_LAST, 0L) == start) return
-      p.edit().putLong(KEY_LAST, start).apply()
-      notify(context, occurrence, p.getString(KEY_TITLE, "") ?: "", p.getString(KEY_BODY, "") ?: "")
+      if (notify(context, occurrence, p.getString(KEY_TITLE, "") ?: "", p.getString(KEY_BODY, "") ?: "")) {
+        p.edit().putLong(KEY_LAST, start).apply()
+      }
       return
     }
   }
 
-  private fun notify(context: Context, occurrence: String, title: String, body: String) {
+  private fun notify(context: Context, occurrence: String, title: String, body: String): Boolean {
     val manager = NotificationManagerCompat.from(context)
-    if (!manager.areNotificationsEnabled()) return
+    if (!manager.areNotificationsEnabled()) return false
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       val system = context.getSystemService(NotificationManager::class.java)
       if (system.getNotificationChannel(CHANNEL) == null) {
@@ -135,10 +151,12 @@ internal object Watch {
       .setContentIntent(tap)
       .setAutoCancel(true)
       .build()
-    try {
+    return try {
       manager.notify(NOTIFICATION_ID, notification)
+      true
     } catch (e: SecurityException) {
       // Notifications refused since the check above.
+      false
     }
   }
 }

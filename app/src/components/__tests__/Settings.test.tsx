@@ -15,11 +15,11 @@ import { ApiError } from '../../api/client';
 
 jest.mock('../../api/endpoints', () => ({ api: { updateMe: jest.fn() } }));
 
-const mockEnable = jest.fn((_notice: unknown) => Promise.resolve(true));
+const mockEnable = jest.fn((_account: string, _notice: unknown) => Promise.resolve(true));
 const mockDisable = jest.fn(() => Promise.resolve());
 jest.mock('../../drive/detection', () => ({
   detectionOn: () => Promise.resolve(false),
-  enableDetection: (notice: unknown) => mockEnable(notice),
+  enableDetection: (account: string, notice: unknown) => mockEnable(account, notice),
   disableDetection: () => mockDisable(),
 }));
 
@@ -206,7 +206,7 @@ test('a driver turns on noticing when they drive', async () => {
   mockMe = { id: 'me', gender: null, women_only: false, asks_paused: false };
   render(<Settings />);
   fireEvent(screen.getByTestId('detect-driving'), 'valueChange', true);
-  await waitFor(() => expect(mockEnable).toHaveBeenCalled());
+  await waitFor(() => expect(mockEnable).toHaveBeenCalledWith('me', expect.anything()));
   await waitFor(() => expect(screen.getByTestId('detect-driving').props.value).toBe(true));
 });
 

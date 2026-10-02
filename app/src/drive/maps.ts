@@ -35,42 +35,56 @@ export function mapsUrl(app: MapsApp, to: { stops: LonLat[]; destination: LonLat
 /**
  * The pickups and drop-offs still ahead, in the order the car meets them.
  *
- * Each point is placed on the nearest segment of the road, as how many
- * segments along plus how far into that one, which is plenty to order a
- * handful of stops along one route. With the car's position, anything at or
- * behind it is done; without one, nothing is.
+ * Each point is placed on the nearest segment of the road, in metres from its
+ * start, which is plenty to order a handful of stops along one route. A stop
+ * is only dropped once the car is well past it — PASSED_M further along — and
+ * a pickup off to the side of the road, which sits level with the car as it
+ * goes by, is therefore kept until the car has clearly left it behind. With
+ * no position for the car nothing is dropped.
  */
 export function remainingStops(
   road: LonLat[],
   car: LonLat | null,
   passengers: { pickup?: LonLat | null; dropoff?: LonLat | null }[],
 ): LonLat[] {
-  const passed = car ? along(road, car) : -Infinity;
+  const passed = car ? metresAlong(road, car) - PASSED_M : -Infinity;
   return passengers
     .flatMap((p) => [p.pickup, p.dropoff])
     .filter((s): s is LonLat => !!s)
-    .map((s) => ({ s, at: along(road, s) }))
+    .map((s) => ({ s, at: metresAlong(road, s) }))
     .filter(({ at }) => at > passed)
     .sort((x, y) => x.at - y.at)
     .map(({ s }) => s);
 }
 
-/** How far along the road a point lies: segment index plus the fraction into it. */
-function along(road: LonLat[], p: LonLat): number {
+const PASSED_M = 300;
+
+/** Metres between two nearby points; flat-earth is exact enough within a region. */
+function metres(a: LonLat, b: LonLat): number {
+  const k = Math.cos(((a[1] + b[1]) / 2) * (Math.PI / 180));
+  return Math.hypot((b[0] - a[0]) * k, b[1] - a[1]) * 111_320;
+}
+
+/** How far along the road a point lies, in metres, through its nearest segment. */
+function metresAlong(road: LonLat[], p: LonLat): number {
   if (road.length < 2) return 0;
   let best = 0;
   let bestD = Infinity;
+  let before = 0;
   for (let i = 0; i < road.length - 1; i++) {
     const [a, b] = [road[i], road[i + 1]];
-    const dx = b[0] - a[0];
+    const k = Math.cos(a[1] * (Math.PI / 180));
+    const dx = (b[0] - a[0]) * k;
     const dy = b[1] - a[1];
     const len = dx * dx + dy * dy;
-    const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len));
-    const d = (a[0] + t * dx - p[0]) ** 2 + (a[1] + t * dy - p[1]) ** 2;
+    const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * k * dx + (p[1] - a[1]) * dy) / len));
+    const d = ((a[0] - p[0]) * k + t * dx) ** 2 + (a[1] - p[1] + t * dy) ** 2;
+    const segment = metres(a, b);
     if (d < bestD) {
       bestD = d;
-      best = i + t;
+      best = before + t * segment;
     }
+    before += segment;
   }
   return best;
 }

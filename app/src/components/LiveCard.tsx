@@ -89,6 +89,21 @@ export function LiveCard({
     [tripId],
   );
 
+  // «Φεύγω» hands the car's position to the drive's background task. A
+  // foreground share already running stops here — and pending starts are
+  // cancelled — but nothing is deleted: the position now belongs to the
+  // drive, and the cleanup above has no watcher left to act on.
+  useEffect(() => {
+    if (!carShared) return;
+    generation.current++;
+    starting.current = false;
+    if (watch.current) {
+      watch.current.remove();
+      watch.current = null;
+    }
+    setSharing(false);
+  }, [carShared]);
+
   // A browser tab closing, or going to another page, unloads without
   // unmounting anything, so the cleanup above never runs. pagehide does, and a
   // keepalive request is allowed to finish after the page is gone.
@@ -100,7 +115,7 @@ export function LiveCard({
   }, [sharing, tripId]);
 
   const start = async () => {
-    if (starting.current || watch.current) return;
+    if (carShared || starting.current || watch.current) return;
     starting.current = true;
     setError(null);
     failures.current = 0;

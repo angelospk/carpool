@@ -139,3 +139,20 @@ test('a driver whose drive shares the car is not offered a second share', async 
   expect(await screen.findByTestId('live-car-shared')).toBeTruthy();
   expect(screen.queryByTestId('live-start')).toBeNull();
 });
+
+// A driver sharing from this screen who then presses «Φεύγω»: the drive's
+// task takes over the position. The screen's own watcher stops, and neither
+// the hand-over nor leaving the screen deletes the position the drive now owns.
+test('handing the car to the drive stops the screen\'s share without deleting the position', async () => {
+  (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [] });
+  (Location.requestForegroundPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
+  const at = Date.parse(window.opens) + 60_000;
+  const { rerender, unmount } = render(wrap(<LiveCard tripId="occ-1" now={() => at} />));
+  fireEvent.press(await screen.findByTestId('live-start'));
+  await waitFor(() => expect(Location.watchPositionAsync).toHaveBeenCalled());
+
+  rerender(wrap(<LiveCard tripId="occ-1" now={() => at} carShared />));
+  await waitFor(() => expect(mockRemove).toHaveBeenCalled());
+  unmount();
+  expect(api.stopPosition).not.toHaveBeenCalled();
+});

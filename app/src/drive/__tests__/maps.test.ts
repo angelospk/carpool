@@ -43,8 +43,8 @@ const road: [number, number][] = [
 ];
 
 // Pickups and drop-offs along the road, ordered as the car meets them; what
-// the car has already passed is left out.
-test('the stops left are the ones ahead of the car, in road order', () => {
+// the car is well past is left out.
+test('the stops left are the ones not yet well behind the car, in road order', () => {
   const passengers = [
     { pickup: [25.86, 40.85] as [number, number], dropoff: [25.99, 40.85] as [number, number] },
     { pickup: [25.94, 40.85] as [number, number], dropoff: [25.97, 40.85] as [number, number] },
@@ -55,10 +55,20 @@ test('the stops left are the ones ahead of the car, in road order', () => {
     [25.97, 40.85],
     [25.99, 40.85],
   ]);
-  // The car is past the first pickup: that one is done, its drop-off is not.
+  // Three kilometres past the first pickup: that one is done, its drop-off is not.
   expect(remainingStops(road, [25.9, 40.85], passengers)).toEqual([
     [25.94, 40.85],
     [25.97, 40.85],
+    [25.99, 40.85],
+  ]);
+});
+
+// A pickup 330 m off the road sits level with the car as it drives by. It is
+// not visited by being level with it, and stays.
+test('a pickup beside the road is kept while the car is level with it', () => {
+  const offRoad = { pickup: [25.9, 40.853] as [number, number], dropoff: [25.99, 40.85] as [number, number] };
+  expect(remainingStops(road, [25.9, 40.85], [offRoad])).toEqual([
+    [25.9, 40.853],
     [25.99, 40.85],
   ]);
 });

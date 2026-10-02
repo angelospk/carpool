@@ -53,8 +53,17 @@ export async function uploadLatest(locations: Fix[]): Promise<void> {
 /** Where this phone last was, for ordering the stops ahead. Null if it does not know. */
 export async function carPosition(): Promise<[number, number] | null> {
   if (Platform.OS === 'web') return null;
-  const last = await Location.getLastKnownPositionAsync().catch(() => null);
+  // Only a recent, decent fix: an old one would drop stops the car has not
+  // reached, and a vague one could put it anywhere.
+  const last = await Location.getLastKnownPositionAsync({ maxAge: 120_000, requiredAccuracy: 200 }).catch(
+    () => null,
+  );
   return last ? [last.coords.longitude, last.coords.latitude] : null;
+}
+
+/** Stops sampling without telling the server: for a sign-out, when there is nobody to tell it as. */
+export async function forgetDrive(): Promise<void> {
+  await stopSampling();
 }
 
 async function stopSampling(): Promise<void> {

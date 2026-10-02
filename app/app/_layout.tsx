@@ -14,7 +14,8 @@ import { useNotificationTaps } from '../src/push/useNotificationTaps';
 import { registerCategories } from '../src/push/categories';
 // Loaded at start for its side effect: the background task that receives the
 // car's position during a drive has to exist before the OS hands it anything.
-import '../src/drive/tracking';
+import { forgetDrive } from '../src/drive/tracking';
+import { forgetOtherAccounts } from '../src/drive/detection';
 import { restoreLanguage } from '../src/i18n/language';
 import '../src/i18n';
 
@@ -74,6 +75,16 @@ function AuthGate() {
   usePushRegistration(status === 'signedIn');
   // And a tap on one opens what it is about, not the front page.
   useNotificationTaps(status === 'signedIn');
+  // What this phone does on its own for a driver — sharing a drive, noticing
+  // a departure — belongs to the account that turned it on. Signed out, or
+  // somebody else signed in, it stops: nobody inherits it.
+  const account = useSession((s) => s.me?.id);
+  useEffect(() => {
+    if (status === 'loading') return;
+    void forgetOtherAccounts(status === 'signedIn' ? account : undefined);
+    if (status === 'signedOut') void forgetDrive();
+  }, [status, account]);
+
   // The buttons an offer on a drive carries, in the language in use.
   useEffect(() => {
     void registerCategories(t);

@@ -80,14 +80,15 @@ export function Settings() {
   // phone actually agreed to rather than what was tapped.
   const [detect, setDetect] = useState(false);
   useEffect(() => {
-    void detectionOn().then(setDetect);
-  }, []);
+    void detectionOn(me?.id).then(setDetect);
+  }, [me?.id]);
   const toggleDetect = async (on: boolean) => {
     if (!on) {
       await disableDetection();
       return setDetect(false);
     }
-    const ok = await enableDetection({ title: t('detect.notifyTitle'), body: t('detect.notifyBody') });
+    if (!me) return;
+    const ok = await enableDetection(me.id, { title: t('detect.notifyTitle'), body: t('detect.notifyBody') });
     setDetect(ok);
     setError(ok ? null : t('detect.denied'));
   };

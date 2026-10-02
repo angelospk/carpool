@@ -48,6 +48,9 @@ function wrap(node: ReactNode) {
   return <QueryClientProvider client={client}>{node}</QueryClientProvider>;
 }
 
+// The driving prompt has tests of its own; here it is in the way.
+jest.mock('../../src/components/DrivingPrompt', () => ({ DrivingPrompt: () => null }));
+
 beforeEach(() => {
   jest.clearAllMocks();
   (api.upcomingTrips as jest.Mock).mockResolvedValue({ trips: [] });

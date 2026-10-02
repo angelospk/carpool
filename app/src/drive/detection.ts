@@ -17,6 +17,7 @@
 import { Platform } from 'react-native';
 import { requireOptionalNativeModule } from 'expo';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 
 import type { TripSummary } from '../api/endpoints';
 import { storage } from '../state/secureStorage';
@@ -39,45 +40,107 @@ export function detectionWindows(trips: TripSummary[]): [number, number, string]
     .map((t) => [Date.parse(t.depart_earliest) - HOUR, Date.parse(t.depart_latest) + HOUR, t.id]);
 }
 
-export async function detectionOn(): Promise<boolean> {
-  return (await storage.getItemAsync(KEY).catch(() => null)) === 'on';
+/**
+ * Whether this account turned detection on, on this phone. The consent is
+ * kept with the account it came from: somebody else signing in on the same
+ * phone has not agreed to anything.
+ */
+export async function detectionOn(account: string | undefined): Promise<boolean> {
+  if (!account) return false;
+  return (await storage.getItemAsync(KEY).catch(() => null)) === account;
 }
 
 /**
- * Turns detection on. Asks for the motion permission ("Physical activity" on
- * Android, "Motion & Fitness" on iOS) and, on Android, starts the watch.
- * Returns false when the permission is refused.
+ * Turns detection on for this account. Asks for the motion permission
+ * ("Physical activity" on Android, "Motion & Fitness" on iOS) and for
+ * notifications, without which the Android watch has no way to speak, and
+ * on Android starts the watch — on only once Play services has accepted it.
+ * Returns false when any of that is refused.
  */
-export async function enableDetection(notice: { title: string; body: string }): Promise<boolean> {
+export async function enableDetection(
+  account: string,
+  notice: { title: string; body: string },
+): Promise<boolean> {
   if (Platform.OS === 'web') return false;
-  const permission = await Location.requestMotionActivityPermissionsAsync().catch(() => null);
-  if (!permission?.granted) return false;
-  if (native && !(await native.start(notice.title, notice.body).catch(() => false))) return false;
-  await storage.setItemAsync(KEY, 'on');
+  const motion = await Location.requestMotionActivityPermissionsAsync().catch(() => null);
+  if (!motion?.granted) return false;
+  if (native) {
+    const current = await Notifications.getPermissionsAsync().catch(() => null);
+    const notify = current?.granted
+      ? current
+      : await Notifications.requestPermissionsAsync().catch(() => null);
+    if (!notify?.granted) return false;
+    if (!(await native.start(notice.title, notice.body).catch(() => false))) return false;
+  }
+  await storage.setItemAsync(KEY, account);
   return true;
 }
 
+/** Off, and the Android watch's windows forgotten. */
 export async function disableDetection(): Promise<void> {
   await storage.deleteItemAsync(KEY).catch(() => undefined);
   await native?.stop().catch(() => undefined);
 }
 
-/** Tells the Android watch which windows count. Harmless elsewhere. */
-export async function syncDetectionWindows(trips: TripSummary[]): Promise<void> {
-  await native?.setWindows(JSON.stringify(detectionWindows(trips))).catch(() => undefined);
+/**
+ * Tells the Android watch which windows count — this account's departures,
+ * and none when this account has not turned detection on.
+ */
+export async function syncDetectionWindows(trips: TripSummary[], account: string | undefined): Promise<void> {
+  const windows = (await detectionOn(account)) ? detectionWindows(trips) : [];
+  await native?.setWindows(JSON.stringify(windows)).catch(() => undefined);
 }
+
+/**
+ * Sign-out, or another account on this phone: detection that was not this
+ * account's is turned off, so nobody inherits it and the watch stops
+ * speaking about somebody else's departures.
+ */
+export async function forgetOtherAccounts(account: string | undefined): Promise<void> {
+  const owner = await storage.getItemAsync(KEY).catch(() => null);
+  if (owner && owner !== account) await disableDetection();
+}
+
+/** The departure whose window holds now, if any. */
+export function departureNow(trips: TripSummary[], now: number): string | null {
+  return detectionWindows(trips).find(([start, end]) => now >= start && now <= end)?.[2] ?? null;
+}
+
+const inCar = (o: Location.MotionActivityObject) =>
+  o.activities.automotive.detected &&
+  o.activities.automotive.confidence >= Location.MotionActivityConfidence.Medium;
 
 /**
  * The departure the driver seems to be setting off on: one whose window holds
  * now, with the phone confidently in a vehicle. Null on any doubt.
  */
 export async function drivingNow(trips: TripSummary[], now: number): Promise<string | null> {
-  const window = detectionWindows(trips).find(([start, end]) => now >= start && now <= end);
-  if (!window) return null;
+  const trip = departureNow(trips, now);
+  if (!trip) return null;
   try {
-    const { activities } = await Location.getMotionActivityAsync();
-    const car = activities.automotive;
-    return car.detected && car.confidence >= Location.MotionActivityConfidence.Medium ? window[2] : null;
+    return inCar(await Location.getMotionActivityAsync()) ? trip : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keeps watching while the screen is open: a driver standing by the car when
+ * the screen first looked is not news, the same driver moving off a minute
+ * later is. Calls back with the departure when the phone is confidently in a
+ * vehicle. Null when there is nothing to watch for.
+ */
+export async function watchDriving(
+  trips: TripSummary[],
+  now: number,
+  onDriving: (trip: string) => void,
+): Promise<{ remove(): void } | null> {
+  const trip = departureNow(trips, now);
+  if (!trip) return null;
+  try {
+    return await Location.watchMotionActivityAsync((o) => {
+      if (inCar(o)) onDriving(trip);
+    });
   } catch {
     return null;
   }
