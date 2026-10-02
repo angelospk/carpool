@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"carpool/internal/api"
@@ -136,5 +137,23 @@ func TestTheOTPIsNeverReturnedWithoutDevMode(t *testing.T) {
 	}
 	if body := res.Body.String(); body != "" {
 		t.Fatalf("the response carried a body: %s", body)
+	}
+}
+
+// A DEV_MODE server that is reachable from the internet keeps the code in its
+// log. Echoing it there would let anybody who knows a phone number sign in as
+// its owner, which DEV_MODE on a laptop never exposes.
+func TestDevModeWithLogOnlyKeepsTheOTPOutOfTheResponse(t *testing.T) {
+	h := newHarnessDeps(t, true, nil, func(d *api.Deps) { d.DevOTPLogOnly = true })
+
+	res := h.do(http.MethodPost, "/v1/auth/otp/request", map[string]any{"phone": "+306900000057"}, "")
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("POST otp/request = %d, want 204 and an empty body: %s", res.Code, res.Body)
+	}
+
+	tok, _ := h.signUp("+306900000058", "Δοκιμή")
+	change := h.do(http.MethodPost, "/v1/me/phone/request", map[string]any{"phone": "+306900000059"}, tok)
+	if strings.Contains(change.Body.String(), "dev_code") {
+		t.Fatalf("the phone change response carried the code: %s", change.Body)
 	}
 }

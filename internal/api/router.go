@@ -105,6 +105,11 @@ type Deps struct {
 	// API cross-origin so the Expo web build can be used for testing.
 	DevMode bool
 
+	// DevOTPLogOnly keeps a DEV_MODE server's codes in its log instead of the
+	// response. For a DEV_MODE server reachable from the internet, where an
+	// echoed code would let anybody who knows a number sign in as its owner.
+	DevOTPLogOnly bool
+
 	// OTPPerIPPerHour caps how many sign-in codes one address may ask for in an
 	// hour, across every number. The per-number limit stops somebody flooding
 	// one phone; it does nothing about one client asking for codes to thousands

@@ -62,6 +62,12 @@ func newRoutedMatcherHarness(t *testing.T) *harness {
 func newHarnessWith(t *testing.T, devMode bool) *harness { return newHarnessOpts(t, devMode, nil) }
 
 func newHarnessOpts(t *testing.T, devMode bool, matcher func(*asks.Service) *asks.Service) *harness {
+	return newHarnessDeps(t, devMode, matcher, nil)
+}
+
+// newHarnessDeps is newHarnessOpts with a last word on the router's Deps, for
+// the few tests about a single deployment setting.
+func newHarnessDeps(t *testing.T, devMode bool, matcher func(*asks.Service) *asks.Service, tweak func(*api.Deps)) *harness {
 	t.Helper()
 	ctx := context.Background()
 
@@ -96,7 +102,7 @@ func newHarnessOpts(t *testing.T, devMode bool, matcher func(*asks.Service) *ask
 	if matcher != nil {
 		askService = matcher(askService)
 	}
-	router := api.NewRouter(api.Deps{
+	deps := api.Deps{
 		DevMode:       devMode,
 		PublicBaseURL: "https://carpool.test/",
 		InstallURL:    "https://carpool.test/get",
@@ -119,9 +125,13 @@ func newHarnessOpts(t *testing.T, devMode bool, matcher func(*asks.Service) *ask
 		Account:       account.NewService(pool, c),
 		Drivers:       drivers.NewService(pool, c),
 		Moderation:    moderation.NewService(pool, c),
-	})
+	}
+	if tweak != nil {
+		tweak(&deps)
+	}
+	router := api.NewRouter(deps)
 
-	return &harness{t: t, router: router, pool: pool, clock: c, sms: sms, regionID: regionID, devMode: devMode}
+	return &harness{t: t, router: router, pool: pool, clock: c, sms: sms, regionID: regionID, devMode: deps.DevMode && !deps.DevOTPLogOnly}
 }
 
 // do issues a request against the router. token may be empty.

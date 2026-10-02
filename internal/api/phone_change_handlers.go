@@ -46,7 +46,7 @@ func (d Deps) handleRequestPhoneChange(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := map[string]any{"challenge_id": challengeID}
-	if d.DevMode {
+	if d.DevMode && !d.DevOTPLogOnly {
 		// Same rule as sign-in: the code comes back only where the log already
 		// prints it, and a test asserts it does not otherwise.
 		out["dev_code"] = code

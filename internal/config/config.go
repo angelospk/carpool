@@ -53,6 +53,10 @@ type Config struct {
 	// does not affect anyone who already has an account.
 	InviteOnly bool
 
+	// DevOTPLogOnly stops DEV_MODE from returning sign-in codes in responses.
+	// Set it on any DEV_MODE server somebody else can reach.
+	DevOTPLogOnly bool
+
 	// PublicBaseURL is the address route links are built on, and InstallURL
 	// is where their page sends somebody without the app. Both optional.
 	PublicBaseURL string
@@ -72,6 +76,8 @@ func Load(lookup LookupFunc) (Config, error) {
 		HTTPAddr:   optional(lookup, "HTTP_ADDR", ":8080"),
 		DevMode:    optional(lookup, "DEV_MODE", "false") == "true",
 		InviteOnly: optional(lookup, "INVITE_ONLY", "false") == "true",
+
+		DevOTPLogOnly: optional(lookup, "DEV_OTP_LOG_ONLY", "false") == "true",
 
 		SMSURL:    optional(lookup, "SMS_URL", ""),
 		SMSToken:  optional(lookup, "SMS_TOKEN", ""),

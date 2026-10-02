@@ -69,7 +69,7 @@ func (d Deps) handleOTPRequest(w http.ResponseWriter, r *http.Request) {
 		// The only other failure mode is a malformed number; treating it as a
 		// client error avoids leaking whether the number is known.
 		writeError(w, http.StatusBadRequest, "invalid_request", "the phone number must be in E.164 format")
-	case d.DevMode:
+	case d.DevMode && !d.DevOTPLogOnly:
 		// Testing this app means signing in on a device you are not holding,
 		// and DEV_MODE writes the code to the API's log, which whoever is
 		// testing cannot read. So it comes back in the response instead.
