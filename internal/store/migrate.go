@@ -5,6 +5,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -37,23 +38,25 @@ func MigrateTo(ctx context.Context, pool *pgxpool.Pool, version int64) error {
 
 // migrate applies every migration, or those up to version when it is non-zero.
 func migrate(ctx context.Context, pool *pgxpool.Pool, version int64) error {
-	conn, err := pool.Acquire(ctx)
+	// The lock is held on a connection of its own, outside the pool. goose
+	// runs on pool connections, and a migrator waiting for the lock while
+	// holding one of those would starve the migrator that has it: four
+	// migrators on a four-connection pool deadlocked exactly so. The lock is a
+	// mutex between migrators; it does not need to share their connection.
+	lockConn, err := pgx.ConnectConfig(ctx, pool.Config().ConnConfig.Copy())
 	if err != nil {
-		return fmt.Errorf("store: acquiring connection for migration: %w", err)
+		return fmt.Errorf("store: connecting for the migration lock: %w", err)
 	}
-	defer conn.Release()
+	defer func() { _ = lockConn.Close(context.WithoutCancel(ctx)) }()
 
-	// Hold the advisory lock on this one connection for the whole migration.
-	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrateLockID); err != nil {
+	if _, err := lockConn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrateLockID); err != nil {
 		return fmt.Errorf("store: taking migration lock: %w", err)
 	}
 	defer func() {
 		// Best effort: the lock is released with the session in any case.
-		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrateLockID)
+		_, _ = lockConn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrateLockID)
 	}()
 
-	// goose speaks database/sql, so hand it this same pgx connection rather than
-	// opening a second one that would not hold the lock.
 	db := stdlib.OpenDBFromPool(pool)
 	defer func() { _ = db.Close() }()
 
