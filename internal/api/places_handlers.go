@@ -90,3 +90,21 @@ func (d Deps) handleMeetingPoints(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"points": found})
 }
+
+// handlePlaceNear names the settlement at a coordinate, so a form can start
+// from where the phone is instead of from a typed name. 404 when nothing is
+// close enough to be the answer.
+func handlePlaceNear(w http.ResponseWriter, r *http.Request) {
+	lon, errLon := strconv.ParseFloat(r.URL.Query().Get("lon"), 64)
+	lat, errLat := strconv.ParseFloat(r.URL.Query().Get("lat"), 64)
+	if errLon != nil || errLat != nil || lon < -180 || lon > 180 || lat < -90 || lat > 90 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "lon and lat are required")
+		return
+	}
+	p, ok := places.Nearest(lon, lat)
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "no place near that point")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"place": p})
+}

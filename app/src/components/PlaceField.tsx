@@ -14,6 +14,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import * as Location from 'expo-location';
 import { useTranslation } from 'react-i18next';
 
 import { api, type Place } from '../api/endpoints';
@@ -31,6 +32,7 @@ export function PlaceField({
   onChange,
   testID,
   placeholder,
+  here = false,
 }: {
   label: string;
   /** The chosen place, or null while the text does not name one. */
@@ -38,6 +40,12 @@ export function PlaceField({
   onChange: (pin: Pin | null) => void;
   testID?: string;
   placeholder?: string;
+  /**
+   * Offer «Από εδώ»: fill the field with the settlement the phone is in. Where
+   * location is already allowed it fills itself on opening; it never asks for
+   * the permission until pressed.
+   */
+  here?: boolean;
 }) {
   const { t } = useTranslation();
   const [text, setText] = useState(value?.label ?? '');
@@ -136,6 +144,44 @@ export function PlaceField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
 
+  const [locating, setLocating] = useState(false);
+  const [hereFailed, setHereFailed] = useState(false);
+
+  // ask=false is the silent fill on opening: it uses a permission already
+  // given and gives up quietly, because nobody pressed anything.
+  const pressedHere = useRef(0);
+  const fromHere = async (ask: boolean) => {
+    // A press overtakes the silent attempt still running from opening.
+    const press = ask ? ++pressedHere.current : pressedHere.current;
+    setHereFailed(false);
+    if (ask) setLocating(true);
+    try {
+      const permission = ask
+        ? await Location.requestForegroundPermissionsAsync()
+        : await Location.getForegroundPermissionsAsync();
+      if (!permission.granted) {
+        if (ask) setHereFailed(true);
+        return;
+      }
+      const at = await position();
+      const { place } = await api.placeNear(at.coords.longitude, at.coords.latitude);
+      // Typed into, or chosen from the list, while the phone was looking: what
+      // somebody did by hand wins over what the phone worked out.
+      if (!ask && (selected.current !== null || pressedHere.current !== press)) return;
+      choose(place);
+    } catch {
+      if (ask) setHereFailed(true);
+    } finally {
+      if (ask) setLocating(false);
+    }
+  };
+
+  useEffect(() => {
+    if (here && value === null) void fromHere(false);
+    // Once, on opening: a field emptied later stays empty until asked.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const choose = (place: Place) => {
     // Same reason as the coordinate branch: choosing ends every question this
     // field has outstanding, so no answer to one may reopen the list.
@@ -158,6 +204,23 @@ export function PlaceField({
         autoCapitalize="sentences"
         valid={value !== null}
       />
+
+      {here ? (
+        <Pressable
+          testID={testID ? `${testID}-here` : undefined}
+          accessibilityRole="button"
+          onPress={() => void fromHere(true)}
+          disabled={locating}
+          style={styles.here}
+        >
+          <Text style={styles.hereLabel}>{t('places.here')}</Text>
+        </Pressable>
+      ) : null}
+      {hereFailed ? (
+        <Text testID={testID ? `${testID}-here-failed` : undefined} style={styles.empty}>
+          {t('places.hereFailed')}
+        </Text>
+      ) : null}
 
       {suggestions && suggestions.length > 0 ? (
         <View testID={testID ? `${testID}-suggestions` : undefined} style={styles.list}>
@@ -190,6 +253,19 @@ export function PlaceField({
   );
 }
 
+// Where the phone is, to the nearest town. A fix from the last few minutes is
+// as good as a new one at that scale and comes back at once; a fresh fix can
+// hang on Android when no provider has one, so it gets ten seconds and then
+// counts as a failure, which the field reports instead of sitting still.
+async function position(): Promise<Location.LocationObject> {
+  const recent = await Location.getLastKnownPositionAsync({ maxAge: 10 * 60_000 });
+  if (recent) return recent;
+  return Promise.race([
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('no fix')), 10_000)),
+  ]);
+}
+
 const styles = StyleSheet.create({
   list: {
     marginTop: space.xs,
@@ -208,5 +284,7 @@ const styles = StyleSheet.create({
   },
   name: { ...typography.body, color: colors.ink },
   kind: { ...typography.caption, color: colors.muted },
+  here: { alignSelf: 'flex-start', paddingVertical: space.xs, marginTop: space.xs },
+  hereLabel: { ...typography.label, color: colors.primary },
   empty: { ...typography.caption, color: colors.muted, marginTop: space.xs, paddingHorizontal: space.md },
 });

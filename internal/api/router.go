@@ -172,6 +172,8 @@ func NewRouter(deps Deps) http.Handler {
 		// through it is a linear scan of 12k rows measured at under a
 		// millisecond, so there is neither a secret nor a cost to protect.
 		r.Get("/places", deps.handlePlaces)
+		// The same list, asked by coordinate instead: «Από εδώ» on a form.
+		r.Get("/places/near", handlePlaceNear)
 
 		// What a route link says, for the app to show before anybody has an
 		// account. Only what the page says; see store.SharedRoute.

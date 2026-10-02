@@ -237,6 +237,7 @@ export default function PublishScreen() {
               setFromPoint(null);
             }}
             placeholder={t('search.placeholder')}
+            here
           />
           <MeetingPointField
             testID="publish-origin-point"

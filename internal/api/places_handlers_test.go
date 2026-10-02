@@ -157,3 +157,32 @@ func TestASettlementWithNoMeetingPointsAnswersEmpty(t *testing.T) {
 		t.Errorf("body = %s, want an empty list", rec.Body.String())
 	}
 }
+
+func TestPlacesNearNamesTheSettlementAtACoordinate(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000509", "Νίκος")
+
+	rec := h.do(http.MethodGet, "/v1/places/near?lon=26.3051&lat=41.1958", nil, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Place struct {
+			Name string  `json:"name"`
+			Lon  float64 `json:"lon"`
+		} `json:"place"`
+	}
+	h.decode(rec, &got)
+	if got.Place.Name != "Σουφλί" || got.Place.Lon == 0 {
+		t.Fatalf("got %+v", got)
+	}
+
+	if rec := h.do(http.MethodGet, "/v1/places/near?lon=20&lat=34", nil, token); rec.Code != http.StatusNotFound {
+		t.Errorf("far out at sea: status %d, want 404", rec.Code)
+	}
+	for _, q := range []string{"", "lon=abc&lat=41", "lon=26.3&lat=95"} {
+		if rec := h.do(http.MethodGet, "/v1/places/near?"+q, nil, token); rec.Code != http.StatusBadRequest {
+			t.Errorf("%q: status %d, want 400", q, rec.Code)
+		}
+	}
+}

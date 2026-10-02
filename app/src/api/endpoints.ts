@@ -408,6 +408,9 @@ export const api = {
    * OpenStreetMap, embedded in the binary — so there is nothing here that a
    * token would be protecting.
    */
+  /** The settlement at a coordinate, for «Από εδώ». 404 when nothing is near. */
+  placeNear: (lon: number, lat: number) =>
+    request<{ place: Place }>(`/v1/places/near?lon=${lon}&lat=${lat}`, { anonymous: true }),
   places: (q: string) =>
     request<{ places: Place[] }>(`/v1/places?q=${encodeURIComponent(q)}`, { anonymous: true }),
 

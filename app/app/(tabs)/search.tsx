@@ -104,6 +104,7 @@ export default function SearchScreen() {
                 value={from}
                 onChange={setFrom}
                 placeholder={t('search.placeholder')}
+                here
               />
               <PlaceField
                 testID="to"
