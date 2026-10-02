@@ -76,12 +76,25 @@ export function setTokens(tokens: Tokens, expectedEpoch?: number): Promise<boole
   });
 }
 
+const cleared = new Set<() => void>();
+
+/**
+ * Called whenever the credentials are cleared — a sign-out, or a session the
+ * server rejected — which is the one thing that means this phone is no longer
+ * signed in as anybody. Returns the way to stop listening.
+ */
+export function onTokensCleared(listener: () => void): () => void {
+  cleared.add(listener);
+  return () => void cleared.delete(listener);
+}
+
 /** Clears credentials and advances the epoch, invalidating any in-flight write. */
 export function clearTokens(): Promise<void> {
   return serialize(async () => {
     epoch += 1;
     cached = null;
     await storage.deleteItemAsync(KEY);
+    cleared.forEach((l) => l());
   });
 }
 

@@ -3,7 +3,13 @@ import * as Location from 'expo-location';
 import { api } from '../../api/endpoints';
 import { ApiError } from '../../api/client';
 import { storage } from '../../state/secureStorage';
-import { startDriveTracking, stopDriveTracking, uploadLatest } from '../tracking';
+import {
+  setDriveStops,
+  startDriveTracking,
+  stopDriveTracking,
+  uploadLatest,
+  visitedStops,
+} from '../tracking';
 
 jest.mock('expo-task-manager', () => ({ defineTask: jest.fn() }));
 jest.mock('expo-location', () => ({
@@ -119,4 +125,19 @@ test('a network failure changes nothing', async () => {
   await uploadLatest([fix(40.81, 1000)]);
   expect(Location.stopLocationUpdatesAsync).not.toHaveBeenCalled();
   expect(await storage.getItemAsync('carpool.driveTrip')).toBe('trip-1');
+});
+
+// The task records which stops the car has been at, from every fix of a
+// batch, so the hand-off never sends the driver back to one.
+test('the fixes record the stops the car has been at', async () => {
+  await storage.setItemAsync('carpool.driveTrip', 'trip-1');
+  await setDriveStops([
+    [25.9, 40.85],
+    [25.95, 40.85],
+  ]);
+  await uploadLatest([
+    { coords: { latitude: 40.85, longitude: 25.9003, accuracy: 10 }, timestamp: 1000 },
+    { coords: { latitude: 40.85, longitude: 25.93, accuracy: 10 }, timestamp: 2000 },
+  ]);
+  expect([...(await visitedStops())]).toEqual(['25.90000,40.85000']);
 });

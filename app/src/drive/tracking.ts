@@ -21,9 +21,12 @@ import * as TaskManager from 'expo-task-manager';
 import { api } from '../api/endpoints';
 import { ApiError } from '../api/client';
 import { storage } from '../state/secureStorage';
+import { markVisited, type LonLat } from './maps';
 
 export const DRIVE_TASK = 'carpool-drive-position';
 const KEY = 'carpool.driveTrip';
+const STOPS = 'carpool.driveStops';
+const VISITED = 'carpool.driveVisited';
 
 /** The part of a fix that is sent. */
 type Fix = {
@@ -35,6 +38,7 @@ type Fix = {
 export async function uploadLatest(locations: Fix[]): Promise<void> {
   const trip = await storage.getItemAsync(KEY).catch(() => null);
   if (!trip || locations.length === 0) return;
+  await noteVisits(locations);
   const last = locations.reduce((a, b) => (b.timestamp > a.timestamp ? b : a));
   try {
     await api.putPosition(trip, last.coords.latitude, last.coords.longitude, {
@@ -50,15 +54,38 @@ export async function uploadLatest(locations: Fix[]): Promise<void> {
   }
 }
 
-/** Where this phone last was, for ordering the stops ahead. Null if it does not know. */
-export async function carPosition(): Promise<[number, number] | null> {
-  if (Platform.OS === 'web') return null;
-  // Only a recent, decent fix: an old one would drop stops the car has not
-  // reached, and a vague one could put it anywhere.
-  const last = await Location.getLastKnownPositionAsync({ maxAge: 120_000, requiredAccuracy: 200 }).catch(
-    () => null,
-  );
-  return last ? [last.coords.longitude, last.coords.latitude] : null;
+/**
+ * The drive's stops, as the trip last listed them, so the background task can
+ * tell which ones the car has been at. Written whenever the trip loads.
+ */
+export async function setDriveStops(stops: LonLat[]): Promise<void> {
+  await storage.setItemAsync(STOPS, JSON.stringify(stops)).catch(() => undefined);
+}
+
+/** The stops this drive's fixes have come close to. */
+export async function visitedStops(): Promise<Set<string>> {
+  const raw = await storage.getItemAsync(VISITED).catch(() => null);
+  try {
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Records the stops any fix of this batch came close to. */
+async function noteVisits(locations: Fix[]): Promise<void> {
+  const raw = await storage.getItemAsync(STOPS).catch(() => null);
+  if (!raw) return;
+  let stops: LonLat[];
+  try {
+    stops = JSON.parse(raw) as LonLat[];
+  } catch {
+    return;
+  }
+  const before = await visitedStops();
+  const fixes = locations.map((l) => [l.coords.longitude, l.coords.latitude] as LonLat);
+  const after = markVisited(fixes, stops, before);
+  if (after.size !== before.size) await storage.setItemAsync(VISITED, JSON.stringify([...after]));
 }
 
 /** Stops sampling without telling the server: for a sign-out, when there is nobody to tell it as. */
@@ -68,6 +95,8 @@ export async function forgetDrive(): Promise<void> {
 
 async function stopSampling(): Promise<void> {
   await storage.deleteItemAsync(KEY).catch(() => undefined);
+  await storage.deleteItemAsync(STOPS).catch(() => undefined);
+  await storage.deleteItemAsync(VISITED).catch(() => undefined);
   if (
     Platform.OS !== 'web' &&
     (await Location.hasStartedLocationUpdatesAsync(DRIVE_TASK).catch(() => false))
@@ -92,6 +121,9 @@ export async function startDriveTracking(
   if (Platform.OS === 'web') return 'unavailable';
   const permission = await Location.requestForegroundPermissionsAsync();
   if (!permission.granted) return 'denied';
+  if ((await storage.getItemAsync(KEY).catch(() => null)) !== tripId) {
+    await storage.deleteItemAsync(VISITED).catch(() => undefined);
+  }
   await storage.setItemAsync(KEY, tripId);
   await Location.startLocationUpdatesAsync(DRIVE_TASK, {
     accuracy: Location.Accuracy.Balanced,

@@ -12,7 +12,9 @@ jest.mock('../../api/endpoints', () => ({
 }));
 jest.mock('../../drive/tracking', () => ({
   stopDriveTracking: jest.fn(() => Promise.resolve()),
-  carPosition: jest.fn(() => Promise.resolve([25.92, 40.85])),
+  setDriveStops: jest.fn(() => Promise.resolve()),
+  // Μαρία's pickup has been made.
+  visitedStops: jest.fn(() => Promise.resolve(new Set(['25.90000,40.85000']))),
 }));
 jest.mock('../RouteGlyph', () => ({
   decodeRoute: () => [
@@ -75,8 +77,8 @@ test('shows who is already at their pickup', () => {
   expect(screen.getByTestId('road-passenger-u2')).not.toHaveTextContent(/στο σημείο/);
 });
 
-// One button, every stop still ahead in road order: the car has passed
-// Μαρία's pickup, so Νίκος's pickup comes first, then both drop-offs.
+// One button, every stop not yet visited in road order: Μαρία's pickup has
+// been made, so Νίκος's pickup comes first, then both drop-offs.
 test('navigates through every stop still ahead', async () => {
   const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
   const withDropoffs = trip({

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Linking, StyleSheet, Switch, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
@@ -7,10 +7,10 @@ import { api, type TripDetail } from '../api/endpoints';
 import { refusalText } from '../api/errorText';
 import { athensTime } from '../design/format';
 import { colors, space, type } from '../design/tokens';
-import { mapsUrl, remainingStops } from '../drive/maps';
+import { mapsUrl, remainingStops, type LonLat } from '../drive/maps';
 import { decodeRoute } from './RouteGlyph';
 import { getMapsApp } from '../drive/mapsApp';
-import { carPosition, stopDriveTracking } from '../drive/tracking';
+import { setDriveStops, stopDriveTracking, visitedStops } from '../drive/tracking';
 import { Badge, Button, Card, Chip, Hint } from './ui';
 
 /**
@@ -53,12 +53,17 @@ export function OnTheRoadCard({
 
   const offering = !!trip.offers_until && Date.parse(trip.offers_until) > now();
   const destination = trip.destination ?? null;
-  // Every stop still ahead — pickups and drop-offs, in road order — then the
-  // end of the road. One button: in a car there is no choosing.
+  // Every stop not yet visited — pickups and drop-offs, in road order — then
+  // the end of the road. One button: in a car there is no choosing.
+  const stops = trip.passengers.flatMap((p) => [p.pickup, p.dropoff]).filter((s): s is LonLat => !!s);
+  useEffect(() => {
+    void setDriveStops(stops);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(stops)]);
   const navigate = async () => {
     if (!destination) return;
-    const stops = remainingStops(decodeRoute(trip.route_polyline), await carPosition(), trip.passengers);
-    await Linking.openURL(mapsUrl(await getMapsApp(), { stops, destination })).catch(() => undefined);
+    const left = remainingStops(decodeRoute(trip.route_polyline), trip.passengers, await visitedStops());
+    await Linking.openURL(mapsUrl(await getMapsApp(), { stops: left, destination })).catch(() => undefined);
   };
   const busy = adjust.isPending || end.isPending;
 

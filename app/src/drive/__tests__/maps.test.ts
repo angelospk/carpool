@@ -1,4 +1,4 @@
-import { mapsUrl, remainingStops } from '../maps';
+import { mapsUrl, markVisited, remainingStops, stopKey } from '../maps';
 
 const a: [number, number] = [25.9, 40.85];
 const b: [number, number] = [25.95, 40.85];
@@ -42,40 +42,37 @@ const road: [number, number][] = [
   [26.0, 40.85],
 ];
 
-// Pickups and drop-offs along the road, ordered as the car meets them; what
-// the car is well past is left out.
-test('the stops left are the ones not yet well behind the car, in road order', () => {
-  const passengers = [
-    { pickup: [25.86, 40.85] as [number, number], dropoff: [25.99, 40.85] as [number, number] },
-    { pickup: [25.94, 40.85] as [number, number], dropoff: [25.97, 40.85] as [number, number] },
-  ];
-  expect(remainingStops(road, null, passengers)).toEqual([
+const first = { pickup: [25.86, 40.85] as [number, number], dropoff: [25.99, 40.85] as [number, number] };
+const second = { pickup: [25.94, 40.85] as [number, number], dropoff: [25.97, 40.85] as [number, number] };
+
+// Every stop not yet visited, in the order the car meets them along the road.
+test('the stops left are the ones not visited, in road order', () => {
+  expect(remainingStops(road, [first, second], new Set())).toEqual([
     [25.86, 40.85],
     [25.94, 40.85],
     [25.97, 40.85],
     [25.99, 40.85],
   ]);
-  // Three kilometres past the first pickup: that one is done, its drop-off is not.
-  expect(remainingStops(road, [25.9, 40.85], passengers)).toEqual([
+  expect(remainingStops(road, [first, second], new Set([stopKey([25.86, 40.85])]))).toEqual([
     [25.94, 40.85],
     [25.97, 40.85],
     [25.99, 40.85],
   ]);
 });
 
-// A pickup 330 m off the road sits level with the car as it drives by. It is
-// not visited by being level with it, and stays.
-test('a pickup beside the road is kept while the car is level with it', () => {
-  const offRoad = { pickup: [25.9, 40.853] as [number, number], dropoff: [25.99, 40.85] as [number, number] };
-  expect(remainingStops(road, [25.9, 40.85], [offRoad])).toEqual([
-    [25.9, 40.853],
-    [25.99, 40.85],
-  ]);
-});
-
-// Just after a pickup — the car pulled away 84 m ago — the pickup is done and
-// navigation goes on to the drop-off, not back.
-test('a pickup the car has just left is done', () => {
-  const p = { pickup: [25.9, 40.85] as [number, number], dropoff: [25.99, 40.85] as [number, number] };
-  expect(remainingStops(road, [25.901, 40.85], [p])).toEqual([[25.99, 40.85]]);
+// The drive's own fixes, at most 150 m apart, record a stop on the road as the
+// car passes it; a pickup 100 m off to the side is not visited by driving by.
+test('a stop is visited when a fix came close to it, not by driving level with it', () => {
+  const onRoad: [number, number] = [25.9, 40.85];
+  const aside: [number, number] = [25.92, 40.8509]; // ~100 m off the road
+  const fixes: [number, number][] = [
+    [25.8991, 40.85],
+    [25.9009, 40.85], // ~75 m either side of the stop on the road
+    [25.92, 40.85],
+  ];
+  const visited = markVisited(fixes, [onRoad, aside], new Set());
+  expect(visited.has(stopKey(onRoad))).toBe(true);
+  expect(visited.has(stopKey(aside))).toBe(false);
+  // Once recorded, a stop stays visited however far the car goes.
+  expect(markVisited([[26.0, 40.85]], [onRoad], visited).has(stopKey(onRoad))).toBe(true);
 });

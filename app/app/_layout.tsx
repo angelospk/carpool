@@ -15,7 +15,7 @@ import { registerCategories } from '../src/push/categories';
 // Loaded at start for its side effect: the background task that receives the
 // car's position during a drive has to exist before the OS hands it anything.
 import { forgetDrive } from '../src/drive/tracking';
-import { getTokens } from '../src/state/tokens';
+import { onTokensCleared } from '../src/state/tokens';
 import { forgetOtherAccounts } from '../src/drive/detection';
 import { restoreLanguage } from '../src/i18n/language';
 import '../src/i18n';
@@ -77,25 +77,22 @@ function AuthGate() {
   // And a tap on one opens what it is about, not the front page.
   useNotificationTaps(status === 'signedIn');
   // What this phone does on its own for a driver — sharing a drive, noticing
-  // a departure — belongs to the account that turned it on. Signed out, or
-  // somebody else signed in, it stops: nobody inherits it.
+  // a departure — belongs to the account that turned it on. Somebody else
+  // signed in, it is not theirs; credentials cleared — a sign-out, or a
+  // session the server rejected — it stops. A launch with no network keeps
+  // the credentials, and is neither.
   const account = useSession((s) => s.me?.id);
-  //
-  // "Signed out" also covers a launch with no network, where the credentials
-  // are kept and the next launch signs straight back in; only credentials
-  // that are actually gone count as leaving.
   useEffect(() => {
-    if (status === 'signedIn') {
-      void forgetOtherAccounts(account);
-      return;
-    }
-    if (status !== 'signedOut') return;
-    void getTokens().then((tokens) => {
-      if (tokens) return;
-      void forgetOtherAccounts(undefined);
-      void forgetDrive();
-    });
+    if (status === 'signedIn') void forgetOtherAccounts(account);
   }, [status, account]);
+  useEffect(
+    () =>
+      onTokensCleared(() => {
+        void forgetOtherAccounts(undefined);
+        void forgetDrive();
+      }),
+    [],
+  );
 
   // The buttons an offer on a drive carries, in the language in use.
   useEffect(() => {

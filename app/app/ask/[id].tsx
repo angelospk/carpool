@@ -22,8 +22,8 @@ import {
 } from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
 import { athensTime } from '../../src/design/format';
-import { mapsUrl, remainingStops } from '../../src/drive/maps';
-import { carPosition } from '../../src/drive/tracking';
+import { mapsUrl, remainingStops, type LonLat } from '../../src/drive/maps';
+import { setDriveStops, visitedStops } from '../../src/drive/tracking';
 import { decodeRoute } from '../../src/components/RouteGlyph';
 import { getMapsApp } from '../../src/drive/mapsApp';
 import { detourText } from '../../src/design/detour';
@@ -102,7 +102,10 @@ export default function AskScreen() {
       if (!trip.destination || !seat?.pickup) return;
       // Every stop still ahead, not only the new one: a second passenger must
       // not take the first one's pickup off the route.
-      const stops = remainingStops(decodeRoute(trip.route_polyline), await carPosition(), trip.passengers);
+      await setDriveStops(
+        trip.passengers.flatMap((p) => [p.pickup, p.dropoff]).filter((s): s is LonLat => !!s),
+      );
+      const stops = remainingStops(decodeRoute(trip.route_polyline), trip.passengers, await visitedStops());
       await Linking.openURL(mapsUrl(await getMapsApp(), { stops, destination: trip.destination }));
     } catch {
       // The seat is booked either way; the trip screen has the same button.

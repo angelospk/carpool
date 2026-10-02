@@ -7,6 +7,7 @@ import {
   resetTokenCache,
   setTokens,
   tokenEpoch,
+  onTokensCleared,
 } from '../tokens';
 
 beforeEach(async () => {
@@ -103,4 +104,16 @@ test('a failed keychain write does not update the cache', async () => {
   await expect(setTokens({ accessToken: 'never', refreshToken: 'never' })).rejects.toThrow();
 
   expect(await getTokens()).toEqual({ accessToken: 'a', refreshToken: 'r' });
+});
+
+// Clearing the credentials is what tells the rest of the app that nobody is
+// signed in on this phone any more.
+test('clearing the credentials tells whoever is listening', async () => {
+  const heard = jest.fn();
+  const stop = onTokensCleared(heard);
+  await clearTokens();
+  expect(heard).toHaveBeenCalledTimes(1);
+  stop();
+  await clearTokens();
+  expect(heard).toHaveBeenCalledTimes(1);
 });

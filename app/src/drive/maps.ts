@@ -33,38 +33,47 @@ export function mapsUrl(app: MapsApp, to: { stops: LonLat[]; destination: LonLat
 }
 
 /**
- * The pickups and drop-offs still ahead, in the order the car meets them.
+ * The pickups and drop-offs not yet visited, in the order the car meets them
+ * along the road.
  *
- * Each point is placed on the nearest segment of the road, in metres from its
- * start, which is plenty to order a handful of stops along one route. A stop
- * is done once the car is well past it, or close to it and level or beyond —
- * which is what having just stopped there looks like. A pickup off to the side
- * of the road, level with the car as it drives by but not close, is kept. With
- * no position for the car nothing is dropped.
+ * Whether a stop was visited is not guessed from where the car is now — a
+ * pickup off to the side looks the same as one just made — but recorded as the
+ * drive goes: the phone marks a stop once one of its own fixes came within
+ * VISIT_M of it (see markVisited). A phone that recorded nothing drops nothing,
+ * which at worst sends the driver past a stop already made, never past one
+ * still to make.
  */
 export function remainingStops(
   road: LonLat[],
-  car: LonLat | null,
   passengers: { pickup?: LonLat | null; dropoff?: LonLat | null }[],
+  visited: ReadonlySet<string>,
 ): LonLat[] {
-  const carAt = car ? metresAlong(road, car) : -Infinity;
-  const done = (s: LonLat, at: number) =>
-    !!car && (at < carAt - PASSED_M || (at <= carAt + LEVEL_M && metres(car, s) < AT_STOP_M));
   return passengers
     .flatMap((p) => [p.pickup, p.dropoff])
-    .filter((s): s is LonLat => !!s)
+    .filter((s): s is LonLat => !!s && !visited.has(stopKey(s)))
     .map((s) => ({ s, at: metresAlong(road, s) }))
-    .filter(({ s, at }) => !done(s, at))
     .sort((x, y) => x.at - y.at)
     .map(({ s }) => s);
 }
 
-// Well past a stop is past it. Close to one and level with it or beyond is
-// at it: the car has just stopped there. A pickup off to the side of the road
-// is neither while the car only drives level with it.
-const PASSED_M = 300;
-const AT_STOP_M = 150;
-const LEVEL_M = 30;
+/** A stop's identity: its point, to the metre. */
+export const stopKey = ([lon, lat]: LonLat) => `${lon.toFixed(5)},${lat.toFixed(5)}`;
+
+/**
+ * The stops the car has been at: those any of these fixes came within VISIT_M
+ * of, added to the ones already recorded. Fixes come at most 150 m apart, so a
+ * car passing a stop on its road always has one within 75 m; a pickup off to
+ * the side is only reached by going to it.
+ */
+export function markVisited(fixes: LonLat[], stops: LonLat[], visited: ReadonlySet<string>): Set<string> {
+  const out = new Set(visited);
+  for (const s of stops) {
+    if (fixes.some((f) => metres(f, s) <= VISIT_M)) out.add(stopKey(s));
+  }
+  return out;
+}
+
+const VISIT_M = 80;
 
 /** Metres between two nearby points; flat-earth is exact enough within a region. */
 function metres(a: LonLat, b: LonLat): number {
