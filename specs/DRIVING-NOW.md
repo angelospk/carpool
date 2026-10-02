@@ -258,8 +258,11 @@ rule as MOBILE.md: no passive tracking.
    «Πάρ' τον» accepts and opens Google Maps / Apple Maps / Waze with the
    pickup as a stop. Stop / resume / detour mid-drive, «Τέλος»,
    «Είμαι εδώ». Background location via expo-location + expo-task-manager,
-   When In Use only, every 150 m or 30 s, newest fix per batch.
-   Not built: adaptive sampling near a pickup (one coarse mode only),
+   When In Use only, High accuracy every 150 m or 30 s, newest fix per batch.
+   The hand-off lists every stop not yet visited, in road order; a stop is
+   visited once a fix within 50 m accuracy came within 80 m of it, recorded
+   on the phone as the drive goes.
+   Not built: adaptive sampling near a pickup (one mode only),
    ad-hoc drives without a schedule (publish a one-off route instead), and
    a moving ETA shown to the passenger (they see the planned pickup time and
    the driver's dot on the live map).
