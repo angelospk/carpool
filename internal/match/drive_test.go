@@ -26,7 +26,8 @@ func (f *fixture) pinDrive(t *testing.T, occurrenceID uuid.UUID, departs time.Ti
 	if _, err := f.pool.Exec(context.Background(), `
 		UPDATE trip_occurrences
 		   SET scheduled_earliest = depart_earliest, scheduled_latest = depart_latest,
-		       depart_earliest = $2::timestamptz, depart_latest = $2::timestamptz, drive_set_at = $2::timestamptz - interval '10 minutes'
+		       depart_earliest = $2::timestamptz, depart_latest = $2::timestamptz, drive_set_at = $2::timestamptz - interval '10 minutes',
+		       offers_until = $2::timestamptz + route_min * interval '1 minute'
 		 WHERE id = $1`, occurrenceID, departs); err != nil {
 		t.Fatalf("pinning the drive: %v", err)
 	}
@@ -199,5 +200,31 @@ func TestDriveDemandCountsOnlyWhoIsReady(t *testing.T) {
 	})
 	if n, err = match.DriveDemand(context.Background(), f.pool, occ, now); err != nil || n != 1 {
 		t.Fatalf("DriveDemand = %d, %v; want the one passenger ready now", n, err)
+	}
+}
+
+// The estimate ignores the stops before this one, so the late side allows for
+// every minute of detour the driver agreed to. A passenger who gives up at
+// 07:08 cannot rely on a car due at 07:02 with ten minutes of other people's
+// detours allowed in front of them; with no detour allowed, they can.
+func TestADriveAllowsForTheDetoursBeforeThePickup(t *testing.T) {
+	f := setup(t)
+	occ := f.addOccurrence(t, corridorWKT)
+	f.pinDrive(t, occ, driveDeparts)
+	q := driveQuery(driveDeparts.Add(-30*time.Minute), driveDeparts.Add(8*time.Minute))
+
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE trip_occurrences SET detour_min = 10 WHERE id = $1`, occ); err != nil {
+		t.Fatal(err)
+	}
+	if got := driveGross(t, f, q); len(got) != 0 {
+		t.Fatalf("ten minutes of allowed detours were not counted: %+v", got)
+	}
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE trip_occurrences SET detour_min = 1 WHERE id = $1`, occ); err != nil {
+		t.Fatal(err)
+	}
+	if got := driveGross(t, f, q); len(got) != 1 {
+		t.Fatalf("control: with a minute's detour the car is in time: %+v", got)
 	}
 }

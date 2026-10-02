@@ -210,8 +210,10 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	// already do for the last seat.
 	var luggageFree int
 	var departs time.Time
+	var takingOffers bool
 	err = tx.QueryRow(ctx, `
 		SELECT o.seats_free, o.status, o.itinerary_version, t.driver_id, o.depart_earliest,
+		       COALESCE(o.drive_set_at IS NOT NULL AND o.offers_until > $2, false),
 		       o.luggage_capacity - COALESCE((
 		           SELECT sum(b.luggage_count) FROM bookings b
 		           WHERE b.occurrence_id = o.id AND b.status IN ('confirmed', 'completed')
@@ -219,7 +221,7 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		FROM trip_occurrences o
 		JOIN route_templates t ON t.id = o.template_id
 		WHERE o.id = $1
-		FOR UPDATE OF o`, occurrenceID).Scan(&seatsFree, &occurrenceState, &version, &templateDriver, &departs, &luggageFree)
+		FOR UPDATE OF o`, occurrenceID, s.clock.Now()).Scan(&seatsFree, &occurrenceState, &version, &templateDriver, &departs, &takingOffers, &luggageFree)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("asks: locking occurrence: %w", err)
 	}
@@ -272,7 +274,11 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	// Offers now carry deadlines that end at the departure, so the ordinary path
 	// cannot produce a pending ask that reaches this line. It is here for the one
 	// that does anyway.
-	if !now.Before(departs) {
+	//
+	// A drive is the exception: the car has left, but it is still on the road
+	// with seats, and the readiness check below decides whether this pickup is
+	// still ahead of it.
+	if !now.Before(departs) && !takingOffers {
 		return uuid.Nil, ErrTripDeparted
 	}
 	if requestState != "open" && requestState != "asking" {
@@ -287,7 +293,7 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		SELECT o.drive_set_at IS NOT NULL AND NOT `+match.DriveReady("o.depart_earliest", "o.route_min",
 		"ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, rr.origin))",
 		"ST_Distance(o.route_geom::geography, rr.origin::geography)",
-		"GREATEST(rr.window_start, $3::timestamptz)", "rr.window_end")+`
+		"GREATEST(rr.window_start, $3::timestamptz)", "rr.window_end", "o.detour_min")+`
 		  FROM trip_occurrences o, ride_requests rr
 		 WHERE o.id = $1 AND rr.id = $2`, occurrenceID, requestID, now).Scan(&tooLate); err != nil {
 		return uuid.Nil, fmt.Errorf("asks: checking the pickup is still in time: %w", err)

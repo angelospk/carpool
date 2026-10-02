@@ -18,3 +18,10 @@ test('an id that is not a plain id goes nowhere odd', () => {
   expect(destinationOf({ ask_id: 42 })).toBe('/(tabs)');
   expect(destinationOf(undefined)).toBeNull();
 });
+
+// A nudge is about one of the driver's own departures, and the «Φεύγω» card
+// is on that departure's screen.
+test('a nudge opens the departure it is about', () => {
+  expect(destinationOf({ occurrence_id: 'c0ffee-1' })).toBe('/trip/c0ffee-1');
+  expect(destinationOf({ occurrence_id: '../x' })).toBe('/(tabs)');
+});

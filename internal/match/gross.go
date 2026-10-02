@@ -118,26 +118,52 @@ func SeatsSpokenFor(occurrence, now string) string {
 		  AND a.expires_at > ` + now + `), 0)`
 }
 
-// DriveReady is the SQL condition for a pickup on a drive: the passenger can
-// be at the road before the car, and has not stopped waiting by the time it
-// arrives. See specs/DRIVING-NOW.md.
+// DriveOpen is the SQL condition for a trip still taking offers. Without a
+// drive that ends when the car is due to leave. A drive goes on past its
+// minute, until offers_until: the car is on the road with seats, and the
+// pickups still ahead of it are held to DriveReady.
+func DriveOpen(occurrence, now string) string {
+	o := occurrence
+	return `((` + o + `.drive_set_at IS NULL AND ` + o + `.depart_earliest > ` + now + `)
+	      OR (` + o + `.drive_set_at IS NOT NULL AND ` + o + `.offers_until > ` + now + `))`
+}
+
+// DriveDeadline is the SQL for the last moment a passenger can be told about a
+// pickup on a drive and still be at the road first.
 //
 // The car reaches the pickup a fraction of the way along a route of known
 // length, leaving at a known minute. The passenger needs to have set off for
 // the road a margin earlier: three minutes for a guess that is only a guess,
-// plus the walk at 80 m a minute. Being early is fine and being late is not,
-// because the one rule a drive keeps is that the driver never waits.
+// plus the walk at 80 m a minute. An offer on a drive expires here, because an
+// answer after it puts the driver at the road before the passenger.
+func DriveDeadline(departs, routeMin, fraction, walkM string) string {
+	return `(` + driveETA(departs, routeMin, fraction) + ` - (` + driveMarginMin + ` + ` + walkM + ` / ` +
+		walkMetresPerMin + `) * interval '1 minute')`
+}
+
+// DriveReady is the SQL condition for a pickup on a drive: the passenger can
+// be at the road before the car, and has not stopped waiting by the time it
+// arrives. See specs/DRIVING-NOW.md.
 //
 // readyFrom is when the passenger can set off, which is never before now: a
 // window that opened an hour ago says they were ready then, not that they are
 // already standing at the road.
 //
-// It takes its operands as SQL so the matcher and the code that re-checks an
-// offer when a drive is set cannot disagree about what ready means.
-func DriveReady(departs, routeMin, fraction, walkM, readyFrom, windowEnd string) string {
-	eta := `(` + departs + ` + (` + fraction + ` * ` + routeMin + `) * interval '1 minute')`
-	return `(` + readyFrom + ` <= ` + eta + ` - (` + driveMarginMin + ` + ` + walkM + ` / ` + walkMetresPerMin + `) * interval '1 minute'
-	     AND ` + eta + ` <= ` + windowEnd + `)`
+// The late side adds lateBy, the most the driver has agreed to spend on other
+// people's detours: the estimate ignores the stops before this one, and the
+// passenger must still be waiting if every one of them costs what it may.
+// Being early is fine and being late is not, because the one rule a drive
+// keeps is that the driver never waits.
+//
+// It takes its operands as SQL so the matcher, the offers already made and the
+// accept path cannot disagree about what ready means.
+func DriveReady(departs, routeMin, fraction, walkM, readyFrom, windowEnd, lateBy string) string {
+	return `(` + readyFrom + ` <= ` + DriveDeadline(departs, routeMin, fraction, walkM) + `
+	     AND ` + driveETA(departs, routeMin, fraction) + ` + (` + lateBy + `) * interval '1 minute' <= ` + windowEnd + `)`
+}
+
+func driveETA(departs, routeMin, fraction string) string {
+	return `(` + departs + ` + (` + fraction + ` * ` + routeMin + `) * interval '1 minute')`
 }
 
 const (
@@ -219,7 +245,7 @@ WITH cand AS (
 	  -- candidate. depart_earliest is what the rest of the app already means by
 	  -- departed — the moment a pair may confirm the ride, and the moment the
 	  -- driver may no longer call it off — so it is what is used here.
-	  AND o.depart_earliest > $13
+	  AND ` + DriveOpen("o", "$13") + `
 	  AND NOT d.notifications_muted
 	  AND ST_DWithin(o.route_geom::geography, $1::geography, d.notify_radius_km * 1000)
 	  AND ST_DWithin(o.route_geom::geography, $2::geography, d.notify_radius_km * 1000)
@@ -270,7 +296,7 @@ WHERE f_o < f_d
   -- the scheduled window cannot express: the passenger is there first and is
   -- still there when it comes. Without a drive the window overlap above is all
   -- there is to go on, and it stays the whole test.
-  AND (drive_set_at IS NULL OR ` + DriveReady("departs", "route_min", "f_o", "walk_m", "GREATEST($3, $13)", "$4") + `)
+  AND (drive_set_at IS NULL OR ` + DriveReady("departs", "route_min", "f_o", "walk_m", "GREATEST($3, $13)", "$4", "detour_min") + `)
 ORDER BY (f_d - f_o) * route_km DESC, occurrence_id
 LIMIT $8
 `

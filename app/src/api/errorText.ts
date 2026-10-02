@@ -22,6 +22,11 @@ const known = new Set([
   'women_only_needs_female',
   'rate_limited',
   'outside_country',
+  'bad_departure',
+  'outside_window',
+  'drive_departed',
+  'trip_not_running',
+  'bad_detour',
 ]);
 
 /** A sentence for a refusal this app knows, or null for the caller to decide. */

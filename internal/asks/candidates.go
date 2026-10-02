@@ -438,7 +438,23 @@ func (s *Service) createAsk(
 	// moved to 'asking' with nothing live behind it, and a wait for the sweeper
 	// to undo it. Refused instead, so the next candidate is tried at once.
 	now := s.clock.Now()
-	if !departs.After(now) {
+
+	// A drive is open past its minute, and an offer on one ends at the last
+	// moment this passenger can still be told and be at the road before the
+	// car. Read in its own statement after the lock, for the reason given
+	// below the next one.
+	var pinned, open bool
+	var deadline *time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT o.drive_set_at IS NOT NULL, `+match.DriveOpen("o", "$3")+`,
+		       CASE WHEN o.drive_set_at IS NOT NULL THEN `+match.DriveDeadline("o.depart_earliest", "o.route_min",
+		"ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, rr.origin))",
+		"ST_Distance(o.route_geom::geography, rr.origin::geography)")+` END
+		  FROM trip_occurrences o, ride_requests rr
+		 WHERE o.id = $1 AND rr.id = $2`, c.OccurrenceID, req.ID, now).Scan(&pinned, &open, &deadline); err != nil {
+		return uuid.Nil, fmt.Errorf("asks: reading the drive: %w", err)
+	}
+	if !open || (pinned && (deadline == nil || !deadline.After(now))) {
 		return uuid.Nil, errNoRoomToAsk
 	}
 
@@ -483,6 +499,9 @@ func (s *Service) createAsk(
 	// Ending it at the departure hands them back to the sweeper, which reopens
 	// the request and looks for somebody who has not gone yet.
 	expiresAt := now.Add(DefaultTTL)
+	if pinned {
+		departs = *deadline
+	}
 	if departs.Before(expiresAt) {
 		expiresAt = departs
 	}

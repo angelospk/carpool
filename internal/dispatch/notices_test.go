@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/dispatch"
 	"carpool/internal/notices"
 	"carpool/internal/outbox"
+	"carpool/internal/store/testdb"
 )
 
 // Every notice a producer can send has to be one the dispatcher can deliver.
@@ -82,6 +84,11 @@ func TestEveryNoticeReachesThePersonItNames(t *testing.T) {
 			addToken(t, pool, recipient, "phone", false)
 
 			resource := uuid.New()
+			if event == notices.DriveNudge {
+				// Checked again at delivery, so it has to be about a real
+				// departure that still has room.
+				resource = seedDeparture(t, pool, recipient)
+			}
 			msg, err := build(event, recipient, resource)
 			if err != nil {
 				t.Fatalf("building the notice: %v", err)
@@ -230,5 +237,56 @@ func TestTheNoticesThatPredateTheEnvelopeStillArrive(t *testing.T) {
 		if n.Title == "" || n.Body == "" {
 			t.Errorf("%q arrived with nothing written on it", n.Data["idempotency_key"])
 		}
+	}
+}
+
+// seedDeparture is one departure of the recipient's, leaving tomorrow with
+// three free seats.
+func seedDeparture(t *testing.T, pool *pgxpool.Pool, driver uuid.UUID) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO driver_profiles (user_id, car_model, car_plate)
+		VALUES ($1, 'Yaris', 'ΑΒΓ-1234') ON CONFLICT DO NOTHING`, driver); err != nil {
+		t.Fatalf("seeding a driver: %v", err)
+	}
+	testdb.GiveEveryDriverACar(t, pool)
+	var id uuid.UUID
+	err := pool.QueryRow(ctx, `
+		WITH t AS (
+			INSERT INTO route_templates (driver_id, vehicle_id, origin, destination, origin_label,
+				destination_label, route_geom, route_km, route_min, seats, osrm_data_version)
+			VALUES ($1, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default),
+				ST_SetSRID(ST_MakePoint(25.80,40.85),4326), ST_SetSRID(ST_MakePoint(26.00,40.85),4326),
+				'A','B', ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 3, 'test')
+			RETURNING id, vehicle_id)
+		INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest, depart_latest,
+			seats_total, seats_free, template_revision, route_geom, route_km, route_min, pricing_mode)
+		SELECT t.id, t.vehicle_id, $2::date, $2, $3, 3, 3, 1,
+			ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 'formula'
+		  FROM t RETURNING id`, driver, clk.Now().Add(24*time.Hour), clk.Now().Add(25*time.Hour)).Scan(&id)
+	if err != nil {
+		t.Fatalf("seeding a departure: %v", err)
+	}
+	return id
+}
+
+// A nudge that sat in the outbox while the car filled up is not sent.
+func TestANudgeThatIsNoLongerTrueIsNotSent(t *testing.T) {
+	pool, snd, driver := newRouter(t)
+	addToken(t, pool, driver, "phone", false)
+	occ := seedDeparture(t, pool, driver)
+	msg, err := notices.Nudge(driver, occ, 2)
+	if err != nil {
+		t.Fatalf("Nudge: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE trip_occurrences SET seats_free = 0 WHERE id = $1`, occ); err != nil {
+		t.Fatalf("filling the car: %v", err)
+	}
+	if err := dispatch.NewRouter(pool, clk, snd, noAsk).Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(snd.sent) != 0 {
+		t.Fatalf("sent %d notifications about a full car", len(snd.sent))
 	}
 }

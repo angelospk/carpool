@@ -102,6 +102,21 @@ func (r *Router) handlePush(ctx context.Context, m outbox.Message) error {
 		return fmt.Errorf("%w: %v", outbox.ErrPermanent, err)
 	}
 
+	// A nudge says a driver has a free seat and has not yet said when they
+	// leave. It may sit in the outbox, or be retried, while either stops being
+	// true, and then it is not sent: telling somebody with a full car that
+	// people are waiting for it is noise they learn to ignore.
+	if p.Event == notices.DriveNudge {
+		still, err := r.nudgeStillTrue(ctx, *p.OccurrenceID)
+		if err != nil {
+			return err
+		}
+		if !still {
+			slog.Info("dropping a nudge that is no longer true", "key", m.IdempotencyKey)
+			return nil
+		}
+	}
+
 	tokens, err := r.tokensFor(ctx, recipient)
 	if err != nil {
 		return err
@@ -281,6 +296,22 @@ func say(event notices.Event, count int) (title, body string, ok bool) {
 	default:
 		return "", "", false
 	}
+}
+
+// nudgeStillTrue is the nudge job's own test, asked again at delivery.
+func (r *Router) nudgeStillTrue(ctx context.Context, occurrenceID uuid.UUID) (bool, error) {
+	var still bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT o.status = 'scheduled' AND o.drive_set_at IS NULL AND o.depart_earliest > $2
+		       AND o.seats_free - `+match.SeatsSpokenFor("o.id", "$2")+` > 0
+		  FROM trip_occurrences o WHERE o.id = $1`, occurrenceID, r.clock.Now()).Scan(&still)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("dispatch: checking a nudge is still true: %w", err)
+	}
+	return still, nil
 }
 
 func (r *Router) tokensFor(ctx context.Context, userID uuid.UUID) ([]string, error) {

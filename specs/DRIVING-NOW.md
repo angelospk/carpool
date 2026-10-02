@@ -238,14 +238,23 @@ rule as MOBILE.md: no passive tracking.
 
 ## Phases
 
-1. **Planned drive + nudge** — no location, no new permission. Drive
-   lifecycle, ad-hoc occurrences, ETA-from-origin matching with the margin,
-   reservation states, the cutoff moved from `depart_earliest` to the drive's
-   `offers_until` in gross matching, `Waiting`, ask admission and acceptance,
-   nudge job. Fixes the RISKS.md late-driver gap. ~4–5 days.
-2. **Moving drive** — fresh-fix gating, passenger-first offers with «Είμαι στο
-   σημείο», one-tap driver confirm + maps hand-off, background location, ETA to the
-   passenger. ~4 days + store listing text + device testing.
+1. **Planned drive + nudge** — BUILT 2026-10-02. No location, no new
+   permission. `POST /v1/trips/{id}/drive` pins the minute (the window
+   becomes it; `scheduled_*` keep the published one), `offers_until` keeps
+   the drive open past its minute, ETA-from-origin matching with the walk
+   margin and the detour budget on the late side, in gross, `Waiting`, ask
+   admission (offer expires at the feasibility deadline), the offers already
+   made, and Accept. Driver-ask flow unchanged — no separate reservation
+   state was needed, because the ask cap already holds seats. Nudge job,
+   re-checked at delivery. App: «Φεύγω» card, pickup time for passengers,
+   per-route nudge switch.
+   Known approximation: the ETA ignores earlier stops except through the
+   detour budget, and after departure it is the planned one until phase 2
+   adds the car's position.
+2. **Moving drive** — fresh-fix gating and position-based ETA, short-TTL
+   asks with one-tap [Πάρ' τον]/[Όχι] notification buttons, maps hand-off,
+   «Είμαι εδώ», end drive / stop offers, ad-hoc drive without a schedule,
+   background location, ETA to the passenger.
 3. **Detection** — Android module, iOS Shortcuts tip. ~2–3 days, two phones.
 
 ## Phase 1 acceptance tests (write first)

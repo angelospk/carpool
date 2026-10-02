@@ -537,7 +537,12 @@
     "invalid_name": "That name cannot be used. Write your name in letters, up to 80 characters.",
     "women_only_needs_female": "Women drivers only is a setting for women. Set your gender first.",
     "rate_limited": "Too many at once. Wait a moment and try again.",
-    "outside_country": "That point is outside Greece. The app only works for journeys within the country."
+    "outside_country": "That point is outside Greece. The app only works for journeys within the country.",
+    "bad_departure": "Pick a time within the next quarter of an hour.",
+    "outside_window": "That time is too far from the route's published time.",
+    "drive_departed": "You have already left. The time can no longer change.",
+    "trip_not_running": "This trip has been called off.",
+    "bad_detour": "The detour must be 0 to 30 minutes."
   },
   "shareRequest": {
     "button": "Send it to a group",
@@ -559,5 +564,22 @@
     "asksPaused": "Pause requests",
     "asksPausedOff": "Away for a while? Pause here. Your routes stay as they are.",
     "asksPausedOn": "Nobody will ask you for a seat until you turn this off. Your routes stay as they are."
+  },
+  "drive": {
+    "title": "Leaving? Say when",
+    "leavingAt": "You leave at {{time}}",
+    "when": "When you leave",
+    "now": "Now",
+    "inMin": "In {{n}}′",
+    "detour": "How far off your road for a passenger",
+    "onMyRoad": "0′, my road only",
+    "plusMin": "+{{n}}′",
+    "hint": "We only ask people who will be at the road before you pass. You never wait.",
+    "go": "I'm leaving",
+    "change": "Change the time",
+    "failed": "Not saved. Try again.",
+    "pickupAt": "The driver reaches your pickup around {{time}}",
+    "nudge": "Tell me when somebody on my road is waiting",
+    "nudgeHint": "Shortly before you leave, if you have a free seat."
   }
 }

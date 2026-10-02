@@ -9,7 +9,7 @@
 // time from the trip itself.
 
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -48,6 +48,17 @@ export default function MyRoutesScreen() {
     },
     // Without this, a retire that failed looked exactly like one that worked
     // until the list redrew with the route still in it.
+    onError: () => setError(t('common.error')),
+  });
+
+  // Being told, shortly before a departure on this route, that somebody on
+  // the road is waiting. Off until the driver turns it on.
+  const nudge = useMutation({
+    mutationFn: (v: { id: string; on: boolean }) => api.setRouteNudge(v.id, v.on),
+    onSuccess: () => {
+      setError(null);
+      void queryClient.invalidateQueries({ queryKey: ['my-routes'] });
+    },
     onError: () => setError(t('common.error')),
   });
 
@@ -129,6 +140,18 @@ export default function MyRoutesScreen() {
               ) : null}
             </View>
 
+            <View style={styles.toggle}>
+              <Text style={styles.toggleLabel}>{t('drive.nudge')}</Text>
+              <Switch
+                testID={`nudge-${r.id}`}
+                value={!!r.nudge_when_leaving}
+                disabled={nudge.isPending}
+                onValueChange={(on) => nudge.mutate({ id: r.id, on })}
+                trackColor={{ true: colors.primary, false: colors.line }}
+              />
+            </View>
+            <Text style={styles.meta}>{t('drive.nudgeHint')}</Text>
+
             <ShareRouteButton route={r} testID={`share-${r.id}`} failedTestID={`share-failed-${r.id}`} />
             <Button
               testID={`retire-${r.id}`}
@@ -156,4 +179,6 @@ const styles = StyleSheet.create({
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, marginVertical: space.sm },
   meta: { ...type.caption, color: colors.muted },
   failed: { gap: space.sm },
+  toggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.md },
+  toggleLabel: { ...type.body, color: colors.ink, flex: 1 },
 });

@@ -27,6 +27,7 @@ import { PriceBreakdown } from '../../src/components/PriceBreakdown';
 import { PreferenceChips } from '../../src/components/Preferences';
 import { SharedGroups } from '../../src/components/SharedGroups';
 import { LiveCard } from '../../src/components/LiveCard';
+import { DriveCard, driveCardShown } from '../../src/components/DriveCard';
 import { tripShareMessage } from '../../src/design/tripShare';
 import { confirm as askFirst } from '../../src/components/confirm';
 import { shareText } from '../../src/components/shareText';
@@ -241,6 +242,12 @@ export default function TripScreen() {
 
                   <RouteSpine from={trip.data.origin_label} to={trip.data.destination_label} />
 
+                  {trip.data.pickup_at ? (
+                    <Text testID="pickup-at" style={styles.pickupAt}>
+                      {t('drive.pickupAt', { time: athensTime(trip.data.pickup_at) })}
+                    </Text>
+                  ) : null}
+
                   <PortNotice endsAtPort={trip.data.ends_at_port} />
 
                   <View style={styles.stats}>
@@ -348,6 +355,10 @@ export default function TripScreen() {
                       </PersonLink>
                     ))}
                   </Card>
+                ) : null}
+
+                {driveCardShown(trip.data, now) ? (
+                  <DriveCard trip={trip.data} onDone={() => void trip.refetch()} />
                 ) : null}
 
                 {/* Only for a trip that is still going to happen. */}
@@ -529,6 +540,7 @@ export default function TripScreen() {
 
 
 const styles = StyleSheet.create({
+  pickupAt: { ...type.body, color: colors.ink, fontWeight: '600', marginTop: space.sm },
   list: { gap: space.sm, paddingBottom: space.lg },
   columns: { flex: 1, flexDirection: 'row', gap: space.xl },
   detailsColumn: { flex: 1 },

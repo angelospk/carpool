@@ -357,7 +357,8 @@ func TestADriveThatHasLeftCannotBeRetimed(t *testing.T) {
 // Offers already on the driver's phone were made against the old window. The
 // ones the new minute rules out are let go now, so the passenger is moved on
 // to somebody else instead of waiting half an hour for an answer that can no
-// longer be yes; the others end when the car leaves, like every new offer.
+// longer be yes; the others end at the last moment the passenger could be
+// told and still be at the road first, like every new offer.
 func TestOffersTheNewMinuteRulesOutAreLetGo(t *testing.T) {
 	w := newWorld(t, at("06:50"))
 	_, late := w.request(t, "+306900000020", at("07:20"), at("09:00"))  // ready after the car passes
@@ -379,8 +380,10 @@ func TestOffersTheNewMinuteRulesOutAreLetGo(t *testing.T) {
 	if got := expiry(lateAsk); !got.Equal(at("06:50")) {
 		t.Errorf("an offer the passenger cannot make expires at %v, want now", got)
 	}
-	if got := expiry(readyAsk); !got.Equal(at("07:00")) {
-		t.Errorf("an offer that still works expires at %v, want the departure", got)
+	// The car passes about 07:02; three minutes' margin and a minute and a
+	// half to walk 110 m make the last moment to tell them about 06:57:38.
+	if got := expiry(readyAsk); got.Sub(at("06:57").Add(38*time.Second)).Abs() > 2*time.Second {
+		t.Errorf("an offer that still works expires at %v, want the last moment they can be told", got)
 	}
 }
 
@@ -397,8 +400,10 @@ func TestChangingTheDetourLetsGoOfOffersMadeUnderTheOldOne(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	o := w.occurrence(t)
-	if o.detourMin != 0 || o.allowStops {
-		t.Errorf("detour %d, stops %v; want no detour and no stops", o.detourMin, o.allowStops)
+	// "My road only" still stops for somebody on it: a minute to pull over,
+	// and stops allowed.
+	if o.detourMin != 1 || !o.allowStops {
+		t.Errorf("detour %d, stops %v; want a minute and stops allowed", o.detourMin, o.allowStops)
 	}
 	var e time.Time
 	if err := w.pool.QueryRow(context.Background(),
@@ -528,5 +533,17 @@ func TestAPassengerSeesWhenTheCarReachesThem(t *testing.T) {
 	}
 	if driver.PickupAt != nil {
 		t.Errorf("the driver was given a pickup time: %v", driver.PickupAt)
+	}
+}
+
+// Saying when you leave without touching the detour leaves the detour alone.
+func TestStartingWithoutADetourKeepsTheOneTheTripHad(t *testing.T) {
+	w := newWorld(t, at("06:55"))
+	w.exec(t, `UPDATE trip_occurrences SET detour_min = 8 WHERE id = $1`, w.occ)
+	if _, err := start(w, at("07:00")); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if o := w.occurrence(t); o.detourMin != 8 {
+		t.Fatalf("detour became %d, want the 8 it was", o.detourMin)
 	}
 }

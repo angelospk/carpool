@@ -135,14 +135,12 @@ func (s *Service) Start(ctx context.Context, driverID, occurrenceID uuid.UUID, i
 		SELECT t.driver_id, o.status, o.depart_earliest, o.depart_latest,
 		       COALESCE(o.scheduled_earliest, o.depart_earliest),
 		       COALESCE(o.scheduled_latest, o.depart_latest),
-		       o.drive_set_at IS NOT NULL, o.detour_min,
-		       EXISTS (SELECT 1 FROM bookings b
-		               WHERE b.occurrence_id = o.id AND b.status IN ('confirmed','completed'))
+		       o.drive_set_at IS NOT NULL, o.detour_min
 		  FROM trip_occurrences o
 		  JOIN route_templates t ON t.id = o.template_id
 		 WHERE o.id = $1
 		 FOR UPDATE OF o`, occurrenceID).Scan(
-		&owner, &occStatus, &earliest, &latest, &scheduledE, &scheduledL, &driveSet, &detourMin, &booked)
+		&owner, &occStatus, &earliest, &latest, &scheduledE, &scheduledL, &driveSet, &detourMin)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && owner != driverID) {
 		return time.Time{}, ErrNotYours
 	}
@@ -151,6 +149,16 @@ func (s *Service) Start(ctx context.Context, driverID, occurrenceID uuid.UUID, i
 	}
 	if occStatus != "scheduled" {
 		return time.Time{}, ErrNotScheduled
+	}
+	// Its own statement, after the lock. A subquery in the locking statement
+	// keeps the snapshot it started with, so a booking committed while this
+	// waited on the row would be missed, and the driver could leave before the
+	// window that passenger had just agreed to.
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM bookings
+		                WHERE occurrence_id = $1 AND status IN ('confirmed','completed'))`,
+		occurrenceID).Scan(&booked); err != nil {
+		return time.Time{}, fmt.Errorf("drives: checking for passengers: %w", err)
 	}
 
 	detourChanged := in.DetourMin != nil && *in.DetourMin != detourMin
@@ -183,8 +191,14 @@ func (s *Service) Start(ctx context.Context, driverID, occurrenceID uuid.UUID, i
 		       depart_earliest    = $2,
 		       depart_latest      = $2,
 		       drive_set_at       = $3,
-		       detour_min         = COALESCE($4, detour_min),
-		       allow_stops        = CASE WHEN $4::int IS NULL THEN allow_stops ELSE $4::int > 0 END,
+		       offers_until       = $2::timestamptz + route_min * interval '1 minute',
+		       -- A driver choosing how far off their road to go is a driver
+		       -- who stops for passengers, even at zero: a pickup on their own
+		       -- road is still a stop.
+		       -- Zero is "my road only", and pulling over on it still costs a
+		       -- minute; a budget of nothing would refuse that pickup too.
+		       detour_min         = CASE WHEN $4::int IS NULL THEN detour_min ELSE GREATEST($4::int, 1) END,
+		       allow_stops        = allow_stops OR $4::int IS NOT NULL,
 		       updated_at         = now()
 		 WHERE id = $1`, occurrenceID, departs, now, in.DetourMin); err != nil {
 		return time.Time{}, fmt.Errorf("drives: pinning the departure: %w", err)
@@ -214,8 +228,8 @@ func (s *Service) Start(ctx context.Context, driverID, occurrenceID uuid.UUID, i
 // One the passenger can no longer make, or one quoted under a detour the
 // driver has just changed, is let go now: its expiry becomes this instant and
 // the sweeper moves the passenger on to somebody else, by the same path as any
-// other lapsed offer. The rest end when the car leaves, like every offer made
-// from here on. A later change of mind does not lengthen them again; an offer
+// other lapsed offer. The rest end at the last moment the passenger could
+// still be told and reach the road first, like every offer made from here on. A later change of mind does not lengthen them again; an offer
 // that has been cut short stays cut short.
 func (s *Service) settleOffers(
 	ctx context.Context, tx pgx.Tx, occurrenceID uuid.UUID, departs, now time.Time, detourChanged bool,
@@ -241,9 +255,11 @@ func (s *Service) settleOffers(
 		         WHEN $4 OR NOT `+match.DriveReady("$2::timestamptz", "o.route_min",
 		"ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, rr.origin))",
 		"ST_Distance(o.route_geom::geography, rr.origin::geography)",
-		"GREATEST(rr.window_start, $3::timestamptz)", "rr.window_end")+`
+		"GREATEST(rr.window_start, $3::timestamptz)", "rr.window_end", "o.detour_min")+`
 		         THEN LEAST(a.expires_at, $3::timestamptz)
-		         ELSE LEAST(a.expires_at, $2::timestamptz)
+		         ELSE LEAST(a.expires_at, `+match.DriveDeadline("$2::timestamptz", "o.route_min",
+		"ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, rr.origin))",
+		"ST_Distance(o.route_geom::geography, rr.origin::geography)")+`)
 		       END
 		  FROM ride_requests rr, trip_occurrences o
 		 WHERE a.occurrence_id = $1 AND a.status = 'pending'
@@ -385,10 +401,10 @@ func (s *Service) nudgeOne(ctx context.Context, occurrenceID uuid.UUID, now time
 		return false, fmt.Errorf("drives: locking the departure: %w", err)
 	}
 
-	// Counted outside the transaction's snapshot of the requests, which is
-	// fine: a count that is a moment stale is still the right reason to tell
-	// somebody, and the matcher decides who is actually asked.
-	count, err := match.DriveDemand(ctx, s.pool, occurrenceID, now)
+	// Counted through this transaction: asking the pool for a second
+	// connection while holding the lock lets two workers each hold one and
+	// wait for the other.
+	count, err := match.DriveDemand(ctx, tx, occurrenceID, now)
 	if err != nil {
 		return false, err
 	}

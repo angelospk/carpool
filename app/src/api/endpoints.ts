@@ -20,6 +20,8 @@ export type MyRoute = {
   upcoming_trips: number;
   /** How many times a person opened this route's link. */
   link_opens?: number;
+  /** Told, as a departure comes up, that somebody on the road is waiting. */
+  nudge_when_leaving?: boolean;
 };
 
 /** A road somebody is waiting on, and how many people are. Never who. */
@@ -297,6 +299,14 @@ export type TripDetail = TripSummary & {
   confirmed_by_me?: boolean;
   /** The caller's own seat, explained. Absent for the driver. */
   price_breakdown?: PriceBreakdownData;
+  /** Set once the driver has said the minute they leave; the window is then
+      that minute and scheduled_* is the published one. */
+  drive_set_at?: string | null;
+  scheduled_earliest?: string | null;
+  scheduled_latest?: string | null;
+  detour_min?: number;
+  /** On a drive, when the car reaches the caller's own pickup. */
+  pickup_at?: string | null;
 };
 
 export type PastTrip = TripSummary & {
@@ -530,6 +540,8 @@ export const api = {
     request<{ proposals: PointProposal[] }>('/v1/me/meeting-points').then((r) => r.proposals),
 
   retireRoute: (id: string) => request<void>(`/v1/me/routes/${id}`, { method: 'DELETE' }),
+  setRouteNudge: (id: string, on: boolean) =>
+    request<void>(`/v1/me/routes/${id}/nudge`, { method: 'PUT', body: { on } }),
 
   registerPushToken: (token: string, platform: 'ios' | 'android') =>
     request<void>('/v1/me/push-token', { method: 'PUT', body: { token, platform } }),
@@ -656,6 +668,13 @@ export const api = {
     request<{ opens: string; closes: string; positions: LivePosition[] }>(`/v1/trips/${id}/live`),
   putPosition: (id: string, lat: number, lon: number) =>
     request<void>(`/v1/trips/${id}/position`, { method: 'PUT', body: { lat, lon } }),
+  /** Pins the minute the driver leaves. A time, not "in five minutes", so a
+      retry is the same request. */
+  startDrive: (id: string, departsAt: string, detourMin?: number) =>
+    request<{ departs_at: string }>(`/v1/trips/${id}/drive`, {
+      method: 'POST',
+      body: { departs_at: departsAt, detour_min: detourMin },
+    }),
   stopPosition: (id: string, keepalive = false) =>
     request<void>(`/v1/trips/${id}/position`, { method: 'DELETE', keepalive }),
 

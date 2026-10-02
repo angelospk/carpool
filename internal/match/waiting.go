@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -43,7 +44,7 @@ type WaitingQuery struct {
 var waitingFrom = `
 WITH trip AS (
 	SELECT o.id, o.route_geom, o.seats_free, o.luggage,
-	       o.depart_earliest, o.depart_latest, o.drive_set_at, o.route_min,
+	       o.depart_earliest, o.depart_latest, o.drive_set_at, o.route_min, o.detour_min,
 	       t.driver_id, d.notify_radius_km, du.gender AS driver_gender
 	FROM trip_occurrences o
 	JOIN route_templates t ON t.id = o.template_id
@@ -56,7 +57,7 @@ WITH trip AS (
 	  -- whenever a booking is cancelled, including ten minutes after the car
 	  -- left, and that wake offered the seat to everybody still waiting on the
 	  -- corridor.
-	  AND o.depart_earliest > $2
+	  AND ` + DriveOpen("o", "$2") + `
 	  AND NOT d.notifications_muted
 )
 SELECT rr.id
@@ -161,16 +162,25 @@ func ExportedWaitingSQL() string { return waitingSQL }
 // what the nudge tells a driver, and it is a count of everybody rather than of
 // a shortlist, so a first page of people who are not ready cannot hide one who
 // is.
-func DriveDemand(ctx context.Context, pool *pgxpool.Pool, occurrenceID uuid.UUID, now time.Time) (int, error) {
+//
+// It runs on whatever it is given, so a caller holding a transaction counts
+// through that transaction rather than asking the pool for a second
+// connection while it holds a lock.
+func DriveDemand(ctx context.Context, q Querier, occurrenceID uuid.UUID, now time.Time) (int, error) {
 	var n int
-	err := pool.QueryRow(ctx, `SELECT count(*) FROM (`+waitingFrom+`
+	err := q.QueryRow(ctx, `SELECT count(*) FROM (`+waitingFrom+`
 		  AND `+DriveReady("trip.depart_earliest", "trip.route_min",
 		"ST_LineLocatePoint(trip.route_geom, ST_ClosestPoint(trip.route_geom, rr.origin))",
 		"ST_Distance(trip.route_geom::geography, rr.origin::geography)",
-		"GREATEST(rr.window_start, $2)", "rr.window_end")+`
+		"GREATEST(rr.window_start, $2)", "rr.window_end", "trip.detour_min")+`
 		) ready`, occurrenceID, now).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("match: counting who a drive could take: %w", err)
 	}
 	return n, nil
+}
+
+// Querier is the one method DriveDemand needs: a pool or a transaction.
+type Querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
