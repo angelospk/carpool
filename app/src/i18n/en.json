@@ -364,6 +364,8 @@
     "copied": "Copied. Paste it into the chat."
   },
   "trip": {
+    "you": "you",
+    "inTheCar": "In the car",
     "cancel": "Cancel trip",
     "cancelConfirm": "This trip will not happen.",
     "cancelWithPassengers": "This trip will not happen. {{count}} passengers will be told.",

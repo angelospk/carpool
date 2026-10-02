@@ -1,4 +1,5 @@
 import { act, render as rtlRender, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import el from '../../src/i18n/el.json';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 
@@ -310,6 +311,25 @@ describe('who you are riding with', () => {
       params: { id: 'p-a', name: 'Άννα' },
     });
     expect(screen.queryByTestId('person-me')).toBeNull();
+  });
+
+  // Who is in the car, for everybody in it: a passenger used to see only the
+  // driver, and found out who else was coming at the stop.
+  it('shows a passenger who else is in the car, and opens them', async () => {
+    (api.trip as jest.Mock).mockResolvedValue(
+      tripOf({ passengers: [person('me', 'Εγώ'), person('p-b', 'Βασίλης')] }),
+    );
+    render(<TripScreen />);
+
+    expect(await screen.findByTestId('passenger-p-b')).toBeTruthy();
+    expect(screen.getByTestId('passenger-me')).toBeTruthy();
+    expect(screen.getByText(new RegExp(`Εγώ · ${el.trip.you}`))).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('person-p-b'));
+    expect(mockPush).toHaveBeenCalledWith({
+      pathname: '/user/[id]',
+      params: { id: 'p-b', name: 'Βασίλης' },
+    });
   });
 });
 

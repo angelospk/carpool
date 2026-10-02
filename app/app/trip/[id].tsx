@@ -341,11 +341,14 @@ export default function TripScreen() {
                   />
                 </Card>
 
-                {/* Who is coming, for the driver. Their name and the groups
-                    the two of them share, which is what decides whether a
-                    stranger at the stop is expected. */}
-                {trip.data.role === 'driver' && trip.data.passengers.length > 0 ? (
+                {/* Who is in the car, for everybody in it: the driver sees who
+                    is coming, and a passenger who else is. Name, and the groups
+                    the caller shares with each, which is what decides whether
+                    a stranger at the stop is expected. Where each one is
+                    picked up stays between them and the driver. */}
+                {trip.data.passengers.length > 0 ? (
                   <Card>
+                    <Text style={styles.label}>{t('trip.inTheCar')}</Text>
                     {trip.data.passengers.map((p) => (
                       <PersonLink
                         key={p.id}
@@ -359,6 +362,7 @@ export default function TripScreen() {
                         <View style={styles.personText}>
                           <Text style={styles.personName}>
                             {p.name}
+                            {p.id === me?.id ? ` · ${t('trip.you')}` : ''}
                             {p.rating ? ` · ★ ${p.rating}` : ''}
                           </Text>
                           <SharedGroups names={p.shared_groups} />
@@ -584,6 +588,7 @@ export default function TripScreen() {
 
 
 const styles = StyleSheet.create({
+  label: { ...type.caption, color: colors.muted, marginBottom: space.xs },
   pickupAt: { ...type.body, color: colors.ink, fontWeight: '600', marginTop: space.sm },
   here: { marginTop: space.sm },
   list: { gap: space.sm, paddingBottom: space.lg },
