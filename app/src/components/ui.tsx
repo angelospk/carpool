@@ -65,6 +65,9 @@ export function Screen({
           padded && styles.screenPadded,
           padded && roomy && styles.screenRoomy,
           topInset && { paddingTop: insets.top + (padded ? (roomy ? space.xl : space.lg) : 0) },
+          // The bottom is not opt-in: no header moves content off the
+          // navigation bar, and a screen's last button is usually its action.
+          { paddingBottom: insets.bottom + (padded ? space.md : 0) },
         ]}
       >
         {children}
