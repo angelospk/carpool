@@ -4,6 +4,9 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"carpool/internal/api"
+	"carpool/internal/jobs"
 )
 
 // The driver's trip screen pins the departure, and the trip then says so to
@@ -164,5 +167,41 @@ func TestTheDriverIsGivenWhatTheMapsHandOffNeeds(t *testing.T) {
 	h.decode(h.do(http.MethodGet, "/v1/trips/"+occ.String(), nil, passenger), &asPassenger)
 	if asPassenger.Destination != nil || (len(asPassenger.Passengers) > 0 && asPassenger.Passengers[0].BookingID != nil) {
 		t.Fatalf("a passenger was given the driver's view: %+v", asPassenger)
+	}
+}
+
+// Publishing a trip to leave on now: the answer names its departure, so the
+// app can open it, where «Φεύγω» is.
+func TestPublishingNamesTheFirstDeparture(t *testing.T) {
+	var h *harness
+	h = newRoutingHarness(t, func(d *api.Deps) {
+		d.Materializer = jobs.NewMaterializer(d.Pool, d.Clock, testLocation())
+	})
+	token, _ := h.signUp("+306900000521", "Οδηγός")
+	h.becomeDriver(token)
+
+	soon := h.clock.Now().In(testLocation()).Add(10 * time.Minute)
+	rec := h.do(http.MethodPost, "/v1/routes", map[string]any{
+		"origin_lon": 25.8743, "origin_lat": 40.8476,
+		"destination_lon": 26.1720, "destination_lat": 40.8960,
+		"origin_label": "Αλεξανδρούπολη", "destination_label": "Φέρες",
+		"seats": 3, "kind": "oneoff",
+		"oneoff_date":     soon.Format("2006-01-02"),
+		"depart_earliest": soon.Format("15:04"), "depart_latest": soon.Add(15 * time.Minute).Format("15:04"),
+	}, token)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("publish: %d %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		First *string `json:"first_occurrence_id"`
+	}
+	h.decode(rec, &got)
+	if got.First == nil {
+		t.Fatalf("no first departure in %s", rec.Body.String())
+	}
+	var departs time.Time
+	h.mustQuery(`SELECT depart_earliest FROM trip_occurrences WHERE id = $1`, &departs, *got.First)
+	if departs.Sub(soon).Abs() > time.Minute {
+		t.Fatalf("the first departure leaves at %v, want %v", departs, soon)
 	}
 }

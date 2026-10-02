@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useMutation, useQuery } from '@tanstack/react-query';
 
 import {
@@ -35,6 +35,7 @@ import { ShareRouteButton } from '../../src/components/ShareRouteButton';
 import { Demand } from '../../src/components/Demand';
 import type { ShareableRoute } from '../../src/design/shareRoute';
 import { athensDate, nextDate } from '../../src/design/when';
+import { athensTime } from '../../src/design/format';
 import { calendarDay } from '../../src/design/format';
 
 // The three answers that cover almost every published route. They replace the
@@ -85,6 +86,12 @@ export default function PublishScreen() {
   }, [dates, oneoffDate]);
   const [earliest, setEarliest] = useState('07:30');
   const [latest, setLatest] = useState('08:00');
+  // «Φεύγω τώρα»: a trip for the next quarter of an hour, published and
+  // opened at once, where «Φεύγω» is. A one-off for today whose window is
+  // worked out when the button is pressed, so it never goes out in the past.
+  const [leavingNow, setLeavingNow] = useState(false);
+  const nowWindow = useRef<{ latest: string } | null>(null);
+  const router = useRouter();
   const [seats, setSeats] = useState(3);
 
   // Where exactly, once the town is settled. Kept next to the place it belongs
@@ -142,7 +149,7 @@ export default function PublishScreen() {
           ? { oneoff_date: snap.oneoff_date }
           : { weekdays: snap.weekdays }),
         depart_earliest: snap.depart_earliest,
-        depart_latest: latest,
+        depart_latest: nowWindow.current?.latest ?? latest,
         ...(allowStops !== null ? { allow_stops: allowStops } : {}),
         ...(detourKm !== null ? { detour_km: detourKm } : {}),
         ...(vehicleID !== null ? { vehicle_id: vehicleID } : {}),
@@ -171,6 +178,9 @@ export default function PublishScreen() {
     onSuccess: (r, snap) => {
       setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`);
       setPublished({ ...snap, id: r.template_id });
+      if (nowWindow.current && r.first_occurrence_id) {
+        router.push({ pathname: '/trip/[id]', params: { id: r.first_occurrence_id } });
+      }
     },
     onError: (e) => {
       const refused = refusalText(e);
@@ -255,17 +265,34 @@ export default function PublishScreen() {
               testID="schedule-recurring"
               label={t('publish.everyWeek')}
               selected={kind === 'recurring'}
-              onPress={() => setKind('recurring')}
+              onPress={() => {
+                setLeavingNow(false);
+                setKind('recurring');
+              }}
             />
             <Chip
               testID="schedule-oneoff"
               label={t('publish.once')}
-              selected={kind === 'oneoff'}
-              onPress={() => setKind('oneoff')}
+              selected={kind === 'oneoff' && !leavingNow}
+              onPress={() => {
+                setLeavingNow(false);
+                setKind('oneoff');
+              }}
+            />
+            <Chip
+              testID="schedule-now"
+              label={t('publish.leavingNow')}
+              selected={leavingNow}
+              onPress={() => {
+                setLeavingNow(true);
+                setKind('oneoff');
+              }}
             />
           </View>
 
-          {kind === 'oneoff' ? (
+          {leavingNow ? (
+            <Hint testID="leaving-now-hint">{t('publish.leavingNowHint')}</Hint>
+          ) : kind === 'oneoff' ? (
             <>
               <Text style={styles.label}>{t('publish.onDate')}</Text>
               <View style={[styles.days, styles.wrap]}>
@@ -312,6 +339,8 @@ export default function PublishScreen() {
             </>
           )}
 
+          {leavingNow ? null : (
+          <>
           <Text style={styles.label}>{t('publish.departWindow')}</Text>
           <View style={styles.times}>
             <Field
@@ -329,6 +358,8 @@ export default function PublishScreen() {
               compact
             />
           </View>
+          </>
+          )}
         </Card>
 
         {myGroups.isError ? (
@@ -486,16 +517,26 @@ export default function PublishScreen() {
           // The snapshot is what was sent, not what the form says later: the
           // form stays editable after publishing, and sharing the edited
           // fields would send a schedule nobody can be picked up on.
-          onPress={() =>
+          onPress={() => {
+            // Leaving now: from two minutes ahead, which the server accepts as
+            // not past, to a quarter of an hour after that, within today.
+            const at = Date.now();
+            nowWindow.current = leavingNow
+              ? { latest: laterOf(athensTime(new Date(at + 17 * 60_000).toISOString()), athensTime(new Date(at + 2 * 60_000).toISOString())) }
+              : null;
             publish.mutate({
               origin_label: label(from as Pin, fromPoint),
               destination_label: label(to as Pin, toPoint),
               kind,
-              ...(kind === 'oneoff' ? { oneoff_date: oneoffDate } : { weekdays: [...weekdays] }),
-              depart_earliest: earliest,
+              ...(leavingNow
+                ? { oneoff_date: athensDate(new Date(at + 2 * 60_000)) }
+                : kind === 'oneoff'
+                  ? { oneoff_date: oneoffDate }
+                  : { weekdays: [...weekdays] }),
+              depart_earliest: leavingNow ? athensTime(new Date(at + 2 * 60_000).toISOString()) : earliest,
               seats,
-            })
-          }
+            });
+          }}
           // Not until the groups have loaded: while they are loading, or if
           // they failed, the "who sees it" choice is not on screen and the
           // route would go out to everybody without the driver having seen
@@ -551,4 +592,13 @@ function sameDays(chosen: number[], preset: readonly number[]): boolean {
 // recognises in a list and the landmark is what they drive to.
 function label(pin: Pin, point: MeetingPoint | null): string {
   return point ? `${pin.label}, ${point.name}` : pin.label;
+}
+
+/**
+ * The latest departure for «Φεύγω τώρα»: a quarter of an hour on, unless that
+ * crosses midnight, which a one-day window cannot, and then the last minute of
+ * the day.
+ */
+function laterOf(latest: string, earliest: string): string {
+  return latest > earliest ? latest : '23:59';
 }

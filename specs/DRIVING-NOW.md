@@ -262,10 +262,9 @@ rule as MOBILE.md: no passive tracking.
    The hand-off lists every stop not yet visited, in road order; a stop is
    visited once a fix within 50 m accuracy came within 80 m of it, recorded
    on the phone as the drive goes.
-   Not built: adaptive sampling near a pickup (one mode only),
-   ad-hoc drives without a schedule (publish a one-off route instead), and
-   a moving ETA shown to the passenger (they see the planned pickup time and
-   the driver's dot on the live map).
+   Without a schedule: «Φεύγω τώρα» in Publish makes a one-off for the next
+   quarter of an hour and opens its departure, where «Φεύγω» is.
+   Not built: adaptive sampling near a pickup (one mode only).
 3. **Detection** — BUILT 2026-10-02, opt-in («Κατάλαβε πότε οδηγώ»).
    Android: local Expo module `app/modules/drive-detect` (Activity
    Recognition IN_VEHICLE enter, re-registered on boot/update) shows one

@@ -263,7 +263,7 @@ const OSRMEnv = "CARPOOL_TEST_OSRM"
 // database harness already makes.
 //
 // Skipped when no service is configured, so a unit-only run stays fast.
-func newRoutingHarness(t *testing.T) *harness {
+func newRoutingHarness(t *testing.T, opts ...func(*api.Deps)) *harness {
 	t.Helper()
 
 	base := os.Getenv(OSRMEnv)
@@ -271,7 +271,7 @@ func newRoutingHarness(t *testing.T) *harness {
 		t.Skipf("%s is not set; skipping the routing test", OSRMEnv)
 	}
 
-	return newHarnessRoutedBy(t, base)
+	return newHarnessRoutedBy(t, base, opts...)
 }
 
 // newHarnessRoutedBy is newRoutingHarness with the routing service named
@@ -282,11 +282,11 @@ func newRoutingHarness(t *testing.T) *harness {
 // Go, so nothing in production has to become an interface for a test's benefit
 // — and what is exercised is the real decoder, the real ferry check and the
 // real WKT, which a Go-level fake would have replaced.
-func newHarnessRoutedBy(t *testing.T, base string) *harness {
+func newHarnessRoutedBy(t *testing.T, base string, opts ...func(*api.Deps)) *harness {
 	t.Helper()
 
 	h := newHarness(t)
-	h.router = api.NewRouter(api.Deps{
+	deps := api.Deps{
 		Ready: h.pool.Ping, Pool: h.pool, Clock: h.clock, Location: testLocation(),
 		Issuer:   auth.NewTokenIssuer(testSecret, h.clock),
 		OTP:      auth.NewOTPService(h.pool, h.clock, h.sms),
@@ -296,7 +296,11 @@ func newHarnessRoutedBy(t *testing.T, base string) *harness {
 		Groups:   groups.NewService(h.pool, h.clock),
 		Drivers:  drivers.NewService(h.pool, h.clock),
 		Router:   geo.NewOSRM(base, nil),
-	})
+	}
+	for _, opt := range opts {
+		opt(&deps)
+	}
+	h.router = api.NewRouter(deps)
 	return h
 }
 

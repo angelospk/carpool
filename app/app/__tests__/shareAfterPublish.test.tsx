@@ -8,8 +8,9 @@ import { ApiError } from '../../src/api/client';
 import el from '../../src/i18n/el.json';
 import { api } from '../../src/api/endpoints';
 
+const mockPush = jest.fn();
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+  useRouter: () => ({ push: mockPush, replace: jest.fn() }),
   // Focus is once, on mount, which is what a test screen gets.
   useFocusEffect: (effect: () => void) => require('react').useEffect(effect, []),
 }));
@@ -232,4 +233,32 @@ test('publishing waits until the groups have loaded, and stays shut if they fail
   await waitFor(() => expect(screen.getByTestId('audience-retry')).toBeTruthy());
   fireEvent.press(screen.getByTestId('publish-submit'));
   expect(api.publishRoute).not.toHaveBeenCalled();
+});
+
+// «Φεύγω τώρα»: a one-off for the next quarter of an hour, worked out when the
+// button is pressed, and the departure opens at once, where «Φεύγω» is.
+test('leaving now publishes the next quarter of an hour and opens the departure', async () => {
+  jest.useFakeTimers({ now: new Date('2026-10-02T15:00:00Z'), doNotFake: ['setTimeout', 'setInterval'] });
+  (api.publishRoute as jest.Mock).mockResolvedValue({
+    template_id: 'r1',
+    route_km: 28.7,
+    ends_at_port: false,
+    first_occurrence_id: 'occ-now',
+  });
+  await pickBothEnds();
+  fireEvent.press(screen.getByTestId('schedule-now'));
+  expect(screen.queryByTestId('depart-earliest')).toBeNull();
+
+  fireEvent.press(screen.getByTestId('publish-submit'));
+  await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
+  expect((api.publishRoute as jest.Mock).mock.calls[0][0]).toMatchObject({
+    kind: 'oneoff',
+    oneoff_date: '2026-10-02',
+    depart_earliest: '18:02',
+    depart_latest: '18:17',
+  });
+  await waitFor(() =>
+    expect(mockPush).toHaveBeenCalledWith({ pathname: '/trip/[id]', params: { id: 'occ-now' } }),
+  );
+  jest.useRealTimers();
 });

@@ -596,7 +596,14 @@ export const api = {
      * is what every route published before the app asked was doing.
      */
     pricing_mode?: PricingMode;
-  }) => request<{ template_id: string; route_km: number; ends_at_port: boolean }>('/v1/routes', {
+  }) =>
+    request<{
+      template_id: string;
+      route_km: number;
+      ends_at_port: boolean;
+      /** The first departure, for a trip published to leave on now. */
+      first_occurrence_id?: string | null;
+    }>('/v1/routes', {
       method: 'POST',
       body,
     }),

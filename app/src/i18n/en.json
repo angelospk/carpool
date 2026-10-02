@@ -314,7 +314,9 @@
     "once": "Once",
     "onDate": "Which day",
     "today": "Today",
-    "tomorrow": "Tomorrow"
+    "tomorrow": "Tomorrow",
+    "leavingNow": "Leaving now",
+    "leavingNowHint": "A trip for the next quarter of an hour. Once published it opens, so you can say exactly when you leave."
   },
   "request": {
     "alreadyMatched": "A driver took your ride, so the request was not cancelled. If you can no longer go, cancel the booking from the trip.",

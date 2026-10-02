@@ -9,6 +9,7 @@ import (
 
 	"carpool/internal/domain"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"carpool/internal/drivers"
 	"carpool/internal/geo"
@@ -350,13 +351,24 @@ func (d Deps) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The first departure, for a driver publishing a trip to leave on now:
+	// the app opens it, where «Φεύγω» is. Absent when there is none yet.
+	var first *uuid.UUID
+	if err := d.Pool.QueryRow(r.Context(), `
+		SELECT id FROM trip_occurrences
+		 WHERE template_id = $1 AND status = 'scheduled' AND depart_latest > $2
+		 ORDER BY depart_earliest LIMIT 1`, templateID, d.now()).Scan(&first); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("finding the first departure", "template", templateID, "error", err)
+	}
+
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"template_id": templateID,
 		"route_km":    shaped.DistanceMeters / 1000,
 		// The app needs this to explain a route that stops somewhere the driver
 		// did not type. Without it the trip just looks wrong.
-		"ends_at_port": shaped.SeaCrossing,
-		"materialized": true,
+		"ends_at_port":        shaped.SeaCrossing,
+		"materialized":        true,
+		"first_occurrence_id": first,
 	})
 }
 
