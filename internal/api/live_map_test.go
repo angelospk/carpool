@@ -61,11 +61,34 @@ func TestTheLiveMapShowsTripsUnderwayAndNothingAboutWhoIsInThem(t *testing.T) {
 		}
 	}
 
+	// The line stops a kilometre short of both ends, measured, not just
+	// different from the stored one.
+	var startGap, endGap float64
+	h.mustQuery(`
+		SELECT ST_Distance(ST_StartPoint(ST_LineFromEncodedPolyline($1, 6))::geography, t.origin::geography)
+		  FROM route_templates t WHERE t.id = $2::uuid`, &startGap, trip.Polyline, templateID)
+	h.mustQuery(`
+		SELECT ST_Distance(ST_EndPoint(ST_LineFromEncodedPolyline($1, 6))::geography, t.destination::geography)
+		  FROM route_templates t WHERE t.id = $2::uuid`, &endGap, trip.Polyline, templateID)
+	if startGap < 900 || endGap < 900 {
+		t.Errorf("the line ends %.0f m and %.0f m from the route's ends, want at least ~1 km", startGap, endGap)
+	}
+
 	// The line stops short of both ends.
 	var full string
 	h.mustQuery(`SELECT ST_AsEncodedPolyline(route_geom, 6) FROM route_templates WHERE id = $1::uuid`, &full, templateID)
 	if trip.Polyline == full {
 		t.Error("the line runs to the driver's front door")
+	}
+
+	// The names are the server's, not the driver's: a label can be a typed
+	// coordinate or a street, which would hand out the door the line hides.
+	h.mustExec(`UPDATE route_templates SET origin_label = '25.8743, 40.8476 οδός Δημοκρατίας 12' WHERE id = $1::uuid`, templateID)
+	rec = h.do(http.MethodGet, "/v1/live/map", nil, viewer)
+	got = liveMap{}
+	h.decode(rec, &got)
+	if len(got.Trips) != 1 || got.Trips[0].From != "Αλεξανδρούπολη" {
+		t.Errorf("the driver's own label reached the map: %+v", got.Trips)
 	}
 
 	// A route offered to one group is that group's business.
