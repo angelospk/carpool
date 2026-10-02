@@ -36,17 +36,18 @@ deploy_api() {
   [[ -f $TAG_FILE ]] && previous=$(sed -n 's/^API_TAG=//p' "$TAG_FILE")
 
   echo "API_TAG=$sha" >"$TAG_FILE"
-  "${COMPOSE[@]}" up -d --remove-orphans
-  if ready; then
+  # A failed `up` is a failed release like a failed readiness check: both roll
+  # back. Under set -e a bare `up` would exit here with tag.env still naming
+  # the release that failed.
+  if "${COMPOSE[@]}" up -d --remove-orphans && ready; then
     echo "api $sha is ready"
   else
-    echo "api $sha did not become ready" >&2
+    echo "api $sha did not start or did not become ready" >&2
     "${COMPOSE[@]}" logs --tail 40 api >&2 || true
     if [[ -n $previous ]]; then
       echo "rolling back to $previous" >&2
       echo "API_TAG=$previous" >"$TAG_FILE"
-      "${COMPOSE[@]}" up -d
-      ready || echo "rollback did not become ready either" >&2
+      { "${COMPOSE[@]}" up -d && ready; } || echo "rollback did not become ready either" >&2
     fi
     exit 1
   fi
@@ -63,15 +64,26 @@ deploy_apk() {
   local version=$1
   [[ $version =~ ^[0-9]{1,9}$ ]] || { echo "bad version" >&2; exit 2; }
 
-  local dir=$ROOT/apk tmp
+  local dir=$ROOT/apk tmp max=300000000
   mkdir -p "$dir"
   tmp=$(mktemp "$dir/.upload.XXXXXX")
   trap 'rm -f "$tmp"' EXIT
-  head -c 300000000 >"$tmp"
-
-  # An APK is a zip. Anything else, or something truncated, is not published.
-  [[ $(head -c 2 "$tmp") == "PK" ]] || { echo "not an APK" >&2; exit 1; }
+  # One byte past the cap is read so that an oversized upload is refused
+  # rather than silently cut to a truncated file that then gets published.
+  head -c $((max + 1)) >"$tmp"
+  (($(stat -c %s "$tmp") <= max)) || { echo "APK larger than $max bytes" >&2; exit 1; }
   (($(stat -c %s "$tmp") > 1000000)) || { echo "APK too small" >&2; exit 1; }
+
+  # A whole zip, every entry checked, with a manifest and code in it. CI
+  # verifies the signing certificate before uploading; here the point is that
+  # a truncated or garbled upload never replaces the working download.
+  # The listing goes to a variable first: grep -q stopping early would kill
+  # zipinfo with SIGPIPE, and pipefail would read that as a missing entry.
+  local entries
+  unzip -tqq "$tmp" >/dev/null 2>&1 || { echo "not a valid zip" >&2; exit 1; }
+  entries=$(zipinfo -1 "$tmp")
+  grep -qx AndroidManifest.xml <<<"$entries" || { echo "no AndroidManifest.xml" >&2; exit 1; }
+  grep -qx classes.dex <<<"$entries" || { echo "no classes.dex" >&2; exit 1; }
 
   chmod 644 "$tmp"
   mv "$tmp" "$dir/carpool-$version.apk"

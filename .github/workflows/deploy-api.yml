@@ -24,7 +24,21 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    # The integration tests are what catch a privacy or concurrency regression;
+    # vet and build alone do not. Without CARPOOL_TEST_DSN they skip themselves,
+    # so the database has to be here for this gate to mean anything.
+    services:
+      postgis:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: carpool
+          POSTGRES_PASSWORD: carpool
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U carpool" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      CARPOOL_TEST_DSN: postgres://carpool:carpool@localhost:5433/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
@@ -32,9 +46,10 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Vet and build
+      - name: Vet, test and build
         run: |
           go vet ./...
+          go test ./...
           go build ./...
 
       - name: Build image

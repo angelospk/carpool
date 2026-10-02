@@ -2,12 +2,16 @@
 # Pulls a dump of the VM's database to this machine and keeps the last 30.
 # Run nightly by the carpool-backup systemd user timer on the mini PC.
 set -euo pipefail
+# The dumps hold phone numbers and journeys: nobody else on this machine reads
+# them.
+umask 077
 
 DIR=${CARPOOL_BACKUP_DIR:-$HOME/backups/carpool}
 KEY=${CARPOOL_BACKUP_KEY:-$HOME/.config/carpool/vps_backup}
 HOSTS=${CARPOOL_KNOWN_HOSTS:-$HOME/.config/carpool/vps_known_hosts}
 
 mkdir -p "$DIR"
+chmod 700 "$DIR"
 out="$DIR/carpool-$(date +%Y%m%d-%H%M).dump"
 tmp="$out.part"
 ssh -i "$KEY" -o IdentitiesOnly=yes -o UserKnownHostsFile="$HOSTS" -o StrictHostKeyChecking=yes \

@@ -44,6 +44,9 @@ jobs:
       - name: Install
         run: npm ci --legacy-peer-deps
 
+      - name: Typecheck and test
+        run: npm run check
+
       # expo export and the Gradle bundling step read app/.env, not the
       # environment.
       - name: Point the app at the public API
@@ -100,6 +103,15 @@ jobs:
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a --no-daemon
+
+      # Only an APK signed with our key goes out: one signed by any other key
+      # could not update the installed app, and would mean something is wrong.
+      - name: Check the signature
+        working-directory: app/android
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          certs=$("$apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk)
+          grep -qi "SHA-256 digest: 293b78ee2f240204e436851cceaa734e836ad34147de041c7ce62c803e0817ec" <<<"$certs"
 
       - name: Publish to the VM
         env:
