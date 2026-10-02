@@ -228,3 +228,68 @@ func TestADriveAllowsForTheDetoursBeforeThePickup(t *testing.T) {
 		t.Fatalf("control: with a minute's detour the car is in time: %+v", got)
 	}
 }
+
+// ---------------------------------------------------------- moving drive ---
+
+// fix puts the driver's last position on the trip: lon along the corridor,
+// how good it is, and when the phone took it.
+func (f *fixture) fix(t *testing.T, occurrenceID uuid.UUID, lon, lat, accuracy float64, seen time.Time) {
+	t.Helper()
+	if _, err := f.pool.Exec(context.Background(), `
+		INSERT INTO trip_live_positions (occurrence_id, user_id, lat, lon, updated_at, accuracy_m, observed_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $5)
+		ON CONFLICT (occurrence_id, user_id) DO UPDATE
+		SET lat = EXCLUDED.lat, lon = EXCLUDED.lon, updated_at = EXCLUDED.updated_at,
+		    accuracy_m = EXCLUDED.accuracy_m, observed_at = EXCLUDED.observed_at`,
+		occurrenceID, f.driverID, lat, lon, seen, accuracy); err != nil {
+		t.Fatalf("placing the car: %v", err)
+	}
+}
+
+// Six minutes after leaving, the car is three tenths of the way along. A
+// passenger seven tenths along is eight minutes ahead of it and has time to
+// reach the road; one two tenths along is behind it.
+func movingQuery(originLon float64) match.GrossQuery {
+	q := driveQuery(driveDeparts.Add(-30*time.Minute), driveDeparts.Add(2*time.Hour))
+	q.Now = driveDeparts.Add(6 * time.Minute)
+	q.Origin = match.Point{Lon: originLon, Lat: 40.851}
+	q.RequestKm = 3
+	return q
+}
+
+func TestAMovingDriveIsOfferedToSomebodyAheadOfTheCar(t *testing.T) {
+	f := setup(t)
+	occ := f.addOccurrence(t, corridorWKT)
+	f.pinDrive(t, occ, driveDeparts)
+	f.fix(t, occ, 25.86, 40.85, 20, driveDeparts.Add(5*time.Minute+50*time.Second))
+
+	if got := driveGross(t, f, movingQuery(25.94)); len(got) != 1 {
+		t.Fatalf("somebody eight minutes ahead of the car was not offered it: %+v", got)
+	}
+	if got := driveGross(t, f, movingQuery(25.84)); len(got) != 0 {
+		t.Fatalf("somebody the car has already passed was offered it: %+v", got)
+	}
+}
+
+// Without a fix it can trust, a car that has left is not offered to anybody:
+// the planned time is a guess that gets worse every minute.
+func TestAMovingDriveNeedsAFixItCanTrust(t *testing.T) {
+	seen := driveDeparts.Add(5*time.Minute + 50*time.Second)
+	cases := map[string]func(f *fixture, occ uuid.UUID){
+		"no fix":          func(f *fixture, occ uuid.UUID) {},
+		"three minutes old": func(f *fixture, occ uuid.UUID) { f.fix(t, occ, 25.86, 40.85, 20, seen.Add(-3*time.Minute)) },
+		"half a km off":   func(f *fixture, occ uuid.UUID) { f.fix(t, occ, 25.86, 40.85, 500, seen) },
+		"another road":    func(f *fixture, occ uuid.UUID) { f.fix(t, occ, 25.86, 40.87, 20, seen) },
+	}
+	for name, arrange := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := setup(t)
+			occ := f.addOccurrence(t, corridorWKT)
+			f.pinDrive(t, occ, driveDeparts)
+			arrange(f, occ)
+			if got := driveGross(t, f, movingQuery(25.94)); len(got) != 0 {
+				t.Fatalf("offered on %s: %+v", name, got)
+			}
+		})
+	}
+}

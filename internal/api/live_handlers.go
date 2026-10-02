@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -69,6 +70,10 @@ func (d Deps) handlePutPosition(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Lat *float64 `json:"lat"`
 		Lon *float64 `json:"lon"`
+		// Both optional: how good the fix is, and when the phone took it. A
+		// drive takes new passengers only on a fix that says both.
+		AccuracyM  *float64   `json:"accuracy_m"`
+		ObservedAt *time.Time `json:"observed_at"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -77,7 +82,9 @@ func (d Deps) handlePutPosition(w http.ResponseWriter, r *http.Request) {
 		d.liveError(w, live.ErrBadPosition)
 		return
 	}
-	if err := d.Live.Put(r.Context(), tripID, userID, *body.Lat, *body.Lon); err != nil {
+	if err := d.Live.PutFix(r.Context(), tripID, userID, live.Fix{
+		Lat: *body.Lat, Lon: *body.Lon, AccuracyM: body.AccuracyM, ObservedAt: body.ObservedAt,
+	}); err != nil {
 		d.liveError(w, err)
 		return
 	}

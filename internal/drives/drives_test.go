@@ -415,6 +415,16 @@ func TestChangingTheDetourLetsGoOfOffersMadeUnderTheOldOne(t *testing.T) {
 		t.Errorf("an offer made under the old budget expires at %v, want now", e)
 	}
 
+	// And whatever was quoted under the old one is stale at accept.
+	var version int
+	if err := w.pool.QueryRow(context.Background(),
+		`SELECT itinerary_version FROM trip_occurrences WHERE id = $1`, w.occ).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 1 {
+		t.Errorf("itinerary_version = %d after a new budget, want 1", version)
+	}
+
 	tooMuch := 31
 	if _, err := w.svc.Start(context.Background(), w.driverID, w.occ,
 		drives.Start{DepartsAt: at("07:00"), DetourMin: &tooMuch}); !errors.Is(err, drives.ErrBadDetour) {

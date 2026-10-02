@@ -258,3 +258,64 @@ func TestANonsensePositionIsRefused(t *testing.T) {
 		}
 	}
 }
+
+func storedFix(t *testing.T, w *world) (lat float64, accuracy *float64, observed *time.Time) {
+	t.Helper()
+	if err := w.pool.QueryRow(context.Background(), `
+		SELECT lat, accuracy_m, observed_at FROM trip_live_positions WHERE user_id = $1`, w.driver).
+		Scan(&lat, &accuracy, &observed); err != nil {
+		t.Fatalf("reading the fix: %v", err)
+	}
+	return lat, accuracy, observed
+}
+
+// A fix says how good it is and when the phone took it. A batch that arrives
+// out of order — a tunnel, a retry — never puts an older place over a newer
+// one, and a phone whose clock runs ahead is held to the server's.
+func TestAFixKeepsItsAccuracyAndTimeAndNeverGoesBackwards(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	now := w.clock.Now()
+	acc := 25.0
+
+	seen := now.Add(-20 * time.Second)
+	if err := w.svc.PutFix(ctx, w.trip, w.driver, live.Fix{Lat: 40.82, Lon: 25.82, AccuracyM: &acc, ObservedAt: &seen}); err != nil {
+		t.Fatalf("PutFix: %v", err)
+	}
+	lat, gotAcc, gotSeen := storedFix(t, w)
+	if lat != 40.82 || gotAcc == nil || *gotAcc != 25 || gotSeen == nil || !gotSeen.Equal(seen) {
+		t.Fatalf("stored %v / %v / %v", lat, gotAcc, gotSeen)
+	}
+
+	w.clock.Advance(10 * time.Second)
+	older := now.Add(-40 * time.Second)
+	_ = w.svc.PutFix(ctx, w.trip, w.driver, live.Fix{Lat: 40.70, Lon: 25.70, AccuracyM: &acc, ObservedAt: &older})
+	if lat, _, _ := storedFix(t, w); lat != 40.82 {
+		t.Fatalf("an older fix replaced a newer one: lat %v", lat)
+	}
+
+	w.clock.Advance(10 * time.Second)
+	ahead := w.clock.Now().Add(time.Hour)
+	_ = w.svc.PutFix(ctx, w.trip, w.driver, live.Fix{Lat: 40.83, Lon: 25.83, AccuracyM: &acc, ObservedAt: &ahead})
+	if _, _, got := storedFix(t, w); got == nil || got.After(w.clock.Now()) {
+		t.Fatalf("a fix from the future was stored as %v", got)
+	}
+}
+
+// After «Τέλος» the driver's phone writes nothing more about this trip: a
+// request still in flight would otherwise put the position back.
+func TestNothingIsWrittenForADriveThatHasEnded(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	if _, err := w.pool.Exec(ctx, `UPDATE trip_occurrences SET drive_ended_at = $2 WHERE id = $1`,
+		w.trip, w.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.svc.Put(ctx, w.trip, w.driver, 40.85, 25.9); !errors.Is(err, live.ErrOutsideWindow) {
+		t.Fatalf("Put after the drive ended: %v, want ErrOutsideWindow", err)
+	}
+	// A passenger still shares their own way to the pickup.
+	if err := w.svc.Put(ctx, w.trip, w.rider, 40.85, 25.9); err != nil {
+		t.Fatalf("a passenger after the drive ended: %v", err)
+	}
+}

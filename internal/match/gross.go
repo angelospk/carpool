@@ -170,6 +170,41 @@ func DriveLateBy(prefix string) string {
 	return `COALESCE(` + prefix + `drive_detour_min + ` + otherPartyDwellMin + `, ` + prefix + `detour_min)`
 }
 
+// DriveCar is a LEFT JOIN LATERAL exposing, as car.f and car.seen, how far
+// along its route a drive's car was at its last fix and when the phone took
+// it. Only a fix that can be trusted to time a pickup appears: under two
+// minutes old, within 200 m by the phone's own account, and on the route —
+// a driver who took another road is not where the route says. The occurrence
+// alias must be in scope.
+func DriveCar(occurrence, now string) string {
+	o := occurrence
+	pt := `ST_SetSRID(ST_MakePoint(p.lon, p.lat), 4326)`
+	return `LEFT JOIN LATERAL (
+		SELECT ST_LineLocatePoint(` + o + `.route_geom, ` + pt + `) AS f, p.observed_at AS seen
+		  FROM trip_live_positions p
+		  JOIN route_templates rt ON rt.id = ` + o + `.template_id
+		 WHERE p.occurrence_id = ` + o + `.id AND p.user_id = rt.driver_id
+		   AND p.observed_at > (` + now + `)::timestamptz - interval '` + fixFresh + `'
+		   AND p.accuracy_m <= ` + fixAccuracyM + `
+		   AND ST_DWithin(` + o + `.route_geom::geography, ` + pt + `::geography, ` + fixOffRouteM + `)) car ON true`
+}
+
+// DriveFrom is where a drive's estimates start: the departure and the route's
+// origin before the car leaves, and its last trusted fix after. Null after
+// departure without one, which every comparison built on it treats as no.
+func DriveFrom(occurrence, now string) (at, fraction string) {
+	o := occurrence
+	before := o + `.depart_earliest > ` + now
+	return `(CASE WHEN ` + before + ` THEN ` + o + `.depart_earliest ELSE car.seen END)`,
+		`(CASE WHEN ` + before + ` THEN 0 ELSE car.f END)`
+}
+
+const (
+	fixFresh     = "2 minutes"
+	fixAccuracyM = "200"
+	fixOffRouteM = "300"
+)
+
 func driveETA(departs, routeMin, fraction string) string {
 	return `(` + departs + ` + (` + fraction + ` * ` + routeMin + `) * interval '1 minute')`
 }
@@ -181,6 +216,8 @@ const (
 	// StopDwell each.
 	otherPartyDwellMin = "4"
 )
+
+var driveFromAt, driveFromF = DriveFrom("o", "$13")
 
 // grossSQL is the stage-1 filter from MATCHING.md.
 //
@@ -218,7 +255,8 @@ WITH cand AS (
 	       o.detour_min        AS detour_min,
 	       o.drive_set_at      AS drive_set_at,
 	       o.drive_detour_min  AS drive_detour_min,
-	       o.depart_earliest   AS departs
+	       ` + driveFromAt + ` AS from_at,
+	       ` + driveFromF + ` AS from_f
 	FROM trip_occurrences o
 	JOIN route_templates  t ON t.id = o.template_id
 	JOIN driver_profiles  d ON d.user_id = t.driver_id
@@ -230,6 +268,7 @@ WITH cand AS (
 	-- that list is short. 'active' rather than <> 'suspended', so a state added
 	-- later is excluded until somebody decides otherwise.
 	JOIN users du ON du.id = t.driver_id AND du.status = 'active'
+	` + DriveCar("o", "$13") + `
 	WHERE o.status = 'scheduled'
 	  AND o.seats_free - ` + SeatsSpokenFor("o.id", "$13") + ` >= $5
 	  -- Excluded rather than ranked down. An ask a driver will certainly
@@ -292,7 +331,7 @@ WITH cand AS (
 	  AND ($12::uuid IS NULL OR o.id = $12::uuid)
 ), located AS (
 	SELECT occurrence_id, driver_id, route_km, route_min, seats_free, itinerary_version,
-	       allow_stops, detour_km, detour_min, drive_set_at, drive_detour_min, departs,
+	       allow_stops, detour_km, detour_min, drive_set_at, drive_detour_min, from_at, from_f,
 	       ST_LineLocatePoint(route_geom, ST_ClosestPoint(route_geom, $1)) AS f_o,
 	       ST_LineLocatePoint(route_geom, ST_ClosestPoint(route_geom, $2)) AS f_d,
 	       ST_Distance(route_geom::geography, $1::geography) AS walk_m
@@ -308,7 +347,7 @@ WHERE f_o < f_d
   -- the scheduled window cannot express: the passenger is there first and is
   -- still there when it comes. Without a drive the window overlap above is all
   -- there is to go on, and it stays the whole test.
-  AND (drive_set_at IS NULL OR ` + DriveReady("departs", "route_min", "f_o", "walk_m", "GREATEST($3, $13)", "$4", DriveLateBy("")) + `)
+  AND (drive_set_at IS NULL OR ` + DriveReady("from_at", "route_min", "(f_o - from_f)", "walk_m", "GREATEST($3, $13)", "$4", DriveLateBy("")) + `)
 ORDER BY (f_d - f_o) * route_km DESC, occurrence_id
 LIMIT $8
 `

@@ -449,19 +449,34 @@ func (s *Service) createAsk(
 	// routed, and an offer the passenger cannot make would hold a seat.
 	var pinned, open, ready bool
 	var deadline *time.Time
-	const fraction = "ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, rr.origin))"
+	fromAt, fromF := match.DriveFrom("o", "$3::timestamptz")
+	fraction := "(ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, rr.origin)) - " + fromF + ")"
 	const walk = "ST_Distance(o.route_geom::geography, rr.origin::geography)"
 	if err := tx.QueryRow(ctx, `
 		SELECT o.drive_set_at IS NOT NULL, `+match.DriveOpen("o", "$3")+`,
-		       o.drive_set_at IS NULL OR `+match.DriveReady("o.depart_earliest", "o.route_min", fraction, walk,
-		"GREATEST(rr.window_start, $3::timestamptz)", "rr.window_end", match.DriveLateBy("o."))+`,
+		       o.drive_set_at IS NULL OR COALESCE(`+match.DriveReady(fromAt, "o.route_min", fraction, walk,
+		"GREATEST(rr.window_start, $3::timestamptz)", "rr.window_end", match.DriveLateBy("o."))+`, false),
 		       CASE WHEN o.drive_set_at IS NOT NULL
-		            THEN `+match.DriveDeadline("o.depart_earliest", "o.route_min", fraction, walk)+` END
-		  FROM trip_occurrences o, ride_requests rr
+		            THEN `+match.DriveDeadline(fromAt, "o.route_min", fraction, walk)+` END
+		  FROM trip_occurrences o `+match.DriveCar("o", "$3")+`, ride_requests rr
 		 WHERE o.id = $1 AND rr.id = $2`, c.OccurrenceID, req.ID, now).Scan(&pinned, &open, &ready, &deadline); err != nil {
 		return uuid.Nil, fmt.Errorf("asks: reading the drive: %w", err)
 	}
 	if !open || !ready || (pinned && (deadline == nil || !deadline.After(now))) {
+		return uuid.Nil, errNoRoomToAsk
+	}
+
+	// The budget the insertion was routed under was read before the lock. A
+	// driver who lowered it since — "0′" mid-drive — must not get an offer
+	// that only fits the old one.
+	var budget match.Budget
+	if err := tx.QueryRow(ctx, `
+		SELECT allow_stops, detour_km, detour_min, drive_detour_min
+		  FROM trip_occurrences WHERE id = $1`, c.OccurrenceID).
+		Scan(&budget.AllowStops, &budget.Km, &budget.Min, &budget.OffRoadMin); err != nil {
+		return uuid.Nil, fmt.Errorf("asks: reading the budget: %w", err)
+	}
+	if !insertion.WithinBudget(budget) {
 		return uuid.Nil, errNoRoomToAsk
 	}
 
@@ -507,7 +522,14 @@ func (s *Service) createAsk(
 	// the request and looks for somebody who has not gone yet.
 	expiresAt := now.Add(DefaultTTL)
 	if pinned {
+		moving := !now.Before(departs)
 		departs = *deadline
+		// A driver on the road answers with one tap or not at all, and the
+		// pickup gets nearer every minute: a short answer window frees the
+		// passenger for somebody else quickly.
+		if moving && now.Add(MovingTTL).Before(expiresAt) {
+			expiresAt = now.Add(MovingTTL)
+		}
 	}
 	if departs.Before(expiresAt) {
 		expiresAt = departs

@@ -47,8 +47,8 @@ func TestAcceptOnADriveRefusesAPickupThePassengerCanNoLongerMake(t *testing.T) {
 // The whole path for a driver who taps «Τώρα»: the pinned minute is already
 // this minute, so everything that used to stop at the departure has to keep
 // going for a drive. Somebody halfway along the road, whom the car passes ten
-// minutes from now, is offered the seat with an offer that ends when they
-// would have to set off, and the driver can accept it after the car has left.
+// minutes from now, is offered the seat once the car's position says where it
+// is, and the driver can accept it after the car has left.
 // Somebody two minutes down the road is not offered it at all: they could not
 // get to the road in time.
 func TestADriveLeavingNowIsOfferedAndAcceptedOnTheRoad(t *testing.T) {
@@ -69,17 +69,27 @@ func TestADriveLeavingNowIsOfferedAndAcceptedOnTheRoad(t *testing.T) {
 	}
 	f.clock.Advance(30 * time.Second) // the car has left
 
+	// Without a position nobody is offered a car that has gone.
+	if _, err := f.matcher().AskNext(ctx, f.requestID); !errors.Is(err, asks.ErrNoCandidates) {
+		t.Fatalf("AskNext for a car with no position: %v, want ErrNoCandidates", err)
+	}
+	// With one, at the start of the road.
+	mustExec(t, f, `INSERT INTO trip_live_positions (occurrence_id, user_id, lat, lon, updated_at, accuracy_m, observed_at)
+		VALUES ($1, $2, 40.85, 25.80, $3, 20, $3)`, f.occurrenceID, f.driverID, f.clock.Now())
+
 	askID, err := f.matcher().AskNext(ctx, f.requestID)
 	if err != nil {
 		t.Fatalf("AskNext after the car left: %v", err)
 	}
+	// A driver on the road gets two minutes to tap, well inside the seven the
+	// passenger has before they must set off.
 	var expires time.Time
 	must(t, f.pool.QueryRow(ctx, `SELECT expires_at FROM asks WHERE id = $1`, askID).Scan(&expires), "expiry")
-	if want := now.Add(7 * time.Minute); expires.Sub(want).Abs() > 5*time.Second {
-		t.Fatalf("the offer ends at %v, want about %v: ten minutes away, less the margin", expires, want)
+	if want := f.clock.Now().Add(asks.MovingTTL); !expires.Equal(want) {
+		t.Fatalf("the offer ends at %v, want %v", expires, want)
 	}
 
-	f.clock.Advance(4 * time.Minute)
+	f.clock.Advance(time.Minute)
 	if _, err := f.service().Accept(ctx, askID, f.driverID); err != nil {
 		t.Fatalf("Accept on the road: %v", err)
 	}

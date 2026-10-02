@@ -60,6 +60,8 @@ const (
 	// minInterval is the fastest one person's position is written. A phone
 	// sending faster is not refused, just not stored more often than this.
 	minInterval = 5 * time.Second
+	// maxFixAge is how old a fix the phone took can be and still be stored.
+	maxFixAge = 2 * time.Minute
 )
 
 // Position is one person's last known place on a trip.
@@ -88,6 +90,8 @@ type trip struct {
 	opens     time.Time
 	closes    time.Time
 	cancelled bool
+	// driveEnded is the driver having said «Τέλος».
+	driveEnded bool
 }
 
 // load decides whether userID is on the trip, and when sharing is open for it.
@@ -102,10 +106,11 @@ func (s *Service) load(ctx context.Context, occurrenceID, userID uuid.UUID) (tri
 	err := s.pool.QueryRow(ctx, `
 		SELECT t.driver_id, o.depart_earliest, o.depart_latest, o.route_min, o.status,
 		       EXISTS (SELECT 1 FROM bookings b
-		               WHERE b.occurrence_id = o.id AND b.passenger_id = $2 AND b.status = 'confirmed')
+		               WHERE b.occurrence_id = o.id AND b.passenger_id = $2 AND b.status = 'confirmed'),
+		       o.drive_ended_at IS NOT NULL
 		FROM trip_occurrences o JOIN route_templates t ON t.id = o.template_id
 		WHERE o.id = $1`, occurrenceID, userID).
-		Scan(&t.driverID, &earliest, &latest, &routeMin, &status, &hasSeat)
+		Scan(&t.driverID, &earliest, &latest, &routeMin, &status, &hasSeat, &t.driveEnded)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return trip{}, ErrNotOnTrip
 	}
@@ -140,36 +145,71 @@ func (s *Service) Window(ctx context.Context, occurrenceID, userID uuid.UUID) (o
 	return t.opens, t.closes, nil
 }
 
-// Put records where the caller is now.
+// Fix is one position as the phone took it.
+type Fix struct {
+	Lat, Lon float64
+	// AccuracyM is the phone's own estimate of how far off it may be. Nil
+	// when it did not say, and then the fix is good for a dot on a map but
+	// not for deciding whether a car can reach somebody.
+	AccuracyM *float64
+	// ObservedAt is when the phone took it. Nil means now. Held to the last
+	// two minutes: a phone whose clock runs ahead cannot claim a fix from
+	// the future, and one far behind is not a fix worth keeping.
+	ObservedAt *time.Time
+}
+
+// Put records where somebody is, now, with nothing said about how well.
 func (s *Service) Put(ctx context.Context, occurrenceID, userID uuid.UUID, lat, lon float64) error {
+	return s.PutFix(ctx, occurrenceID, userID, Fix{Lat: lat, Lon: lon})
+}
+
+// PutFix records where somebody is.
+//
+// Inside the trip's window only, one row per person, overwritten — and never
+// with an older fix than the one it holds, so a batch delivered out of order
+// cannot move the car backwards. After the driver has said «Τέλος» nothing
+// from the driver is written: a request already in flight would otherwise put
+// the position back.
+func (s *Service) PutFix(ctx context.Context, occurrenceID, userID uuid.UUID, f Fix) error {
+	lat, lon := f.Lat, f.Lon
 	if math.IsNaN(lat) || math.IsNaN(lon) || math.IsInf(lat, 0) || math.IsInf(lon, 0) ||
 		lat < -90 || lat > 90 || lon < -180 || lon > 180 {
 		return ErrBadPosition
 	}
+	if f.AccuracyM != nil && (math.IsNaN(*f.AccuracyM) || *f.AccuracyM < 0) {
+		return ErrBadPosition
+	}
 	now := s.clock.Now()
+	observed := now
+	if f.ObservedAt != nil && f.ObservedAt.Before(now) {
+		observed = *f.ObservedAt
+	}
+	if observed.Before(now.Add(-maxFixAge)) {
+		return ErrBadPosition
+	}
 	t, err := s.load(ctx, occurrenceID, userID)
 	if err != nil {
 		return err
 	}
-	if !t.open(now) {
+	if !t.open(now) || (t.isDriver && t.driveEnded) {
 		return ErrOutsideWindow
 	}
-	// The WHERE on the update is the rate limit: a write inside minInterval of
-	// the last one leaves the row as it was.
 	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO trip_live_positions (occurrence_id, user_id, lat, lon, updated_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO trip_live_positions (occurrence_id, user_id, lat, lon, updated_at, accuracy_m, observed_at)
+		VALUES ($1, $2, $3, $4, $5, $7, $8)
 		ON CONFLICT (occurrence_id, user_id) DO UPDATE
-		SET lat = EXCLUDED.lat, lon = EXCLUDED.lon, updated_at = EXCLUDED.updated_at
-		WHERE trip_live_positions.updated_at <= EXCLUDED.updated_at - $6::interval`,
-		occurrenceID, userID, lat, lon, now, fmt.Sprintf("%d seconds", int(minInterval.Seconds()))); err != nil {
+		SET lat = EXCLUDED.lat, lon = EXCLUDED.lon, updated_at = EXCLUDED.updated_at,
+		    accuracy_m = EXCLUDED.accuracy_m, observed_at = EXCLUDED.observed_at
+		WHERE trip_live_positions.updated_at <= EXCLUDED.updated_at - $6::interval
+		  AND (trip_live_positions.observed_at IS NULL
+		       OR trip_live_positions.observed_at < EXCLUDED.observed_at)`,
+		occurrenceID, userID, lat, lon, now, fmt.Sprintf("%d seconds", int(minInterval.Seconds())),
+		f.AccuracyM, observed); err != nil {
 		return fmt.Errorf("live: storing the position: %w", err)
 	}
 	return nil
 }
 
-// Stop forgets where the caller is on this trip. Allowed whatever the window
-// and whatever became of the booking: stopping must always work.
 func (s *Service) Stop(ctx context.Context, occurrenceID, userID uuid.UUID) error {
 	if _, err := s.pool.Exec(ctx, `
 		DELETE FROM trip_live_positions WHERE occurrence_id = $1 AND user_id = $2`,

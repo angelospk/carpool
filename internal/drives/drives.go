@@ -197,8 +197,11 @@ func (s *Service) Start(ctx context.Context, driverID, occurrenceID uuid.UUID, i
 		       -- road is still a stop.
 		       drive_detour_min   = COALESCE($4, drive_detour_min),
 		       allow_stops        = allow_stops OR $4::int IS NOT NULL,
+		       -- A new budget is a new plan: an offer quoted under the old one
+		       -- is stale at accept, whichever path created it.
+		       itinerary_version  = itinerary_version + CASE WHEN $5 THEN 1 ELSE 0 END,
 		       updated_at         = now()
-		 WHERE id = $1`, occurrenceID, departs, now, in.DetourMin); err != nil {
+		 WHERE id = $1`, occurrenceID, departs, now, in.DetourMin, detourChanged); err != nil {
 		return time.Time{}, fmt.Errorf("drives: pinning the departure: %w", err)
 	}
 
