@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   api,
+  LUGGAGE_SIZES,
   type LuggageSize,
   type MeetingPoint,
   type PricingMode,
@@ -164,6 +165,28 @@ export default function PublishScreen() {
     if (latestParam) setLatest(latestParam);
     const seatsParam = Number(first(params.seats));
     if (seatsParam >= 1) setSeats(seatsParam);
+    // Who it is offered to above all: a group-only route republished without
+    // its group would go out to everybody.
+    setGroupID(first(params.group) ?? null);
+    setVehicleID(first(params.vehicle) ?? null);
+    const pricingParam = first(params.pricing);
+    if (pricingParam === 'formula' || pricingParam === 'free_contribution' || pricingParam === 'free') {
+      setPricing(pricingParam);
+    }
+    const shareParam = Number(first(params.share));
+    if (shareParam > 0 && shareParam <= 1) setShare(shareParam);
+    const luggageParam = first(params.luggage);
+    if (luggageParam && (LUGGAGE_SIZES as readonly string[]).includes(luggageParam)) {
+      setLuggage(luggageParam as LuggageSize);
+    }
+    const capacityParam = Number(first(params.luggage_capacity));
+    if (first(params.luggage_capacity) !== undefined && Number.isInteger(capacityParam) && capacityParam >= 0) {
+      setLuggageCapacity(capacityParam);
+    }
+    const stopsParam = first(params.allow_stops);
+    if (stopsParam === 'true' || stopsParam === 'false') setAllowStops(stopsParam === 'true');
+    const detourParam = Number(first(params.detour_km));
+    if (first(params.detour_km) !== undefined && detourParam >= 0) setDetourKm(detourParam);
     setReplaces({ id, label: `${pins.from.label} → ${pins.to.label}` });
   }, [params]);
 
@@ -343,6 +366,9 @@ export default function PublishScreen() {
               label={t('publish.leavingNow')}
               selected={leavingNow}
               onPress={() => {
+                // A trip now is not a new version of the route being changed,
+                // so publishing it must not retire that route.
+                setReplaces(null);
                 setLeavingNow(true);
                 setKind('oneoff');
               }}

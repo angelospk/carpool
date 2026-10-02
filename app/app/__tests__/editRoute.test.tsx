@@ -90,3 +90,53 @@ test('a failed publish leaves the old route alone', async () => {
   await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
   expect(api.retireRoute).not.toHaveBeenCalled();
 });
+
+// «Φεύγω τώρα» is a single trip, not a new version of the weekly route: it
+// must not retire the route being changed.
+test('leaving now while changing a route does not retire it', async () => {
+  render(wrap(<PublishScreen />));
+  await waitFor(() => expect(screen.getByTestId('publish-origin-input').props.value).toBe('Σουφλί'));
+
+  fireEvent.press(screen.getByTestId('schedule-now'));
+  expect(screen.queryByTestId('editing-route')).toBeNull();
+  await waitFor(() => expect(screen.getByTestId('publish-submit').props.accessibilityState?.disabled).toBeFalsy());
+  fireEvent.press(screen.getByTestId('publish-submit'));
+
+  await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
+  expect(api.retireRoute).not.toHaveBeenCalled();
+});
+
+// Review found this: a group-only route came back as one offered to everybody,
+// because the group was not carried and the form's default is "everybody".
+test('a group-only route stays group-only, with every other choice kept', async () => {
+  mockParams = {
+    ...mockParams,
+    group: 'g-hospital',
+    vehicle: 'v1',
+    pricing: 'formula',
+    share: '0.5',
+    luggage: 'cabin',
+    luggage_capacity: '2',
+    allow_stops: 'false',
+    detour_km: '7',
+  };
+  (api.myGroups as jest.Mock).mockResolvedValue({ groups: [{ id: 'g-hospital', name: 'Νοσοκομείο' }] });
+  render(wrap(<PublishScreen />));
+  await waitFor(() => expect(screen.getByTestId('publish-origin-input').props.value).toBe('Σουφλί'));
+
+  await waitFor(() => expect(screen.getByTestId('publish-submit').props.accessibilityState?.disabled).toBeFalsy());
+  fireEvent.press(screen.getByTestId('publish-submit'));
+
+  await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
+  expect((api.publishRoute as jest.Mock).mock.calls[0][0]).toEqual(
+    expect.objectContaining({
+      group_id: 'g-hospital',
+      vehicle_id: 'v1',
+      contribution_share: 0.5,
+      luggage: 'cabin',
+      luggage_capacity: 2,
+      allow_stops: false,
+      detour_km: 7,
+    }),
+  );
+});

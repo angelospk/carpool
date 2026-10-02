@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -39,6 +40,16 @@ type myRoute struct {
 	OriginLat      float64 `json:"origin_lat"`
 	DestinationLon float64 `json:"destination_lon"`
 	DestinationLat float64 `json:"destination_lat"`
+	// Everything else the driver chose, for the same reason: «Αλλαγή» retires
+	// this route, so the replacement has to keep all of it. A missing group
+	// would republish a group-only route to everybody.
+	GroupID           *string `json:"group_id"`
+	VehicleID         *string `json:"vehicle_id"`
+	Luggage           string  `json:"luggage"`
+	LuggageCapacity   int     `json:"luggage_capacity"`
+	ContributionShare float64 `json:"contribution_share"`
+	AllowStops        bool    `json:"allow_stops"`
+	DetourKm          float64 `json:"detour_km"`
 	// LinkOpens is how many times a person opened the route's link: whether
 	// sharing it reached anybody.
 	LinkOpens int `json:"link_opens"`
@@ -75,7 +86,9 @@ func (d Deps) handleMyRoutes(w http.ResponseWriter, r *http.Request) {
 		             OR EXISTS (SELECT 1 FROM asks a
 		                         WHERE a.occurrence_id = o.id AND a.status = 'pending'))),
 		       rt.share_opens, rt.nudge_when_leaving,
-		       ST_X(rt.origin), ST_Y(rt.origin), ST_X(rt.destination), ST_Y(rt.destination)
+		       ST_X(rt.origin), ST_Y(rt.origin), ST_X(rt.destination), ST_Y(rt.destination),
+		       rt.group_id::text, rt.vehicle_id::text, rt.luggage, rt.luggage_capacity,
+		       rt.contribution_share::float8, rt.allow_stops, rt.detour_km::float8
 		  FROM route_templates rt
 		  JOIN route_schedules rs ON rs.template_id = rt.id
 		 WHERE rt.driver_id = $1 AND rt.active
@@ -96,7 +109,9 @@ func (d Deps) handleMyRoutes(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&m.ID, &m.OriginLabel, &m.DestinationLabel, &m.RouteKm,
 			&m.Seats, &m.PricingMode, &m.Kind, &m.Weekdays, &oneoff,
 			&m.DepartEarliest, &m.DepartLatest, &m.UpcomingTrips, &m.KeptTrips, &m.LinkOpens, &m.NudgeWhenLeaving,
-			&m.OriginLon, &m.OriginLat, &m.DestinationLon, &m.DestinationLat); err != nil {
+			&m.OriginLon, &m.OriginLat, &m.DestinationLon, &m.DestinationLat,
+			&m.GroupID, &m.VehicleID, &m.Luggage, &m.LuggageCapacity,
+			&m.ContributionShare, &m.AllowStops, &m.DetourKm); err != nil {
 			slog.Error("reading a route", "driver", userID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal", "could not read your routes")
 			return
@@ -171,7 +186,38 @@ func (d Deps) handleRetireRoute(w http.ResponseWriter, r *http.Request) {
 
 	// Also on a second retire, so a route retired before this existed can be
 	// cleared by retiring it again.
-	if _, err := d.Pool.Exec(r.Context(), `
+	if err := d.cancelEmptyDepartures(r.Context(), routeID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "the route was retired but its departures were not called off")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// cancelEmptyDepartures calls off the route's future departures that nobody
+// has a seat on or is being asked about.
+//
+// In two statements, in one transaction. Writing an ask locks its departure
+// first, so the departures are locked here before anything is checked: a
+// single UPDATE would judge "nobody is being asked" from a snapshot taken
+// before it waited for that lock, and cancel a departure whose ask committed
+// in between. The second statement starts after the locks are held, so under
+// READ COMMITTED it sees every ask and booking written before them.
+func (d Deps) cancelEmptyDepartures(ctx context.Context, routeID uuid.UUID) error {
+	tx, err := d.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
+		SELECT 1 FROM trip_occurrences
+		 WHERE template_id = $1 AND status = 'scheduled' AND depart_earliest > $2
+		 ORDER BY id
+		 FOR UPDATE`, routeID, d.now()); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
 		UPDATE trip_occurrences o SET status = 'cancelled', updated_at = now()
 		 WHERE o.template_id = $1
 		   AND o.status = 'scheduled'
@@ -181,9 +227,7 @@ func (d Deps) handleRetireRoute(w http.ResponseWriter, r *http.Request) {
 		   AND NOT EXISTS (SELECT 1 FROM asks a
 		                    WHERE a.occurrence_id = o.id AND a.status = 'pending')`,
 		routeID, d.now()); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "the route was retired but its departures were not called off")
-		return
+		return err
 	}
-
-	w.WriteHeader(http.StatusNoContent)
+	return tx.Commit(ctx)
 }

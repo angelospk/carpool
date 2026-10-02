@@ -54,6 +54,14 @@ export default function MyRoutesScreen() {
         earliest: r.depart_earliest,
         latest: r.depart_latest,
         seats: String(r.seats),
+        pricing: r.pricing_mode,
+        share: String(r.contribution_share),
+        luggage: r.luggage,
+        luggage_capacity: String(r.luggage_capacity),
+        allow_stops: String(r.allow_stops),
+        detour_km: String(r.detour_km),
+        ...(r.group_id ? { group: r.group_id } : {}),
+        ...(r.vehicle_id ? { vehicle: r.vehicle_id } : {}),
       },
     });
 
