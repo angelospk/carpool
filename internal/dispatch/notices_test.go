@@ -63,6 +63,10 @@ func TestEveryNoticeReachesThePersonItNames(t *testing.T) {
 			"Ο οδηγός είπε πότε φεύγει",
 			"Άνοιξε τη διαδρομή για να δεις πότε περνά από το σημείο σου.",
 		},
+		notices.PassengerHere: {
+			"Ο επιβάτης σου είναι στο σημείο",
+			"Άνοιξε τη διαδρομή για να δεις ποιος και πού.",
+		},
 		notices.DriveNudge: {
 			"2 άτομα στον δρόμο σου θέλουν να πάνε τώρα",
 			"Έχεις ελεύθερες θέσεις. Πες πότε φεύγεις και τους ρωτάμε.",
@@ -116,7 +120,8 @@ func TestEveryNoticeReachesThePersonItNames(t *testing.T) {
 			}
 			field := "arrangement_id"
 			switch event {
-			case notices.BookingCancelledForPassenger, notices.BookingCancelledForDriver, notices.DriveRetimed:
+			case notices.BookingCancelledForPassenger, notices.BookingCancelledForDriver, notices.DriveRetimed,
+				notices.PassengerHere:
 				field = "booking_id"
 			case notices.DriveNudge:
 				field = "occurrence_id"
@@ -144,6 +149,8 @@ func build(event notices.Event, recipient, resource uuid.UUID) (outbox.Message, 
 		return notices.Retimed(recipient, resource, time.Date(2026, time.July, 30, 7, 0, 0, 0, time.UTC))
 	case notices.DriveNudge:
 		return notices.Nudge(recipient, resource, 2)
+	case notices.PassengerHere:
+		return notices.Here(recipient, resource)
 	}
 	return notices.Arrangement(event, recipient, resource)
 }

@@ -429,3 +429,202 @@ func (s *Service) nudgeOne(ctx context.Context, occurrenceID uuid.UUID, now time
 	}
 	return true, nil
 }
+
+// ErrNotDriving means there is no drive under way to change: no minute was
+// pinned, or the driver has already said «Τέλος».
+var ErrNotDriving = errors.New("drives: no drive under way")
+
+// lockDrive takes the driver's row and the occurrence, in that order, and
+// reports whether a drive is under way on it.
+func lockDrive(ctx context.Context, tx pgx.Tx, driverID, occurrenceID uuid.UUID) (underway bool, err error) {
+	var status string
+	err = tx.QueryRow(ctx, `SELECT status FROM users WHERE id = $1 FOR SHARE`, driverID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != "active") {
+		return false, ErrNotYours
+	}
+	if err != nil {
+		return false, fmt.Errorf("drives: locking the driver: %w", err)
+	}
+	var owner uuid.UUID
+	err = tx.QueryRow(ctx, `
+		SELECT t.driver_id, o.drive_set_at IS NOT NULL AND o.drive_ended_at IS NULL AND o.status = 'scheduled'
+		  FROM trip_occurrences o JOIN route_templates t ON t.id = o.template_id
+		 WHERE o.id = $1 FOR UPDATE OF o`, occurrenceID).Scan(&owner, &underway)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && owner != driverID) {
+		return false, ErrNotYours
+	}
+	if err != nil {
+		return false, fmt.Errorf("drives: locking the trip: %w", err)
+	}
+	return underway, nil
+}
+
+// letGoOfOffers ends every offer out on a drive now, requests before asks in
+// id order as the sweeper takes them, so the passengers move on to somebody
+// else.
+func letGoOfOffers(ctx context.Context, tx pgx.Tx, occurrenceID uuid.UUID, now time.Time) error {
+	if _, err := tx.Exec(ctx, `
+		SELECT rr.id FROM ride_requests rr
+		 WHERE rr.id IN (SELECT a.request_id FROM asks a
+		                  WHERE a.occurrence_id = $1 AND a.status = 'pending')
+		 ORDER BY rr.id FOR UPDATE`, occurrenceID); err != nil {
+		return fmt.Errorf("drives: locking the requests behind open offers: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE asks SET expires_at = LEAST(expires_at, $2)
+		 WHERE id IN (SELECT id FROM asks WHERE occurrence_id = $1 AND status = 'pending'
+		               ORDER BY id FOR UPDATE)`, occurrenceID, now); err != nil {
+		return fmt.Errorf("drives: letting go of open offers: %w", err)
+	}
+	return nil
+}
+
+// End is «Τέλος»: the drive takes nobody else, the offers out are let go,
+// and the car's position is forgotten and not written again. Ending a drive
+// that has ended is not an error; there is nothing left to do.
+func (s *Service) End(ctx context.Context, driverID, occurrenceID uuid.UUID) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("drives: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	underway, err := lockDrive(ctx, tx, driverID, occurrenceID)
+	if err != nil {
+		return err
+	}
+	if !underway {
+		return tx.Commit(ctx)
+	}
+	now := s.clock.Now()
+	if _, err := tx.Exec(ctx, `
+		UPDATE trip_occurrences
+		   SET drive_ended_at = $2, offers_until = LEAST(offers_until, $2), updated_at = now()
+		 WHERE id = $1`, occurrenceID, now); err != nil {
+		return fmt.Errorf("drives: ending the drive: %w", err)
+	}
+	if err := letGoOfOffers(ctx, tx, occurrenceID, now); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM trip_live_positions WHERE occurrence_id = $1 AND user_id = $2`,
+		occurrenceID, driverID); err != nil {
+		return fmt.Errorf("drives: forgetting the car: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("drives: commit: %w", err)
+	}
+	return nil
+}
+
+// Adjust is what the driver changes on the road.
+type Adjust struct {
+	// Offering false stops new offers and lets go of the ones out; true takes
+	// people again until the end of the road.
+	Offering *bool
+	// DetourMin replaces the off-road limit for the rest of the drive.
+	DetourMin *int
+}
+
+// Adjust changes a drive under way without ending it.
+func (s *Service) Adjust(ctx context.Context, driverID, occurrenceID uuid.UUID, in Adjust) error {
+	if in.DetourMin != nil && (*in.DetourMin < 0 || *in.DetourMin > maxDetourMin) {
+		return ErrBadDetour
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("drives: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	underway, err := lockDrive(ctx, tx, driverID, occurrenceID)
+	if err != nil {
+		return err
+	}
+	if !underway {
+		return ErrNotDriving
+	}
+	now := s.clock.Now()
+	letGo := false
+	if in.Offering != nil {
+		if _, err := tx.Exec(ctx, `
+			UPDATE trip_occurrences
+			   SET offers_until = CASE WHEN $2 THEN depart_earliest + route_min * interval '1 minute'
+			                           ELSE $3::timestamptz END,
+			       updated_at = now()
+			 WHERE id = $1`, occurrenceID, *in.Offering, now); err != nil {
+			return fmt.Errorf("drives: changing offers: %w", err)
+		}
+		letGo = !*in.Offering
+	}
+	if in.DetourMin != nil {
+		tag, err := tx.Exec(ctx, `
+			UPDATE trip_occurrences
+			   SET drive_detour_min = $2, allow_stops = true,
+			       itinerary_version = itinerary_version + 1, updated_at = now()
+			 WHERE id = $1 AND drive_detour_min IS DISTINCT FROM $2`, occurrenceID, *in.DetourMin)
+		if err != nil {
+			return fmt.Errorf("drives: changing the detour: %w", err)
+		}
+		letGo = letGo || tag.RowsAffected() > 0
+	}
+	if letGo {
+		if err := letGoOfOffers(ctx, tx, occurrenceID, now); err != nil {
+			return err
+		}
+	}
+	if in.Offering != nil && *in.Offering {
+		if err := outbox.Wake(ctx, tx, occurrenceID, "drive_resumed", now); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("drives: commit: %w", err)
+	}
+	return nil
+}
+
+// Here is «Είμαι εδώ»: a passenger with a seat on a drive is at the pickup.
+// The driver is told once; saying it again changes nothing.
+func (s *Service) Here(ctx context.Context, passengerID, occurrenceID uuid.UUID) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("drives: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var bookingID, driverID uuid.UUID
+	var already bool
+	err = tx.QueryRow(ctx, `
+		SELECT b.id, t.driver_id, b.arrived_at IS NOT NULL
+		  FROM bookings b
+		  JOIN trip_occurrences o ON o.id = b.occurrence_id
+		  JOIN route_templates t ON t.id = o.template_id
+		 WHERE b.occurrence_id = $1 AND b.passenger_id = $2 AND b.status = 'confirmed'
+		   AND o.drive_set_at IS NOT NULL AND o.status = 'scheduled'
+		 FOR UPDATE OF b`, occurrenceID, passengerID).Scan(&bookingID, &driverID, &already)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotYours
+	}
+	if err != nil {
+		return fmt.Errorf("drives: finding the seat: %w", err)
+	}
+	if already {
+		return tx.Commit(ctx)
+	}
+	now := s.clock.Now()
+	if _, err := tx.Exec(ctx, `UPDATE bookings SET arrived_at = $2 WHERE id = $1`, bookingID, now); err != nil {
+		return fmt.Errorf("drives: marking the passenger here: %w", err)
+	}
+	msg, err := notices.Here(driverID, bookingID)
+	if err != nil {
+		return err
+	}
+	if err := outbox.Enqueue(ctx, tx, msg, now); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("drives: commit: %w", err)
+	}
+	return nil
+}

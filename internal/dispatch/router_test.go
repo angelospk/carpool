@@ -327,3 +327,34 @@ func TestAFailureToRetireADeadDeviceFailsTheMessage(t *testing.T) {
 func r(pool *pgxpool.Pool, snd *sender) *dispatch.Router {
 	return dispatch.NewRouter(pool, clk, snd, noAsk)
 }
+
+// An offer on a drive is answered from the notification: its own words, and
+// the buttons the app registered for it.
+func TestAnOfferOnADriveCarriesItsButtons(t *testing.T) {
+	pool, snd, driverID := newRouter(t)
+	addToken(t, pool, driverID, "phone", false)
+	payload, err := json.Marshal(map[string]any{
+		"ask_id": uuid.New(), "driver_id": driverID, "detour_min": 3.0, "drive": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := dispatch.NewRouter(pool, clk, snd, noAsk)
+	if err := r.Handle(context.Background(), outbox.Message{Kind: "push", Payload: payload, IdempotencyKey: "ask:2"}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(snd.sent) != 1 {
+		t.Fatalf("sent %d", len(snd.sent))
+	}
+	n := snd.sent[0]
+	if n.CategoryID != dispatch.DriveOfferCategory || n.Title != "Επιβάτης στον δρόμο σου · +3′" {
+		t.Fatalf("sent %q with category %q", n.Title, n.CategoryID)
+	}
+	// An ordinary offer has no buttons.
+	if err := r.Handle(context.Background(), askMessage(t, driverID)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if snd.sent[1].CategoryID != "" {
+		t.Fatalf("an ordinary offer carried category %q", snd.sent[1].CategoryID)
+	}
+}

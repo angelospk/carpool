@@ -120,6 +120,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 			"bio": p.Bio, "preferences": nonNil(p.Preferences),
 			"shared_groups": sharedGroups,
 			"can_rate":      p.CanRate, "rated": p.Rated,
+			"arrived_at": p.ArrivedAt, "pickup": p.Pickup,
 		})
 	}
 	driverGroups, ok := shared(trip.Driver.UserID)
@@ -147,6 +148,9 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		"scheduled_latest":   trip.ScheduledLatest,
 		"detour_min":         trip.DetourMin,
 		"pickup_at":          trip.PickupAt,
+		"drive_ended_at":     trip.DriveEndedAt,
+		"offers_until":       trip.OffersUntil,
+		"destination":        trip.Destination,
 		"driver": map[string]any{
 			"id": trip.Driver.UserID, "name": trip.Driver.Name,
 			"photo_url": avatarURL(trip.Driver.UserID, trip.Driver.PhotoVersion), "rating": trip.Driver.Rating,

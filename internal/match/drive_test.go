@@ -276,10 +276,10 @@ func TestAMovingDriveIsOfferedToSomebodyAheadOfTheCar(t *testing.T) {
 func TestAMovingDriveNeedsAFixItCanTrust(t *testing.T) {
 	seen := driveDeparts.Add(5*time.Minute + 50*time.Second)
 	cases := map[string]func(f *fixture, occ uuid.UUID){
-		"no fix":          func(f *fixture, occ uuid.UUID) {},
+		"no fix":            func(f *fixture, occ uuid.UUID) {},
 		"three minutes old": func(f *fixture, occ uuid.UUID) { f.fix(t, occ, 25.86, 40.85, 20, seen.Add(-3*time.Minute)) },
-		"half a km off":   func(f *fixture, occ uuid.UUID) { f.fix(t, occ, 25.86, 40.85, 500, seen) },
-		"another road":    func(f *fixture, occ uuid.UUID) { f.fix(t, occ, 25.86, 40.87, 20, seen) },
+		"half a km off":     func(f *fixture, occ uuid.UUID) { f.fix(t, occ, 25.86, 40.85, 500, seen) },
+		"another road":      func(f *fixture, occ uuid.UUID) { f.fix(t, occ, 25.86, 40.87, 20, seen) },
 	}
 	for name, arrange := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -332,6 +332,9 @@ func NewRouter(deps Deps) http.Handler {
 				}
 				if deps.Drives != nil {
 					r.Post("/drive", deps.handleStartDrive)
+					r.Patch("/drive", deps.handleAdjustDrive)
+					r.Post("/drive/end", deps.handleEndDrive)
+					r.Post("/here", deps.handleHere)
 				}
 				if deps.Live != nil {
 					r.Get("/live", deps.handleLive)

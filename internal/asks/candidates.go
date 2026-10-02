@@ -565,6 +565,8 @@ func (s *Service) createAsk(
 		"occurrence_id": c.OccurrenceID,
 		"driver_id":     c.DriverID,
 		"detour_min":    insertion.DetourMin,
+		// A drive's offer is answered with one tap on the notification.
+		"drive": pinned,
 	})
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("asks: encoding ask notification: %w", err)

@@ -62,6 +62,8 @@ const (
 	// reminded about, when somebody on their road could be picked up. It says
 	// how many and nothing about who.
 	DriveNudge Event = "drive_nudge"
+	// PassengerHere reaches a driver on a drive: a passenger is at the pickup.
+	PassengerHere Event = "passenger_here"
 )
 
 // All is every event a producer can emit, and the reason a new one cannot be
@@ -76,6 +78,7 @@ func All() []Event {
 		ArrangementCancelled,
 		DriveRetimed,
 		DriveNudge,
+		PassengerHere,
 	}
 }
 
@@ -108,7 +111,7 @@ func (p Payload) Validate() error {
 	switch p.Event {
 	case "":
 		return fmt.Errorf("notices: the payload names no event")
-	case BookingCancelledForPassenger, BookingCancelledForDriver, DriveRetimed:
+	case BookingCancelledForPassenger, BookingCancelledForDriver, DriveRetimed, PassengerHere:
 		if p.BookingID == nil || *p.BookingID == uuid.Nil {
 			return fmt.Errorf("notices: %s names no booking", p.Event)
 		}
@@ -166,6 +169,12 @@ func Retimed(recipient, booking uuid.UUID, departs time.Time) (outbox.Message, e
 func Nudge(driver, occurrence uuid.UUID, count int) (outbox.Message, error) {
 	return message(Payload{Event: DriveNudge, RecipientID: driver, OccurrenceID: &occurrence, Count: count},
 		"drive_nudge:"+occurrence.String())
+}
+
+// Here builds the notice that a passenger is at the pickup. Once per seat.
+func Here(driver, booking uuid.UUID) (outbox.Message, error) {
+	return message(Payload{Event: PassengerHere, RecipientID: driver, BookingID: &booking},
+		"passenger_here:"+booking.String())
 }
 
 func message(p Payload, key string) (outbox.Message, error) {

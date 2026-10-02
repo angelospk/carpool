@@ -146,3 +146,27 @@ var (
 	_ push.Sender = (*push.Expo)(nil)
 	_ push.Sender = (*push.Fake)(nil)
 )
+
+// Buttons on the notification travel as Expo's categoryId.
+func TestSendCarriesTheButtons(t *testing.T) {
+	var got struct {
+		CategoryID string `json:"categoryId"`
+	}
+	c := stub(t, func(w http.ResponseWriter, r *http.Request) {
+		var batch []json.RawMessage
+		_ = json.NewDecoder(r.Body).Decode(&batch)
+		if len(batch) == 1 {
+			_ = json.Unmarshal(batch[0], &got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"status":"ok","id":"ticket-1"}]}`))
+	})
+	if err := c.Send(context.Background(), push.Notification{
+		Token: "ExponentPushToken[abc]", Title: "t", Body: "b", CategoryID: "drive_offer",
+	}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if got.CategoryID != "drive_offer" {
+		t.Errorf("categoryId = %q", got.CategoryID)
+	}
+}

@@ -84,7 +84,15 @@ type pushPayload struct {
 
 	OccurrenceID *uuid.UUID `json:"occurrence_id"`
 	Count        int        `json:"count"`
+	// Drive marks an offer on a drive, which is answered from the
+	// notification itself.
+	Drive bool `json:"drive"`
 }
+
+// DriveOfferCategory is the set of buttons the app registers for an offer on a
+// drive: «Πάρ' τον», which opens the app on the offer and accepts it, and
+// «Όχι». The app and this name have to agree.
+const DriveOfferCategory = "drive_offer"
 
 func (r *Router) handlePush(ctx context.Context, m outbox.Message) error {
 	var p pushPayload
@@ -152,9 +160,11 @@ func (r *Router) handlePush(ctx context.Context, m outbox.Message) error {
 	// the notification for a device that had merely timed out.
 	var transient, permanent error
 	for _, token := range tokens {
-		err := r.push.Send(ctx, push.Notification{
-			Token: token, Title: title, Body: body, Data: data,
-		})
+		n := push.Notification{Token: token, Title: title, Body: body, Data: data}
+		if p.Event == "" && p.AskID != nil && p.Drive {
+			n.CategoryID = DriveOfferCategory
+		}
+		err := r.push.Send(ctx, n)
 		switch {
 		case err == nil:
 			// The provider took it, so this device is real and somebody is
@@ -223,6 +233,11 @@ func (p pushPayload) notification() (recipient uuid.UUID, title, body string, er
 		case p.BookingID != nil && p.PassengerID != nil:
 			to, title, body = *p.PassengerID, "Η διαδρομή σου επιβεβαιώθηκε",
 				"Ο οδηγός δέχτηκε το αίτημά σου."
+		case p.AskID != nil && p.DriverID != nil && p.Drive:
+			// Read at a glance, in a car: who is where costs what, and what
+			// the two buttons do. No name and no place on a lock screen.
+			to, title, body = *p.DriverID, fmt.Sprintf("Επιβάτης στον δρόμο σου · +%.0f′", p.DetourMin),
+				"«Πάρ' τον» βάζει στάση στον χάρτη σου. Αν δεν απαντήσεις, δεν γίνεται τίποτα."
 		case p.AskID != nil && p.DriverID != nil:
 			to, title, body = *p.DriverID, "Νέο αίτημα διαδρομής",
 				fmt.Sprintf("Ένας επιβάτης ζητά μεταφορά, +%.0f λεπτά.", p.DetourMin)
@@ -261,6 +276,9 @@ func (p pushPayload) notification() (recipient uuid.UUID, title, body string, er
 // first of those is the driver's doing — so none of the three is claimed.
 func say(event notices.Event, count int) (title, body string, ok bool) {
 	switch event {
+	case notices.PassengerHere:
+		return "Ο επιβάτης σου είναι στο σημείο",
+			"Άνοιξε τη διαδρομή για να δεις ποιος και πού.", true
 	case notices.DriveRetimed:
 		return "Ο οδηγός είπε πότε φεύγει",
 			"Άνοιξε τη διαδρομή για να δεις πότε περνά από το σημείο σου.", true

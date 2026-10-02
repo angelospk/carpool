@@ -574,3 +574,168 @@ func TestARetriedZeroDetourIsTheSameDrive(t *testing.T) {
 		t.Errorf("queued %d wakes, want 1", n)
 	}
 }
+
+// ------------------------------------------------------- on the road ---
+
+func (w *world) offersUntil(t *testing.T) time.Time {
+	t.Helper()
+	var u time.Time
+	if err := w.pool.QueryRow(context.Background(),
+		`SELECT offers_until FROM trip_occurrences WHERE id = $1`, w.occ).Scan(&u); err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
+
+func (w *world) askExpiry(t *testing.T, id uuid.UUID) time.Time {
+	t.Helper()
+	var e time.Time
+	if err := w.pool.QueryRow(context.Background(),
+		`SELECT expires_at FROM asks WHERE id = $1`, id).Scan(&e); err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+// «Τέλος»: no more offers, the ones out let go, the car's position gone, and
+// nothing the phone still sends is written.
+func TestEndingADriveStopsEverything(t *testing.T) {
+	w := newWorld(t, at("06:55"))
+	if _, err := start(w, at("07:00")); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	w.clock.Set(at("07:05"))
+	_, req := w.request(t, "+306900000040", at("06:30"), at("09:00"))
+	askID := w.ask(t, req, at("07:07"))
+	w.exec(t, `INSERT INTO trip_live_positions (occurrence_id, user_id, lat, lon, updated_at, accuracy_m, observed_at)
+		VALUES ($1, $2, 40.85, 25.85, $3, 20, $3)`, w.occ, w.driverID, at("07:05"))
+
+	for i := 0; i < 2; i++ {
+		if err := w.svc.End(context.Background(), w.driverID, w.occ); err != nil {
+			t.Fatalf("End #%d: %v", i+1, err)
+		}
+	}
+	if got := w.offersUntil(t); !got.Equal(at("07:05")) {
+		t.Errorf("offers until %v, want now", got)
+	}
+	if got := w.askExpiry(t, askID); !got.Equal(at("07:05")) {
+		t.Errorf("an offer out on the road expires at %v, want now", got)
+	}
+	var rows int
+	if err := w.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM trip_live_positions WHERE user_id = $1`, w.driverID).Scan(&rows); err != nil || rows != 0 {
+		t.Errorf("%d positions left after «Τέλος» (%v)", rows, err)
+	}
+
+	stranger := w.user(t, "+306900000041")
+	if err := w.svc.End(context.Background(), stranger, w.occ); !errors.Is(err, drives.ErrNotYours) {
+		t.Errorf("a stranger ending it: %v", err)
+	}
+}
+
+// Mid-drive the driver can stop taking people, take them again, or change
+// how far off the road they go — one tap each, none of them ending the drive.
+func TestADriverOnTheRoadCanStopAndResumeOffers(t *testing.T) {
+	w := newWorld(t, at("06:55"))
+	if _, err := start(w, at("07:00")); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	w.clock.Set(at("07:05"))
+	_, req := w.request(t, "+306900000042", at("06:30"), at("09:00"))
+	askID := w.ask(t, req, at("07:07"))
+
+	off, on := false, true
+	if err := w.svc.Adjust(context.Background(), w.driverID, w.occ, drives.Adjust{Offering: &off}); err != nil {
+		t.Fatalf("Adjust off: %v", err)
+	}
+	if got := w.offersUntil(t); !got.Equal(at("07:05")) {
+		t.Errorf("offers until %v after stopping", got)
+	}
+	if got := w.askExpiry(t, askID); !got.Equal(at("07:05")) {
+		t.Errorf("the offer out expires at %v after stopping, want now", got)
+	}
+
+	if err := w.svc.Adjust(context.Background(), w.driverID, w.occ, drives.Adjust{Offering: &on}); err != nil {
+		t.Fatalf("Adjust on: %v", err)
+	}
+	if got := w.offersUntil(t); !got.Equal(at("07:20")) {
+		t.Errorf("offers until %v after resuming, want the end of the road", got)
+	}
+
+	three := 3
+	if err := w.svc.Adjust(context.Background(), w.driverID, w.occ, drives.Adjust{DetourMin: &three}); err != nil {
+		t.Fatalf("Adjust detour: %v", err)
+	}
+	if o := w.occurrence(t); o.driveDetourMin == nil || *o.driveDetourMin != 3 {
+		t.Errorf("off-road limit %v, want 3", o.driveDetourMin)
+	}
+
+	if err := w.svc.End(context.Background(), w.driverID, w.occ); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+	if err := w.svc.Adjust(context.Background(), w.driverID, w.occ, drives.Adjust{Offering: &on}); !errors.Is(err, drives.ErrNotDriving) {
+		t.Errorf("resuming an ended drive: %v, want ErrNotDriving", err)
+	}
+}
+
+// «Είμαι εδώ»: the passenger is at the pickup, the driver is told, once.
+func TestAPassengerSaysTheyAreAtThePickup(t *testing.T) {
+	w := newWorld(t, at("06:55"))
+	passenger, booking := w.book(t, "+306900000043")
+	if _, err := start(w, at("07:00")); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	w.clock.Set(at("07:01"))
+	for i := 0; i < 2; i++ {
+		if err := w.svc.Here(context.Background(), passenger, w.occ); err != nil {
+			t.Fatalf("Here #%d: %v", i+1, err)
+		}
+	}
+	var arrived *time.Time
+	if err := w.pool.QueryRow(context.Background(),
+		`SELECT arrived_at FROM bookings WHERE id = $1`, booking).Scan(&arrived); err != nil || arrived == nil {
+		t.Fatalf("arrived_at = %v (%v)", arrived, err)
+	}
+	got := w.notices(t, notices.PassengerHere)
+	if len(got) != 1 || got[0].RecipientID != w.driverID || *got[0].BookingID != booking {
+		t.Fatalf("the driver was told %+v", got)
+	}
+
+	stranger := w.user(t, "+306900000044")
+	if err := w.svc.Here(context.Background(), stranger, w.occ); !errors.Is(err, drives.ErrNotYours) {
+		t.Errorf("somebody without a seat: %v", err)
+	}
+}
+
+// The driver sees every pickup and where the road ends, to hand to their maps
+// app; a passenger sees their own pickup and nobody else's.
+func TestOnlyTheDriverSeesEveryPickup(t *testing.T) {
+	w := newWorld(t, at("06:55"))
+	first, _ := w.book(t, "+306900000050")
+	second, _ := w.book(t, "+306900000051")
+
+	driver, err := store.GetTrip(context.Background(), w.pool, w.occ, w.driverID)
+	if err != nil {
+		t.Fatalf("GetTrip as the driver: %v", err)
+	}
+	if driver.Destination == nil || len(driver.Passengers) != 2 ||
+		driver.Passengers[0].Pickup == nil || driver.Passengers[1].Pickup == nil {
+		t.Fatalf("the driver is missing pickups or the destination: %+v", driver)
+	}
+
+	mine, err := store.GetTrip(context.Background(), w.pool, w.occ, first)
+	if err != nil {
+		t.Fatalf("GetTrip as a passenger: %v", err)
+	}
+	if mine.Destination != nil {
+		t.Errorf("a passenger was given the driver's destination")
+	}
+	for _, p := range mine.Passengers {
+		if p.UserID == second && p.Pickup != nil {
+			t.Errorf("a passenger was told where another passenger waits")
+		}
+		if p.UserID == first && p.Pickup == nil {
+			t.Errorf("a passenger was not told their own pickup")
+		}
+	}
+}

@@ -94,3 +94,68 @@ func (d Deps) handleRouteNudge(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// handleEndDrive is «Τέλος».
+func (d Deps) handleEndDrive(w http.ResponseWriter, r *http.Request) {
+	userID, occurrenceID, ok := d.driveParams(w, r)
+	if !ok {
+		return
+	}
+	d.driveResult(w, d.Drives.End(r.Context(), userID, occurrenceID))
+}
+
+// handleAdjustDrive changes a drive under way: stop or resume taking people,
+// or how far off the road to go.
+func (d Deps) handleAdjustDrive(w http.ResponseWriter, r *http.Request) {
+	userID, occurrenceID, ok := d.driveParams(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Offering  *bool `json:"offering"`
+		DetourMin *int  `json:"detour_min"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	d.driveResult(w, d.Drives.Adjust(r.Context(), userID, occurrenceID,
+		drives.Adjust{Offering: body.Offering, DetourMin: body.DetourMin}))
+}
+
+// handleHere is a passenger's «Είμαι εδώ».
+func (d Deps) handleHere(w http.ResponseWriter, r *http.Request) {
+	userID, occurrenceID, ok := d.driveParams(w, r)
+	if !ok {
+		return
+	}
+	d.driveResult(w, d.Drives.Here(r.Context(), userID, occurrenceID))
+}
+
+func (d Deps) driveParams(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, bool) {
+	userID, ok := callerID(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
+		return uuid.Nil, uuid.Nil, false
+	}
+	occurrenceID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "no such trip")
+		return uuid.Nil, uuid.Nil, false
+	}
+	return userID, occurrenceID, true
+}
+
+func (d Deps) driveResult(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, drives.ErrNotYours):
+		writeError(w, http.StatusNotFound, "not_found", "no such trip")
+	case errors.Is(err, drives.ErrNotDriving):
+		writeError(w, http.StatusConflict, "not_driving", "no drive under way")
+	case errors.Is(err, drives.ErrBadDetour):
+		writeError(w, http.StatusUnprocessableEntity, "bad_detour", "detour must be 0 to 30 minutes")
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "could not change the drive")
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}

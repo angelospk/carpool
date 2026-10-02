@@ -32,6 +32,9 @@ type Notification struct {
 	Title string
 	Body  string
 	Data  map[string]any
+	// CategoryID names a set of buttons the app registered, shown on the
+	// notification itself. Empty for a plain one.
+	CategoryID string
 }
 
 // Sender delivers a notification. The provider sits behind this interface so
@@ -67,6 +70,8 @@ type expoMessage struct {
 	Data     map[string]any `json:"data,omitempty"`
 	Sound    string         `json:"sound,omitempty"`
 	Priority string         `json:"priority,omitempty"`
+	// CategoryID is Expo's name for the buttons on the notification.
+	CategoryID string `json:"categoryId,omitempty"`
 }
 
 // expoResponse is the ticket envelope Expo returns.
@@ -99,7 +104,8 @@ func (e *Expo) Send(ctx context.Context, n Notification) error {
 		Sound: "default",
 		// Ask notifications are time-sensitive: the TTL is ticking while the
 		// driver decides.
-		Priority: "high",
+		Priority:   "high",
+		CategoryID: n.CategoryID,
 	}})
 	if err != nil {
 		return fmt.Errorf("push: encoding message: %w", err)

@@ -110,6 +110,12 @@ type TripParticipant struct {
 	// passenger whose booking completed; a passenger rates only the driver.
 	CanRate bool
 	Rated   bool
+	// ArrivedAt is the passenger's «Είμαι εδώ» on a drive.
+	ArrivedAt *time.Time
+	// Pickup is where the passenger gets in, as [lon, lat]: for the driver,
+	// who hands it to their maps app, and for the passenger themselves.
+	// Nobody else on the trip is told where another passenger waits.
+	Pickup *[2]float64
 }
 
 // TripDetail is the trip card.
@@ -146,6 +152,12 @@ type TripDetail struct {
 	// worked out from the minute it leaves and how far along the road the
 	// pickup is. Nil for the driver and when no minute has been given.
 	PickupAt *time.Time
+	// DriveEndedAt is the driver's «Τέλος»; OffersUntil is how long the drive
+	// takes new passengers.
+	DriveEndedAt, OffersUntil *time.Time
+	// Destination is the end of the driver's road, [lon, lat], for the
+	// driver only: it is what their maps app is pointed at after a pickup.
+	Destination *[2]float64
 }
 
 // ErrNotParticipant means the caller has no place on this trip. It is reported
@@ -165,6 +177,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 	var d TripDetail
 	d.Role = role
 	d.OccurrenceID = occurrenceID
+	var destination []float64
 
 	err = pool.QueryRow(ctx, `
 		SELECT o.depart_earliest, o.depart_latest, o.status, o.route_km, o.seats_free, o.ends_at_port,
@@ -200,7 +213,9 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		                                      * o.route_min * interval '1 minute'
 		             FROM bookings b
 		            WHERE b.occurrence_id = o.id AND b.passenger_id = $2 AND b.status = 'confirmed')
-		       END
+		       END,
+		       o.drive_ended_at, o.offers_until,
+		       CASE WHEN t.driver_id = $2 THEN ARRAY[ST_X(t.destination), ST_Y(t.destination)] END
 		FROM trip_occurrences o
 		JOIN route_templates t  ON t.id = o.template_id
 		JOIN driver_profiles dp ON dp.user_id = t.driver_id
@@ -211,7 +226,8 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		&d.Driver.UserID, &d.Driver.Name, &d.Driver.PhotoVersion, &d.Driver.FacebookHandle, &d.Driver.InstagramHandle, &d.Driver.Rating,
 		&d.Driver.CarModel, &d.Driver.CarColor, &d.Driver.CarPlate,
 		&d.Driver.Bio, &d.Driver.Preferences, &d.ConfirmedByMe, &d.Driver.CanRate, &d.Driver.Rated,
-		&d.DriveSetAt, &d.ScheduledEarliest, &d.ScheduledLatest, &d.DetourMin, &d.PickupAt)
+		&d.DriveSetAt, &d.ScheduledEarliest, &d.ScheduledLatest, &d.DetourMin, &d.PickupAt,
+		&d.DriveEndedAt, &d.OffersUntil, &destination)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TripDetail{}, ErrNotParticipant
 	}
@@ -219,6 +235,9 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		return TripDetail{}, fmt.Errorf("store: loading trip: %w", err)
 	}
 	d.Driver.CanRate = d.Driver.CanRate && !d.Driver.Rated
+	if len(destination) == 2 {
+		d.Destination = &[2]float64{destination[0], destination[1]}
+	}
 
 	rows, err := pool.Query(ctx, `
 		SELECT u.id, u.name,
@@ -227,7 +246,8 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		       (SELECT round(avg(stars)::numeric, 2) FROM ratings WHERE ratee_id = u.id),
 		       b.price_eur, b.seats, b.pricing_basis, u.bio, b.status = 'completed',
 		       coalesce((SELECT array_agg(p.tag) FROM user_preferences p WHERE p.user_id = u.id), '{}'),
-		       EXISTS (SELECT 1 FROM ratings r WHERE r.booking_id = b.id AND r.rater_id = $2)
+		       EXISTS (SELECT 1 FROM ratings r WHERE r.booking_id = b.id AND r.rater_id = $2),
+		       b.arrived_at, ST_X(b.pickup_point), ST_Y(b.pickup_point)
 		FROM bookings b JOIN users u ON u.id = b.passenger_id
 		WHERE b.occurrence_id = $1 AND b.status IN ('confirmed','completed')
 		ORDER BY b.created_at`, occurrenceID, userID)
@@ -240,9 +260,14 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		var p TripParticipant
 		var raw []byte
 		var completed bool
+		var lon, lat float64
 		if err := rows.Scan(&p.UserID, &p.Name, &p.PhotoVersion, &p.FacebookHandle, &p.InstagramHandle, &p.Rating,
-			&p.PriceEUR, &p.Seats, &raw, &p.Bio, &completed, &p.Preferences, &p.Rated); err != nil {
+			&p.PriceEUR, &p.Seats, &raw, &p.Bio, &completed, &p.Preferences, &p.Rated,
+			&p.ArrivedAt, &lon, &lat); err != nil {
 			return TripDetail{}, fmt.Errorf("store: scanning passenger: %w", err)
+		}
+		if role == RoleDriver || p.UserID == userID {
+			p.Pickup = &[2]float64{lon, lat}
 		}
 		// Only the driver rates passengers, and only once each booking is
 		// complete, which is what RateTrip itself insists on.

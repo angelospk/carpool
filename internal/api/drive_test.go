@@ -92,3 +92,41 @@ func TestADriverTurnsTheNudgeOnForARoute(t *testing.T) {
 		t.Fatalf("routes: %+v", list.Routes)
 	}
 }
+
+// On the road: stop and resume taking people, change the detour, «Τέλος»,
+// and a passenger-only «Είμαι εδώ».
+func TestTheDriveCanBeChangedAndEndedOverHTTP(t *testing.T) {
+	h := newHarness(t)
+	occ := h.occurrenceOf("+306900000511", "Οδηγός")
+	driver, _ := h.signUp("+306900000511", "Οδηγός")
+	opens := h.clock.Now().Add(10 * time.Minute)
+	h.mustExec(`UPDATE trip_occurrences SET depart_earliest = $2, depart_latest = $3 WHERE id = $1`,
+		occ, opens, opens.Add(30*time.Minute))
+	base := "/v1/trips/" + occ + "/drive"
+
+	if rec := h.do(http.MethodPatch, base, map[string]any{"offering": false}, driver); rec.Code != http.StatusConflict || h.errorCode(rec) != "not_driving" {
+		t.Fatalf("adjusting before any drive: %d %q", rec.Code, h.errorCode(rec))
+	}
+	if rec := h.do(http.MethodPost, base, map[string]any{"departs_at": opens.Format(time.RFC3339)}, driver); rec.Code != http.StatusOK {
+		t.Fatalf("start: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, body := range []map[string]any{{"offering": false}, {"offering": true}, {"detour_min": 3}} {
+		if rec := h.do(http.MethodPatch, base, body, driver); rec.Code != http.StatusNoContent {
+			t.Fatalf("adjust %v: %d %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := h.do(http.MethodPost, "/v1/trips/"+occ+"/here", nil, driver); rec.Code != http.StatusNotFound {
+		t.Fatalf("the driver saying «Είμαι εδώ»: %d", rec.Code)
+	}
+	if rec := h.do(http.MethodPost, base+"/end", nil, driver); rec.Code != http.StatusNoContent {
+		t.Fatalf("end: %d %s", rec.Code, rec.Body.String())
+	}
+	var trip struct {
+		DriveEndedAt *time.Time `json:"drive_ended_at"`
+		Destination  []float64  `json:"destination"`
+	}
+	h.decode(h.do(http.MethodGet, "/v1/trips/"+occ, nil, driver), &trip)
+	if trip.DriveEndedAt == nil || len(trip.Destination) != 2 {
+		t.Fatalf("after «Τέλος»: %+v", trip)
+	}
+}
