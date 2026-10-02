@@ -1,0 +1,38 @@
+# System Caddy on the VM, /etc/caddy/Caddyfile.
+#
+# TLS is Cloudflare's: the tunnel terminates it and hands plain HTTP to this
+# loopback listener, so nothing here is reachable except through the tunnel.
+# That is also why Cf-Connecting-Ip can be trusted as the client address: the
+# only thing that can set it on a request arriving here is Cloudflare.
+
+{
+	auto_https off
+	admin localhost:2019
+}
+
+http://:8180 {
+	bind 127.0.0.1
+	encode zstd gzip
+
+	# The install link a route page sends somebody without the app to.
+	# carpool-deploy keeps carpool.apk pointing at the newest upload.
+	handle /get {
+		root * /opt/carpool/apk
+		rewrite * /carpool.apk
+		header Content-Type application/vnd.android.package-archive
+		header Content-Disposition `attachment; filename="carpool.apk"`
+		header Cache-Control no-store
+		file_server
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:8187 {
+			header_up X-Real-IP {http.request.header.Cf-Connecting-Ip}
+		}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

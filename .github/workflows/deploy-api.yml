@@ -1,0 +1,56 @@
+# Builds the API image and hands it to the VM. The VM never builds anything:
+# a Go build does not fit in its 1 GB.
+name: deploy-api
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "migrations/**"
+      - "fixtures/**"
+      - "go.mod"
+      - "go.sum"
+      - "Dockerfile"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch:
+
+# One deploy at a time; a newer push waits rather than racing the older one.
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet and build
+        run: |
+          go vet ./...
+          go build ./...
+
+      - name: Build image
+        run: docker build -t "carpool-api:${GITHUB_SHA}" .
+
+      - name: Ship to the VM
+        env:
+          SSH_KEY: ${{ secrets.VPS_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          docker save "carpool-api:${GITHUB_SHA}" | gzip |
+            ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes "deploy@${HOST}" "api ${GITHUB_SHA}"
+
+      - name: Smoke test through the public hostname
+        run: curl -fsS -m 10 --retry 5 --retry-delay 3 --retry-all-errors https://carpool.haroldpoi.dev/v1/readyz

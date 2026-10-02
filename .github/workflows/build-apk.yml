@@ -1,0 +1,99 @@
+# Builds a release APK against the public API and publishes it on the VM, where
+# https://carpool.haroldpoi.dev/get serves the newest one.
+name: build-apk
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "app/**"
+      - "!app/**/__tests__/**"
+      - ".github/workflows/build-apk.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      # expo export and the Gradle bundling step read app/.env, not the
+      # environment.
+      - name: Point the app at the public API
+        run: echo 'EXPO_PUBLIC_API_URL=https://carpool.haroldpoi.dev' > .env
+
+      - name: Prebuild
+        run: npx expo prebuild --platform android --no-install
+
+      # The generated project signs releases with the template's debug key,
+      # which is public. Releases are signed with our own instead, kept as a
+      # secret: an APK signed by a different key cannot update an installed one.
+      - name: Signing and version
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          printf '%s' "$KEYSTORE_B64" | base64 -d > android/app/release.keystore
+          python3 - "$GITHUB_RUN_NUMBER" <<'PY'
+          import re, sys
+          path = "android/app/build.gradle"
+          src = open(path).read()
+          release_cfg = """    signingConfigs {
+                  release {
+                      storeFile file('release.keystore')
+                      storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                      keyAlias 'carpool'
+                      keyPassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                  }"""
+          assert src.count("    signingConfigs {") == 1, "signingConfigs block moved"
+          src = src.replace("    signingConfigs {", release_cfg, 1)
+          # The release buildType, not the release signingConfig added above.
+          head, sep, tail = src.partition("    buildTypes {")
+          assert sep, "buildTypes not found"
+          types_head, sep2, release = tail.partition("        release {")
+          assert sep2, "release buildType not found"
+          release = release.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release", 1)
+          src = head + sep + types_head + sep2 + release
+          src, n = re.subn(r"versionCode \d+", f"versionCode {sys.argv[1]}", src, count=1)
+          assert n == 1, "versionCode not found"
+          open(path, "w").write(src)
+          PY
+
+      - name: Build
+        working-directory: app/android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a --no-daemon
+
+      - name: Publish to the VM
+        env:
+          SSH_KEY: ${{ secrets.VPS_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes "deploy@${HOST}" "apk ${GITHUB_RUN_NUMBER}" \
+            < android/app/build/outputs/apk/release/app-release.apk

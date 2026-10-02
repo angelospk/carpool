@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# The only thing CI may run on the VM. Installed root-owned at
+# /usr/local/bin/carpool-deploy and reached through a forced-command SSH key,
+# so a leaked deploy key can do these two things and nothing else:
+#
+#   api <git-sha>        stdin: gzip of `docker save carpool-api:<git-sha>`
+#   apk <version-code>   stdin: the APK
+#
+# The verb comes from SSH_ORIGINAL_COMMAND, which the client chooses, so it is
+# parsed strictly and never handed to a shell.
+set -euo pipefail
+
+ROOT=/opt/carpool
+TAG_FILE=$ROOT/tag.env
+COMPOSE=(docker compose --project-directory "$ROOT" -f "$ROOT/compose.yml" --env-file "$ROOT/.env" --env-file "$TAG_FILE")
+
+read -r verb arg extra <<<"${SSH_ORIGINAL_COMMAND:-}" || true
+[[ -z "${extra:-}" ]] || { echo "unexpected arguments" >&2; exit 2; }
+
+ready() {
+  for _ in $(seq 1 45); do
+    curl -fsS -m 3 http://127.0.0.1:8187/v1/readyz >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  return 1
+}
+
+deploy_api() {
+  local sha=$1
+  [[ $sha =~ ^[0-9a-f]{7,40}$ ]] || { echo "bad sha" >&2; exit 2; }
+
+  gunzip | docker load
+  docker image inspect "carpool-api:$sha" >/dev/null
+
+  local previous=""
+  [[ -f $TAG_FILE ]] && previous=$(sed -n 's/^API_TAG=//p' "$TAG_FILE")
+
+  echo "API_TAG=$sha" >"$TAG_FILE"
+  "${COMPOSE[@]}" up -d --remove-orphans
+  if ready; then
+    echo "api $sha is ready"
+  else
+    echo "api $sha did not become ready" >&2
+    "${COMPOSE[@]}" logs --tail 40 api >&2 || true
+    if [[ -n $previous ]]; then
+      echo "rolling back to $previous" >&2
+      echo "API_TAG=$previous" >"$TAG_FILE"
+      "${COMPOSE[@]}" up -d
+      ready || echo "rollback did not become ready either" >&2
+    fi
+    exit 1
+  fi
+
+  # Keep the current image and the two before it, for a manual rollback.
+  docker image ls carpool-api --format '{{.Tag}} {{.CreatedAt}}' |
+    sort -k2 -r | awk 'NR>3 {print $1}' |
+    while read -r old; do
+      [[ $old == "$sha" || $old == "$previous" ]] || docker image rm "carpool-api:$old" >/dev/null || true
+    done
+}
+
+deploy_apk() {
+  local version=$1
+  [[ $version =~ ^[0-9]{1,9}$ ]] || { echo "bad version" >&2; exit 2; }
+
+  local dir=$ROOT/apk tmp
+  mkdir -p "$dir"
+  tmp=$(mktemp "$dir/.upload.XXXXXX")
+  trap 'rm -f "$tmp"' EXIT
+  head -c 300000000 >"$tmp"
+
+  # An APK is a zip. Anything else, or something truncated, is not published.
+  [[ $(head -c 2 "$tmp") == "PK" ]] || { echo "not an APK" >&2; exit 1; }
+  (($(stat -c %s "$tmp") > 1000000)) || { echo "APK too small" >&2; exit 1; }
+
+  chmod 644 "$tmp"
+  mv "$tmp" "$dir/carpool-$version.apk"
+  ln -sfn "carpool-$version.apk" "$dir/.carpool.apk.new"
+  mv -T "$dir/.carpool.apk.new" "$dir/carpool.apk"
+  trap - EXIT
+
+  ls -1t "$dir"/carpool-*.apk | tail -n +4 | xargs -r rm -f
+  echo "apk $version published"
+}
+
+case ${verb:-} in
+  api) deploy_api "${arg:-}" ;;
+  apk) deploy_apk "${arg:-}" ;;
+  *) echo "usage: api <sha> | apk <version-code>" >&2; exit 2 ;;
+esac

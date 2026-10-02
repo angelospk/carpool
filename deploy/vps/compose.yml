@@ -1,0 +1,88 @@
+# The stack on the Oracle VM (1 GB RAM, shared with Vaultwarden).
+#
+# Standalone rather than an override of docker-compose.yml: Compose merges
+# overrides, so leaving Caddy out of one would not remove it, and a ports list
+# in an override is appended to rather than replaced.
+#
+# Nothing here publishes a public port. The API listens on loopback; system
+# Caddy in front of it (deploy/vps/Caddyfile) is reached only through the
+# Cloudflare tunnel. The API image is not built here, because a Go build does
+# not fit in this box's memory: CI builds it and carpool-deploy loads it.
+
+name: carpool
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  api:
+    image: carpool-api:${API_TAG:?carpool-deploy sets API_TAG}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      osrm:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://carpool:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/carpool?sslmode=disable
+      OSRM_URL: http://osrm:5000
+      HTTP_ADDR: ":8080"
+    ports:
+      - "127.0.0.1:8187:8080"
+    mem_limit: 200m
+    logging: *logging
+
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: carpool
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: carpool
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Sized for what is left of 1 GB once Vaultwarden and cloudflared are in.
+    # max_connections leaves room beyond the API's pool for a pg_dump and a
+    # psql session during a migration.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=32MB
+      - -c
+      - max_connections=20
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U carpool -d carpool"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 300m
+    logging: *logging
+
+  osrm:
+    # Pinned by digest: the extract under ./osrm-data was preprocessed with this
+    # build, and osrm-routed refuses data from a different one.
+    image: ghcr.io/project-osrm/osrm-backend@sha256:a7091038e39a73659767f34ef2d389909b42ea80b09bd2bdca482dce2991cbad
+    restart: unless-stopped
+    command: osrm-routed --algorithm mld --port 5000 /data/${OSRM_EXTRACT:-evros-buffered}.osrm
+    volumes:
+      - ./osrm-data:/data:ro
+    healthcheck:
+      # The image ships neither wget nor curl, but it does have bash.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5000"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    mem_limit: 150m
+    logging: *logging
+
+volumes:
+  pgdata:
