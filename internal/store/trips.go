@@ -221,8 +221,8 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		       -- matcher timed the pickup; from the pinned minute before. A car
 		       -- that has left with no fix gives no time rather than a stale one.
 		       CASE WHEN o.drive_set_at IS NOT NULL THEN (
-		           SELECT ` + pickupFrom + ` + (ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, b.pickup_point))
-		                                      - ` + pickupFromF + `) * o.route_min * interval '1 minute'
+		           SELECT `+pickupFrom+` + (ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, b.pickup_point))
+		                                      - `+pickupFromF+`) * o.route_min * interval '1 minute'
 		             FROM bookings b
 		            WHERE b.occurrence_id = o.id AND b.passenger_id = $2 AND b.status = 'confirmed')
 		       END,
@@ -232,7 +232,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		JOIN route_templates t  ON t.id = o.template_id
 		JOIN driver_profiles dp ON dp.user_id = t.driver_id
 		JOIN users u            ON u.id = t.driver_id
-		` + match.DriveCar("o", "$3") + `
+		`+match.DriveCar("o", "$3")+`
 		WHERE o.id = $1`, occurrenceID, userID, now).Scan(
 		&d.DepartEarliest, &d.DepartLatest, &d.Status, &d.RouteKm, &d.SeatsFree, &d.EndsAtPort,
 		&d.OriginLabel, &d.DestLabel, &d.TemplateID, &d.Weekday, &d.BookingID, &d.RoutePolyline,

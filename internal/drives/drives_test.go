@@ -778,3 +778,19 @@ func TestAPassengerSeesTheCarsTimeOnceItHasLeft(t *testing.T) {
 		t.Fatalf("pickup at %v, want about 07:12 from where the car is", trip.PickupAt)
 	}
 }
+
+// Every seat held by an offer to somebody on this road is not a full car:
+// those are the people the nudge is about, still waiting on this driver.
+func TestADriverWhoseSeatsAreAllOnOfferIsStillNudged(t *testing.T) {
+	w := newWorld(t, at("06:50"))
+	for i, phone := range []string{"+306900000071", "+306900000072", "+306900000073"} {
+		_, req := w.request(t, phone, at("06:40"), at("09:00"))
+		w.ask(t, req, at("07:00").Add(time.Duration(i)*time.Second))
+	}
+	if n := w.nudge(t); n != 1 {
+		t.Fatalf("nudged %d departures, want 1", n)
+	}
+	if got := w.notices(t, notices.DriveNudge); len(got) != 1 || got[0].Count != 3 {
+		t.Fatalf("notices: %+v", got)
+	}
+}

@@ -317,15 +317,15 @@ func say(event notices.Event, count int) (title, body string, ok bool) {
 }
 
 // nudgeStillTrue is the nudge job's own test, asked again at delivery: the
-// driver still wants it, the departure still has room and no minute, and
-// somebody is still ready for it.
+// driver still wants it, the departure still has a free seat and no minute,
+// and somebody is still ready for it.
 func (r *Router) nudgeStillTrue(ctx context.Context, occurrenceID uuid.UUID) (bool, error) {
 	now := r.clock.Now()
 	var still bool
 	err := r.pool.QueryRow(ctx, `
 		SELECT o.status = 'scheduled' AND o.drive_set_at IS NULL AND o.depart_earliest > $2
 		       AND t.nudge_when_leaving AND NOT d.notifications_muted
-		       AND o.seats_free - `+match.SeatsSpokenFor("o.id", "$2")+` > 0
+		       AND o.seats_free > 0
 		  FROM trip_occurrences o
 		  JOIN route_templates t ON t.id = o.template_id
 		  JOIN driver_profiles d ON d.user_id = t.driver_id

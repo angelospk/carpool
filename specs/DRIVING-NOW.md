@@ -167,7 +167,8 @@ For a scheduled occurrence whose route has «Ρώτα με όταν ξεκινά
 default), shortly before the window opens push the driver once:
 «2 άτομα στον δρόμο σου θέλουν να πάνε τώρα. Τους παίρνεις;» — only if
 
-- `seats_free` minus holds > 0 (full car → never),
+- `seats_free` > 0 (full car → never; seats held by offers still count as
+  free, since those offers are to the people waiting),
 - at least one request is a match by the table above, computed from the
   earliest departure still possible *now* (a late job must not use a stale
   `depart_earliest`),

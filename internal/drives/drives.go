@@ -314,7 +314,8 @@ func (s *Service) tellPassengers(ctx context.Context, tx pgx.Tx, occurrenceID uu
 // waiting, once per departure, and returns how many it told.
 //
 // A departure qualifies from NudgeLead before its window opens until it opens,
-// while it has a seat nobody has been offered, the driver has not already said
+// while it has a free seat — one held by an offer still counts, because the
+// person it is offered to is one of those waiting — the driver has not already said
 // when they are leaving, and at least one person could be picked up if they
 // left on time. Nothing is marked for a departure with nobody waiting, so it
 // is looked at again on the next run: somebody may ask in the meantime.
@@ -394,7 +395,7 @@ func (s *Service) nudgeOne(ctx context.Context, occurrenceID uuid.UUID, now time
 		SELECT t.nudge_when_leaving AND NOT d.notifications_muted
 		       AND o.status = 'scheduled' AND o.drive_set_at IS NULL AND o.nudged_at IS NULL
 		       AND o.depart_earliest > $2
-		       AND o.seats_free - `+match.SeatsSpokenFor("o.id", "$2")+` > 0
+		       AND o.seats_free > 0
 		  FROM trip_occurrences o
 		  JOIN route_templates t ON t.id = o.template_id
 		  JOIN driver_profiles d ON d.user_id = t.driver_id
