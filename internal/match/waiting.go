@@ -39,9 +39,12 @@ type WaitingQuery struct {
 // duplication would be most likely to drift. Gross remains the authority on
 // whether a pair is really a match, and the containment property is tested
 // rather than asserted from reading the two side by side.
-// waitingFrom is everything Waiting and DriveDemand share: one trip, and the
-// open requests it could answer.
-var waitingFrom = `
+//
+// waitingFromWith is everything Waiting and DriveDemand share: one trip, and
+// the requests it could answer. They differ in which requests still count as
+// waiting and which earlier offers on this trip rule one out.
+func waitingFromWith(waitingStatuses, waitingSpentAsks string) string {
+	return `
 WITH trip AS (
 	SELECT o.id, o.route_geom, o.seats_free, o.luggage,
 	       o.depart_earliest, o.depart_latest, o.drive_set_at, o.route_min, o.detour_min, o.drive_detour_min,
@@ -68,7 +71,7 @@ JOIN trip ON true
 -- would otherwise hand a driver a real seat for somebody who cannot open the
 -- app to agree a meeting point, answer a message, or say they are not coming.
 JOIN users pu ON pu.id = rr.passenger_id AND pu.status = 'active'
-WHERE rr.status = 'open'
+WHERE rr.status IN (` + waitingStatuses + `)
   -- Read from the window rather than the status. A request whose time has
   -- passed is only marked expired when the sweeper next runs, and waking it in
   -- between would offer somebody a lift to a journey they have already made or
@@ -87,7 +90,8 @@ WHERE rr.status = 'open'
   AND (rr.kind = 'open' OR rr.target_occurrence_id = trip.id)
   AND NOT EXISTS (
         SELECT 1 FROM asks a
-        WHERE a.request_id = rr.id AND a.occurrence_id = trip.id)
+        WHERE a.request_id = rr.id AND a.occurrence_id = trip.id
+          AND a.status IN (` + waitingSpentAsks + `))
   -- The mirrors of the forward filter: nobody is offered a departure they
   -- already have a seat on, and a passenger who wants women drivers only is
   -- not woken by anybody else.
@@ -108,6 +112,11 @@ WHERE rr.status = 'open'
   AND ST_LineLocatePoint(trip.route_geom, ST_ClosestPoint(trip.route_geom, rr.origin))
     < ST_LineLocatePoint(trip.route_geom, ST_ClosestPoint(trip.route_geom, rr.destination))
 `
+}
+
+// waitingFrom is the wake's filter: requests nobody is asking about yet, and
+// never one already offered this trip.
+var waitingFrom = waitingFromWith(`'open'`, `'pending','accepted','declined','expired','cancelled'`)
 
 var waitingSQL = waitingFrom + `
 -- Longest wait first, then a stable tie-break. With a limit in play this
@@ -157,8 +166,14 @@ func Waiting(ctx context.Context, pool *pgxpool.Pool, q WaitingQuery) ([]uuid.UU
 // ExportedWaitingSQL is the query text, for plan assertions in tests.
 func ExportedWaitingSQL() string { return waitingSQL }
 
+// demandFrom is the nudge's filter. Somebody being asked about a seat — by
+// this driver or another — is still waiting, and is exactly whom a pinned
+// minute helps; only somebody this driver has already turned down, or let an
+// offer lapse on, is not news to them.
+var demandFrom = waitingFromWith(`'open','asking'`, `'declined','expired'`)
+
 // DriveDemand counts the people a trip could pick up if it left at its
-// earliest departure: everybody Waiting would wake, held to DriveReady. It is
+// earliest departure: everybody still waiting on its road, held to DriveReady. It is
 // what the nudge tells a driver, and it is a count of everybody rather than of
 // a shortlist, so a first page of people who are not ready cannot hide one who
 // is.
@@ -168,7 +183,7 @@ func ExportedWaitingSQL() string { return waitingSQL }
 // connection while it holds a lock.
 func DriveDemand(ctx context.Context, q Querier, occurrenceID uuid.UUID, now time.Time) (int, error) {
 	var n int
-	err := q.QueryRow(ctx, `SELECT count(*) FROM (`+waitingFrom+`
+	err := q.QueryRow(ctx, `SELECT count(*) FROM (`+demandFrom+`
 		  AND `+DriveReady("trip.depart_earliest", "trip.route_min",
 		"ST_LineLocatePoint(trip.route_geom, ST_ClosestPoint(trip.route_geom, rr.origin))",
 		"ST_Distance(trip.route_geom::geography, rr.origin::geography)",

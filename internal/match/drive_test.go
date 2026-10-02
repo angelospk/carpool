@@ -293,3 +293,41 @@ func TestAMovingDriveNeedsAFixItCanTrust(t *testing.T) {
 		})
 	}
 }
+
+// Somebody being asked about a seat right now is still waiting, and is
+// exactly whom a pinned minute helps; the nudge counts them. Somebody this
+// driver already turned down is not news to them.
+func TestDriveDemandCountsPeopleStillBeingAskedButNotOnesThisDriverRefused(t *testing.T) {
+	f := setup(t)
+	occ := f.addOccurrence(t, corridorWKT, withWindow(driveDeparts, driveDeparts.Add(30*time.Minute)))
+	now := driveDeparts.Add(-10 * time.Minute)
+	ready := func(o *requestOpts) {
+		o.windowStart = now
+		o.windowEnd = driveDeparts.Add(2 * time.Hour)
+		o.status = "asking"
+	}
+	asked := f.addRequest(t, ready)
+	refused := f.addRequest(t, ready)
+	for id, status := range map[uuid.UUID]string{asked: "pending", refused: "declined"} {
+		if _, err := f.pool.Exec(context.Background(), `
+			INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
+				suggested_price_eur, itinerary_version, status, expires_at)
+			VALUES ($1, $2, 1, 1, ST_SetSRID(ST_MakePoint(25.82, 40.85), 4326),
+				ST_SetSRID(ST_MakePoint(25.98, 40.85), 4326), 2, 0, $3, $4)`,
+			id, occ, status, now.Add(20*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := match.DriveDemand(context.Background(), f.pool, occ, now)
+	if err != nil || n != 1 {
+		t.Fatalf("DriveDemand = %d, %v; want the one still being asked", n, err)
+	}
+
+	// The wake is unchanged: nobody it has already offered this trip.
+	q := waitingQuery(occ)
+	q.Now = now
+	got, err := match.Waiting(context.Background(), f.pool, q)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("Waiting = %v, %v; want nobody", got, err)
+	}
+}
