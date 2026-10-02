@@ -367,3 +367,22 @@ test('there is no «Είμαι εδώ» without a drive', async () => {
   await screen.findByTestId('route-glyph');
   expect(screen.queryByTestId('here')).toBeNull();
 });
+
+// On the road the trip is under way, not over: nobody is asked «Έγινε;»
+// a minute after setting off, only after «Τέλος».
+test('a driver on the road is not asked whether the trip happened', async () => {
+  const left = new Date(Date.now() - 60_000).toISOString();
+  (api.trip as jest.Mock).mockResolvedValue(
+    tripOf({
+      role: 'driver',
+      depart_earliest: left,
+      depart_latest: left,
+      drive_set_at: left,
+      drive_ended_at: null,
+      passengers: [],
+    }),
+  );
+  render(<TripScreen />);
+  await screen.findByTestId('route-glyph');
+  expect(screen.queryByTestId('trip-confirm')).toBeNull();
+});

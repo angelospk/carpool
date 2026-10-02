@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -111,10 +111,15 @@ export default function TripScreen() {
     const timer = setTimeout(() => setNow(Date.now()), nextEdge - now + 1000);
     return () => clearTimeout(timer);
   }, [nextEdge, now]);
+  // A drive pins the window to one minute, so by the clock alone the trip
+  // would be over the moment the car leaves, asking «Έγινε;» of a driver who
+  // has just set off. On the road it is under way, until «Τέλος».
   const phase: 'cancelled' | 'before' | 'underway' | 'after' =
     trip.data?.status === 'cancelled'
       ? 'cancelled'
-      : earliestAt !== null && now < earliestAt
+      : trip.data && onTheRoad(trip.data, now)
+        ? 'underway'
+        : earliestAt !== null && now < earliestAt
         ? 'before'
         : latestAt !== null && now < latestAt
           ? 'underway'
@@ -391,8 +396,14 @@ export default function TripScreen() {
                 {phase !== 'cancelled' ? (
                   <LiveCard
                     tripId={id}
+                    // Only a phone runs the drive's background task; a
+                    // browser shares nothing on its own, so it keeps the
+                    // ordinary button rather than claiming otherwise.
                     carShared={
-                      trip.data.role === 'driver' && !!trip.data.drive_set_at && !trip.data.drive_ended_at
+                      Platform.OS !== 'web' &&
+                      trip.data.role === 'driver' &&
+                      !!trip.data.drive_set_at &&
+                      !trip.data.drive_ended_at
                     }
                   />
                 ) : null}

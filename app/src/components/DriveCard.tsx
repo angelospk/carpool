@@ -33,7 +33,14 @@ export function DriveCard({
   onDone: () => void;
 }) {
   const { t } = useTranslation();
-  const [inMin, setInMin] = useState<number>(0);
+  // Only the minutes the server would take: with somebody booked, not before
+  // the window they agreed to, nor more than a quarter of an hour after it;
+  // with nobody, an hour either side. Offering «Τώρα» only to refuse it is
+  // the card arguing with itself.
+  const allowed = WHEN.filter((m) => departureAllowed(trip, now() + m * 60_000));
+  const [chosen, setInMin] = useState<number | null>(null);
+  const inMin =
+    chosen !== null && allowed.includes(chosen as (typeof WHEN)[number]) ? chosen : (allowed[0] ?? null);
   const [detour, setDetour] = useState<number>(nearestDetour(trip.detour_min ?? 5));
   const [error, setError] = useState<string | null>(null);
 
@@ -71,10 +78,15 @@ export function DriveCard({
             label={m === 0 ? t('drive.now') : t('drive.inMin', { n: m })}
             selected={inMin === m}
             onPress={() => setInMin(m)}
-            disabled={go.isPending}
+            disabled={go.isPending || !allowed.includes(m)}
           />
         ))}
       </View>
+      {inMin === null ? (
+        <Hint testID="drive-not-yet">
+          {t('drive.bookedFrom', { time: athensTime(trip.scheduled_earliest ?? trip.depart_earliest) })}
+        </Hint>
+      ) : null}
 
       <Text style={styles.label}>{t('drive.detour')}</Text>
       <View style={styles.row}>
@@ -99,8 +111,9 @@ export function DriveCard({
       <Button
         testID="drive-go"
         label={pinned ? t('drive.change') : t('drive.go')}
-        disabled={go.isPending}
+        disabled={go.isPending || inMin === null}
         onPress={() =>
+          inMin !== null &&
           go.mutate({
             departsAt: new Date(Math.floor((now() + inMin * 60_000) / 60_000) * 60_000).toISOString(),
             detour,
@@ -114,6 +127,18 @@ export function DriveCard({
 const WHEN = [0, 5, 10, 15] as const;
 const DETOURS = [0, 3, 5, 10] as const;
 const HOUR = 60 * 60_000;
+
+/** The server's bounds on a departure, measured against the published window. */
+function departureAllowed(trip: TripDetail, at: number): boolean {
+  const opens = Date.parse(trip.scheduled_earliest ?? trip.depart_earliest);
+  const closes = Date.parse(trip.scheduled_latest ?? trip.depart_latest);
+  const minute = Math.floor(at / 60_000) * 60_000;
+  return trip.passengers.length > 0
+    ? minute >= opens && minute <= closes + QUARTER
+    : minute >= opens - HOUR && minute <= closes + HOUR;
+}
+
+const QUARTER = 15 * 60_000;
 
 function nearestDetour(min: number): number {
   return DETOURS.reduce((best, d) => (Math.abs(d - min) < Math.abs(best - min) ? d : best), 5);

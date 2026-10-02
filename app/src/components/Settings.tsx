@@ -169,6 +169,9 @@ export function Settings() {
       {me?.asks_paused !== undefined ? (
         <>
           <View style={styles.divider} />
+          {/* A phone notices when it is in a car; a browser cannot. */}
+          {Platform.OS !== 'web' ? (
+            <>
           <View style={styles.row}>
             <Text style={styles.rowLabel}>{t('detect.toggle')}</Text>
             <Switch
@@ -185,6 +188,9 @@ export function Settings() {
               <Text testID="detect-shortcut" selectable style={styles.hint}>
                 {t('detect.shortcutSteps')}
               </Text>
+            </>
+          ) : null}
+
             </>
           ) : null}
 

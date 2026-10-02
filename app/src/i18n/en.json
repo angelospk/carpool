@@ -602,7 +602,8 @@
     "maps_google": "Google Maps",
     "maps_apple": "Apple Maps",
     "maps_waze": "Waze",
-    "ended": "The drive has ended."
+    "ended": "The drive has ended.",
+    "bookedFrom": "With passengers booked you can leave from {{time}} on, as agreed."
   },
   "detect": {
     "prompt": "Looks like you are driving. Say when you leave and we ask the people waiting on your road.",

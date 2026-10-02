@@ -119,3 +119,17 @@ test('a refused location permission is explained, and the drive still stands', a
   expect(await screen.findByTestId('drive-error')).toHaveTextContent(/θέση σου/);
   expect(onDone).toHaveBeenCalled();
 });
+
+// With somebody booked, leaving before their window is not on offer: the
+// minutes before it are shut, the first one inside it is chosen, and when
+// none is, the card says from when.
+test('with passengers booked it offers only minutes inside their window', () => {
+  const booked = trip({ passengers: [{ id: 'p1', name: 'Ελένη' }] } as Partial<TripDetail>);
+  const { rerender } = render(wrap(<DriveCard trip={booked} now={() => at('03:50')} onDone={jest.fn()} />));
+  expect(screen.getByTestId('drive-when-0').props.accessibilityState?.disabled).toBe(true);
+  expect(screen.getByTestId('drive-when-10').props.accessibilityState?.selected).toBe(true);
+
+  rerender(wrap(<DriveCard trip={booked} now={() => at('03:30')} onDone={jest.fn()} />));
+  expect(screen.getByTestId('drive-not-yet')).toHaveTextContent(/07:00/);
+  expect(screen.getByTestId('drive-go').props.accessibilityState?.disabled).toBe(true);
+});
