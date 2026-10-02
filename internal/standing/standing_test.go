@@ -460,7 +460,7 @@ func TestARepeatTakesItsWeekdayAndItsEndDateFromTheRideItRepeats(t *testing.T) {
 	if !until.After(testNow) {
 		t.Errorf("the arrangement ends at %s, which has already passed", until.Format("2006-01-02"))
 	}
-	if want := testNow.AddDate(0, 0, jobs.HorizonDays); !until.Truncate(24*time.Hour).Equal(want.Truncate(24*time.Hour)) {
+	if want := testNow.AddDate(0, 0, jobs.HorizonDays); !until.Truncate(24 * time.Hour).Equal(want.Truncate(24 * time.Hour)) {
 		t.Errorf("the arrangement ends at %s, want the %d-day horizon at %s",
 			until.Format("2006-01-02"), jobs.HorizonDays, want.Format("2006-01-02"))
 	}

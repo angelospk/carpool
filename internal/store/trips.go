@@ -194,7 +194,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		                   AND b.status IN ('confirmed','completed')), false),
 		       EXISTS (SELECT 1 FROM bookings b JOIN ratings r ON r.booking_id = b.id
 		               WHERE b.occurrence_id = o.id AND b.passenger_id = $2 AND r.rater_id = $2),
-		       o.drive_set_at, o.scheduled_earliest, o.scheduled_latest, o.detour_min,
+		       o.drive_set_at, o.scheduled_earliest, o.scheduled_latest, COALESCE(o.drive_detour_min, o.detour_min),
 		       CASE WHEN o.drive_set_at IS NOT NULL THEN (
 		           SELECT o.depart_earliest + ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, b.pickup_point))
 		                                      * o.route_min * interval '1 minute'

@@ -348,3 +348,18 @@ func (r *pickyRouter) Route(ctx context.Context, waypoints []geo.Point) (geo.Rou
 	}
 	return r.straightLineRouter.Route(ctx, waypoints)
 }
+
+// A drive's off-road limit leaves out the time stops take: "my road only"
+// still takes somebody standing on the road, two stops' dwell and all.
+func TestAnOffRoadLimitDoesNotCountPullingOver(t *testing.T) {
+	zero := 0
+	b := match.Budget{AllowStops: true, Km: 5, Min: 1, OffRoadMin: &zero}
+	onRoad := match.Insertion{TotalDetourMin: 4, NewStops: 2}
+	if !onRoad.WithinBudget(b) {
+		t.Errorf("a pickup on the road was refused under 'my road only'")
+	}
+	offRoad := match.Insertion{TotalDetourMin: 6, NewStops: 2}
+	if offRoad.WithinBudget(b) {
+		t.Errorf("two minutes off the road were allowed under 'my road only'")
+	}
+}

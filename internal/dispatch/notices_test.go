@@ -254,18 +254,32 @@ func seedDeparture(t *testing.T, pool *pgxpool.Pool, driver uuid.UUID) uuid.UUID
 	err := pool.QueryRow(ctx, `
 		WITH t AS (
 			INSERT INTO route_templates (driver_id, vehicle_id, origin, destination, origin_label,
-				destination_label, route_geom, route_km, route_min, seats, osrm_data_version)
+				destination_label, route_geom, route_km, route_min, seats, osrm_data_version, nudge_when_leaving)
 			VALUES ($1, (SELECT id FROM vehicles WHERE owner_id = $1 AND is_default),
 				ST_SetSRID(ST_MakePoint(25.80,40.85),4326), ST_SetSRID(ST_MakePoint(26.00,40.85),4326),
-				'A','B', ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 3, 'test')
+				'A','B', ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 3, 'test', true)
 			RETURNING id, vehicle_id)
 		INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest, depart_latest,
 			seats_total, seats_free, template_revision, route_geom, route_km, route_min, pricing_mode)
-		SELECT t.id, t.vehicle_id, $2::date, $2, $3, 3, 3, 1,
+		SELECT t.id, t.vehicle_id, $2::timestamptz::date, $2::timestamptz, $3, 3, 3, 1,
 			ST_GeomFromText('LINESTRING(25.80 40.85, 26.00 40.85)',4326), 17, 20, 'formula'
 		  FROM t RETURNING id`, driver, clk.Now().Add(24*time.Hour), clk.Now().Add(25*time.Hour)).Scan(&id)
 	if err != nil {
 		t.Fatalf("seeding a departure: %v", err)
+	}
+	// And somebody on the road, ready before the car comes.
+	if _, err := pool.Exec(ctx, `
+		WITH p AS (
+			INSERT INTO users (date_of_birth, phone, name, home_region_id)
+			SELECT DATE '1990-01-01', '+3069' || lpad((floor(random()*100000000))::bigint::text, 8, '0'),
+			       'Επιβάτης', home_region_id FROM users WHERE id = $1
+			RETURNING id)
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end,
+			seats, kind, status)
+		SELECT p.id, ST_SetSRID(ST_MakePoint(25.82,40.851),4326), ST_SetSRID(ST_MakePoint(25.98,40.851),4326),
+		       $2, $3, 1, 'open', 'open' FROM p`,
+		driver, clk.Now().Add(23*time.Hour), clk.Now().Add(26*time.Hour)); err != nil {
+		t.Fatalf("seeding a passenger: %v", err)
 	}
 	return id
 }
@@ -288,5 +302,32 @@ func TestANudgeThatIsNoLongerTrueIsNotSent(t *testing.T) {
 	}
 	if len(snd.sent) != 0 {
 		t.Fatalf("sent %d notifications about a full car", len(snd.sent))
+	}
+}
+
+// Nor one whose waiting passengers have gone, or whose driver turned it off.
+func TestANudgeIsNotSentOnceNobodyIsWaitingOrTheDriverOptedOut(t *testing.T) {
+	for name, undo := range map[string]string{
+		"nobody waiting": `UPDATE ride_requests SET status = 'cancelled'`,
+		"opted out":      `UPDATE route_templates SET nudge_when_leaving = false`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			pool, snd, driver := newRouter(t)
+			addToken(t, pool, driver, "phone", false)
+			occ := seedDeparture(t, pool, driver)
+			msg, err := notices.Nudge(driver, occ, 1)
+			if err != nil {
+				t.Fatalf("Nudge: %v", err)
+			}
+			if _, err := pool.Exec(context.Background(), undo); err != nil {
+				t.Fatalf("arranging: %v", err)
+			}
+			if err := dispatch.NewRouter(pool, clk, snd, noAsk).Handle(context.Background(), msg); err != nil {
+				t.Fatalf("Handle: %v", err)
+			}
+			if len(snd.sent) != 0 {
+				t.Fatalf("sent %d", len(snd.sent))
+			}
+		})
 	}
 }

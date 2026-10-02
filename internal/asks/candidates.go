@@ -443,18 +443,25 @@ func (s *Service) createAsk(
 	// moment this passenger can still be told and be at the road before the
 	// car. Read in its own statement after the lock, for the reason given
 	// below the next one.
-	var pinned, open bool
+	//
+	// The whole readiness rule is asked again, not only the deadline: the
+	// driver may have changed the minute while this candidate was being
+	// routed, and an offer the passenger cannot make would hold a seat.
+	var pinned, open, ready bool
 	var deadline *time.Time
+	const fraction = "ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, rr.origin))"
+	const walk = "ST_Distance(o.route_geom::geography, rr.origin::geography)"
 	if err := tx.QueryRow(ctx, `
 		SELECT o.drive_set_at IS NOT NULL, `+match.DriveOpen("o", "$3")+`,
-		       CASE WHEN o.drive_set_at IS NOT NULL THEN `+match.DriveDeadline("o.depart_earliest", "o.route_min",
-		"ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, rr.origin))",
-		"ST_Distance(o.route_geom::geography, rr.origin::geography)")+` END
+		       o.drive_set_at IS NULL OR `+match.DriveReady("o.depart_earliest", "o.route_min", fraction, walk,
+		"GREATEST(rr.window_start, $3::timestamptz)", "rr.window_end", match.DriveLateBy("o."))+`,
+		       CASE WHEN o.drive_set_at IS NOT NULL
+		            THEN `+match.DriveDeadline("o.depart_earliest", "o.route_min", fraction, walk)+` END
 		  FROM trip_occurrences o, ride_requests rr
-		 WHERE o.id = $1 AND rr.id = $2`, c.OccurrenceID, req.ID, now).Scan(&pinned, &open, &deadline); err != nil {
+		 WHERE o.id = $1 AND rr.id = $2`, c.OccurrenceID, req.ID, now).Scan(&pinned, &open, &ready, &deadline); err != nil {
 		return uuid.Nil, fmt.Errorf("asks: reading the drive: %w", err)
 	}
-	if !open || (pinned && (deadline == nil || !deadline.After(now))) {
+	if !open || !ready || (pinned && (deadline == nil || !deadline.After(now))) {
 		return uuid.Nil, errNoRoomToAsk
 	}
 

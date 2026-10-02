@@ -44,7 +44,7 @@ type WaitingQuery struct {
 var waitingFrom = `
 WITH trip AS (
 	SELECT o.id, o.route_geom, o.seats_free, o.luggage,
-	       o.depart_earliest, o.depart_latest, o.drive_set_at, o.route_min, o.detour_min,
+	       o.depart_earliest, o.depart_latest, o.drive_set_at, o.route_min, o.detour_min, o.drive_detour_min,
 	       t.driver_id, d.notify_radius_km, du.gender AS driver_gender
 	FROM trip_occurrences o
 	JOIN route_templates t ON t.id = o.template_id
@@ -172,7 +172,7 @@ func DriveDemand(ctx context.Context, q Querier, occurrenceID uuid.UUID, now tim
 		  AND `+DriveReady("trip.depart_earliest", "trip.route_min",
 		"ST_LineLocatePoint(trip.route_geom, ST_ClosestPoint(trip.route_geom, rr.origin))",
 		"ST_Distance(trip.route_geom::geography, rr.origin::geography)",
-		"GREATEST(rr.window_start, $2)", "rr.window_end", "trip.detour_min")+`
+		"GREATEST(rr.window_start, $2)", "rr.window_end", DriveLateBy("trip."))+`
 		) ready`, occurrenceID, now).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("match: counting who a drive could take: %w", err)

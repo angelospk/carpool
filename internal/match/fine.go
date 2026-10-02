@@ -105,6 +105,10 @@ type Budget struct {
 	// and fifteen up a mountain road is thirty-five, and a driver who said
 	// fifteen kilometres did not agree to thirty-five minutes.
 	Min int
+	// OffRoadMin, when set, replaces Min for a drive: the minutes the driver
+	// will spend off their road, not counting the time stops take. A driver
+	// who said "my road only" still stops for somebody standing on it.
+	OffRoadMin *int
 }
 
 // BestInsertion finds the cheapest valid way to add a pickup and dropoff to an
@@ -226,6 +230,9 @@ func (i Insertion) WithinBudget(b Budget) bool {
 	}
 	if i.TotalDetourKm > b.Km {
 		return false
+	}
+	if b.OffRoadMin != nil {
+		return i.TotalDetourMin-float64(i.NewStops)*StopDwell.Minutes() <= float64(*b.OffRoadMin)
 	}
 	return i.TotalDetourMin <= float64(b.Min)
 }

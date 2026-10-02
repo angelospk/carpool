@@ -181,7 +181,6 @@ func TestARecoveryThatIsNoLongerWantedDoesNothing(t *testing.T) {
 			`UPDATE bookings SET status = 'confirmed' WHERE request_id = $1 AND status <> 'confirmed'`,
 			"a request holding a live seat is not stranded, and reopening it would sell that seat twice",
 		},
-
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newStrandedWorld(t)

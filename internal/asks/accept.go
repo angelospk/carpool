@@ -293,7 +293,7 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		SELECT o.drive_set_at IS NOT NULL AND NOT `+match.DriveReady("o.depart_earliest", "o.route_min",
 		"ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, rr.origin))",
 		"ST_Distance(o.route_geom::geography, rr.origin::geography)",
-		"GREATEST(rr.window_start, $3::timestamptz)", "rr.window_end", "o.detour_min")+`
+		"GREATEST(rr.window_start, $3::timestamptz)", "rr.window_end", match.DriveLateBy("o."))+`
 		  FROM trip_occurrences o, ride_requests rr
 		 WHERE o.id = $1 AND rr.id = $2`, occurrenceID, requestID, now).Scan(&tooLate); err != nil {
 		return uuid.Nil, fmt.Errorf("asks: checking the pickup is still in time: %w", err)

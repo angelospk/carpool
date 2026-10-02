@@ -133,6 +133,7 @@ type occurrence struct {
 	scheduledE, scheduledL *time.Time
 	driveSetAt             *time.Time
 	detourMin              int
+	driveDetourMin         *int
 	allowStops             bool
 }
 
@@ -141,9 +142,10 @@ func (w *world) occurrence(t *testing.T) occurrence {
 	var o occurrence
 	if err := w.pool.QueryRow(context.Background(), `
 		SELECT depart_earliest, depart_latest, scheduled_earliest, scheduled_latest, drive_set_at,
-		       detour_min, allow_stops
+		       detour_min, drive_detour_min, allow_stops
 		  FROM trip_occurrences WHERE id = $1`, w.occ).Scan(
-		&o.earliest, &o.latest, &o.scheduledE, &o.scheduledL, &o.driveSetAt, &o.detourMin, &o.allowStops); err != nil {
+		&o.earliest, &o.latest, &o.scheduledE, &o.scheduledL, &o.driveSetAt, &o.detourMin,
+		&o.driveDetourMin, &o.allowStops); err != nil {
 		t.Fatalf("reading the occurrence: %v", err)
 	}
 	return o
@@ -400,10 +402,9 @@ func TestChangingTheDetourLetsGoOfOffersMadeUnderTheOldOne(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	o := w.occurrence(t)
-	// "My road only" still stops for somebody on it: a minute to pull over,
-	// and stops allowed.
-	if o.detourMin != 1 || !o.allowStops {
-		t.Errorf("detour %d, stops %v; want a minute and stops allowed", o.detourMin, o.allowStops)
+	// "My road only" still stops for somebody standing on it.
+	if o.driveDetourMin == nil || *o.driveDetourMin != 0 || !o.allowStops {
+		t.Errorf("off-road %v, stops %v; want zero and stops allowed", o.driveDetourMin, o.allowStops)
 	}
 	var e time.Time
 	if err := w.pool.QueryRow(context.Background(),
@@ -543,7 +544,23 @@ func TestStartingWithoutADetourKeepsTheOneTheTripHad(t *testing.T) {
 	if _, err := start(w, at("07:00")); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if o := w.occurrence(t); o.detourMin != 8 {
-		t.Fatalf("detour became %d, want the 8 it was", o.detourMin)
+	if o := w.occurrence(t); o.detourMin != 8 || o.driveDetourMin != nil {
+		t.Fatalf("detour became %d / %v, want the 8 it was and no off-road limit", o.detourMin, o.driveDetourMin)
+	}
+}
+
+// A phone that sends "0′" twice is one change, not a change of detour that
+// lets go of every offer on the second call.
+func TestARetriedZeroDetourIsTheSameDrive(t *testing.T) {
+	w := newWorld(t, at("06:50"))
+	none := 0
+	for i := 0; i < 2; i++ {
+		if _, err := w.svc.Start(context.Background(), w.driverID, w.occ,
+			drives.Start{DepartsAt: at("07:00"), DetourMin: &none}); err != nil {
+			t.Fatalf("Start #%d: %v", i+1, err)
+		}
+	}
+	if n := len(w.outbox(t, "wake_waiting")); n != 1 {
+		t.Errorf("queued %d wakes, want 1", n)
 	}
 }

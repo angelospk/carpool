@@ -162,6 +162,14 @@ func DriveReady(departs, routeMin, fraction, walkM, readyFrom, windowEnd, lateBy
 	     AND ` + driveETA(departs, routeMin, fraction) + ` + (` + lateBy + `) * interval '1 minute' <= ` + windowEnd + `)`
 }
 
+// DriveLateBy is the SQL for how late the car can be against the estimate:
+// the driver's off-road limit plus pulling over for one other passenger when
+// they set one, or the route's whole detour budget when they did not. The
+// operand is a column prefix, such as "o." or "" inside a CTE.
+func DriveLateBy(prefix string) string {
+	return `COALESCE(` + prefix + `drive_detour_min + ` + otherPartyDwellMin + `, ` + prefix + `detour_min)`
+}
+
 func driveETA(departs, routeMin, fraction string) string {
 	return `(` + departs + ` + (` + fraction + ` * ` + routeMin + `) * interval '1 minute')`
 }
@@ -169,6 +177,9 @@ func driveETA(departs, routeMin, fraction string) string {
 const (
 	driveMarginMin   = "3"
 	walkMetresPerMin = "80.0"
+	// otherPartyDwellMin is one other party's pickup and dropoff: two stops at
+	// StopDwell each.
+	otherPartyDwellMin = "4"
 )
 
 // grossSQL is the stage-1 filter from MATCHING.md.
@@ -206,6 +217,7 @@ WITH cand AS (
 	       o.detour_km         AS detour_km,
 	       o.detour_min        AS detour_min,
 	       o.drive_set_at      AS drive_set_at,
+	       o.drive_detour_min  AS drive_detour_min,
 	       o.depart_earliest   AS departs
 	FROM trip_occurrences o
 	JOIN route_templates  t ON t.id = o.template_id
@@ -280,7 +292,7 @@ WITH cand AS (
 	  AND ($12::uuid IS NULL OR o.id = $12::uuid)
 ), located AS (
 	SELECT occurrence_id, driver_id, route_km, route_min, seats_free, itinerary_version,
-	       allow_stops, detour_km, detour_min, drive_set_at, departs,
+	       allow_stops, detour_km, detour_min, drive_set_at, drive_detour_min, departs,
 	       ST_LineLocatePoint(route_geom, ST_ClosestPoint(route_geom, $1)) AS f_o,
 	       ST_LineLocatePoint(route_geom, ST_ClosestPoint(route_geom, $2)) AS f_d,
 	       ST_Distance(route_geom::geography, $1::geography) AS walk_m
@@ -288,7 +300,7 @@ WITH cand AS (
 )
 SELECT occurrence_id, driver_id, f_o, f_d,
        (f_d - f_o) * route_km AS shared_km,
-       route_km, route_min, allow_stops, detour_km, detour_min, seats_free, itinerary_version
+       route_km, route_min, allow_stops, detour_km, detour_min, drive_detour_min, seats_free, itinerary_version
 FROM located
 WHERE f_o < f_d
   AND (f_d - f_o) * route_km >= GREATEST(1.0, 0.2 * $6)
@@ -296,7 +308,7 @@ WHERE f_o < f_d
   -- the scheduled window cannot express: the passenger is there first and is
   -- still there when it comes. Without a drive the window overlap above is all
   -- there is to go on, and it stays the whole test.
-  AND (drive_set_at IS NULL OR ` + DriveReady("departs", "route_min", "f_o", "walk_m", "GREATEST($3, $13)", "$4", "detour_min") + `)
+  AND (drive_set_at IS NULL OR ` + DriveReady("departs", "route_min", "f_o", "walk_m", "GREATEST($3, $13)", "$4", DriveLateBy("")) + `)
 ORDER BY (f_d - f_o) * route_km DESC, occurrence_id
 LIMIT $8
 `
@@ -314,7 +326,7 @@ func Gross(ctx context.Context, pool *pgxpool.Pool, q GrossQuery) ([]Candidate, 
 	for rows.Next() {
 		var c Candidate
 		if err := rows.Scan(&c.OccurrenceID, &c.DriverID, &c.FractionOrigin, &c.FractionDest,
-			&c.SharedKm, &c.RouteKm, &c.RouteMin, &c.Budget.AllowStops, &c.Budget.Km, &c.Budget.Min, &c.SeatsFree,
+			&c.SharedKm, &c.RouteKm, &c.RouteMin, &c.Budget.AllowStops, &c.Budget.Km, &c.Budget.Min, &c.Budget.OffRoadMin, &c.SeatsFree,
 			&c.ItineraryVersion); err != nil {
 			return nil, fmt.Errorf("match: scanning candidate: %w", err)
 		}

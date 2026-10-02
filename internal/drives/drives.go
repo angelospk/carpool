@@ -128,14 +128,14 @@ func (s *Service) Start(ctx context.Context, driverID, occurrenceID uuid.UUID, i
 		earliest, latest       time.Time
 		scheduledE, scheduledL time.Time
 		driveSet               bool
-		detourMin              int
+		detourMin              *int
 		booked                 bool
 	)
 	err = tx.QueryRow(ctx, `
 		SELECT t.driver_id, o.status, o.depart_earliest, o.depart_latest,
 		       COALESCE(o.scheduled_earliest, o.depart_earliest),
 		       COALESCE(o.scheduled_latest, o.depart_latest),
-		       o.drive_set_at IS NOT NULL, o.detour_min
+		       o.drive_set_at IS NOT NULL, o.drive_detour_min
 		  FROM trip_occurrences o
 		  JOIN route_templates t ON t.id = o.template_id
 		 WHERE o.id = $1
@@ -161,7 +161,7 @@ func (s *Service) Start(ctx context.Context, driverID, occurrenceID uuid.UUID, i
 		return time.Time{}, fmt.Errorf("drives: checking for passengers: %w", err)
 	}
 
-	detourChanged := in.DetourMin != nil && *in.DetourMin != detourMin
+	detourChanged := in.DetourMin != nil && (detourMin == nil || *in.DetourMin != *detourMin)
 	// The same minute asked for again is the same drive. Checked before the
 	// clock, so a retry that arrives after the minute has passed still gets
 	// the answer the first one got.
@@ -195,9 +195,7 @@ func (s *Service) Start(ctx context.Context, driverID, occurrenceID uuid.UUID, i
 		       -- A driver choosing how far off their road to go is a driver
 		       -- who stops for passengers, even at zero: a pickup on their own
 		       -- road is still a stop.
-		       -- Zero is "my road only", and pulling over on it still costs a
-		       -- minute; a budget of nothing would refuse that pickup too.
-		       detour_min         = CASE WHEN $4::int IS NULL THEN detour_min ELSE GREATEST($4::int, 1) END,
+		       drive_detour_min   = COALESCE($4, drive_detour_min),
 		       allow_stops        = allow_stops OR $4::int IS NOT NULL,
 		       updated_at         = now()
 		 WHERE id = $1`, occurrenceID, departs, now, in.DetourMin); err != nil {
@@ -255,7 +253,7 @@ func (s *Service) settleOffers(
 		         WHEN $4 OR NOT `+match.DriveReady("$2::timestamptz", "o.route_min",
 		"ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, rr.origin))",
 		"ST_Distance(o.route_geom::geography, rr.origin::geography)",
-		"GREATEST(rr.window_start, $3::timestamptz)", "rr.window_end", "o.detour_min")+`
+		"GREATEST(rr.window_start, $3::timestamptz)", "rr.window_end", match.DriveLateBy("o."))+`
 		         THEN LEAST(a.expires_at, $3::timestamptz)
 		         ELSE LEAST(a.expires_at, `+match.DriveDeadline("$2::timestamptz", "o.route_min",
 		"ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, rr.origin))",
