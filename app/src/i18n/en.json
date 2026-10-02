@@ -261,6 +261,7 @@
     "photoRemove": "Remove",
     "photoTooBig": "That photo is too large",
     "retire": "Retire",
+    "editRoute": "Change",
     "retireConfirm": "This route will no longer be offered, and its scheduled trips are called off.",
     "retireWithTrips": "This route will no longer be offered, and its empty trips are called off. {{count}} with passengers stay: cancel those one by one if you need to, so they are told.",
     "routes": "My routes",
@@ -279,6 +280,8 @@
     "linkOpens_other": "Link opened {{count}} times"
   },
   "publish": {
+    "replacing": "You are changing {{route}}. When you publish, the old one is retired and its empty trips are called off.",
+    "replaceFailed": "The new route is out, but the old one was not retired. Retire it from your routes.",
     "allowStops": "I accept stops",
     "departWindow": "Departure time",
     "detour": "Intermediate stops",

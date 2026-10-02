@@ -20,6 +20,10 @@ export type MyRoute = {
   upcoming_trips: number;
   /** How many of those retiring leaves standing: somebody has a seat or is being asked. */
   kept_trips: number;
+  origin_lon: number;
+  origin_lat: number;
+  destination_lon: number;
+  destination_lat: number;
   /** How many times a person opened this route's link. */
   link_opens?: number;
   /** Told, as a departure comes up, that somebody on the road is waiting. */

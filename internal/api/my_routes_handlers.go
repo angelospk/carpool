@@ -34,6 +34,11 @@ type myRoute struct {
 	// KeptTrips is how many of those retiring would leave standing, because
 	// somebody has a seat on them or is being asked about one.
 	KeptTrips int `json:"kept_trips"`
+	// The ends as coordinates, so «Αλλαγή» can fill the publish form in.
+	OriginLon      float64 `json:"origin_lon"`
+	OriginLat      float64 `json:"origin_lat"`
+	DestinationLon float64 `json:"destination_lon"`
+	DestinationLat float64 `json:"destination_lat"`
 	// LinkOpens is how many times a person opened the route's link: whether
 	// sharing it reached anybody.
 	LinkOpens int `json:"link_opens"`
@@ -69,7 +74,8 @@ func (d Deps) handleMyRoutes(w http.ResponseWriter, r *http.Request) {
 		                         WHERE b.occurrence_id = o.id AND b.status = 'confirmed')
 		             OR EXISTS (SELECT 1 FROM asks a
 		                         WHERE a.occurrence_id = o.id AND a.status = 'pending'))),
-		       rt.share_opens, rt.nudge_when_leaving
+		       rt.share_opens, rt.nudge_when_leaving,
+		       ST_X(rt.origin), ST_Y(rt.origin), ST_X(rt.destination), ST_Y(rt.destination)
 		  FROM route_templates rt
 		  JOIN route_schedules rs ON rs.template_id = rt.id
 		 WHERE rt.driver_id = $1 AND rt.active
@@ -89,7 +95,8 @@ func (d Deps) handleMyRoutes(w http.ResponseWriter, r *http.Request) {
 		var oneoff *string
 		if err := rows.Scan(&m.ID, &m.OriginLabel, &m.DestinationLabel, &m.RouteKm,
 			&m.Seats, &m.PricingMode, &m.Kind, &m.Weekdays, &oneoff,
-			&m.DepartEarliest, &m.DepartLatest, &m.UpcomingTrips, &m.KeptTrips, &m.LinkOpens, &m.NudgeWhenLeaving); err != nil {
+			&m.DepartEarliest, &m.DepartLatest, &m.UpcomingTrips, &m.KeptTrips, &m.LinkOpens, &m.NudgeWhenLeaving,
+			&m.OriginLon, &m.OriginLat, &m.DestinationLon, &m.DestinationLat); err != nil {
 			slog.Error("reading a route", "driver", userID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal", "could not read your routes")
 			return

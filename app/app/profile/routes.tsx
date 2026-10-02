@@ -11,6 +11,7 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api, type MyRoute } from '../../src/api/endpoints';
@@ -32,6 +33,29 @@ import { calendarDay } from '../../src/design/format';
 export default function MyRoutesScreen() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const router = useRouter();
+
+  // The publish form, filled in with this route. Publishing there retires
+  // this one, so a change is one act rather than publish-then-retire.
+  const edit = (r: MyRoute) =>
+    router.push({
+      pathname: '/(tabs)/publish',
+      params: {
+        replaces: r.id,
+        from_lon: String(r.origin_lon),
+        from_lat: String(r.origin_lat),
+        from_label: r.origin_label,
+        to_lon: String(r.destination_lon),
+        to_lat: String(r.destination_lat),
+        to_label: r.destination_label,
+        kind: r.kind,
+        weekdays: r.weekdays.join(','),
+        ...(r.oneoff_date ? { oneoff_date: r.oneoff_date } : {}),
+        earliest: r.depart_earliest,
+        latest: r.depart_latest,
+        seats: String(r.seats),
+      },
+    });
 
   const routes = useQuery({
     queryKey: ['my-routes'],
@@ -155,6 +179,12 @@ export default function MyRoutesScreen() {
             <Text style={styles.meta}>{t('drive.nudgeHint')}</Text>
 
             <ShareRouteButton route={r} testID={`share-${r.id}`} failedTestID={`share-failed-${r.id}`} />
+            <Button
+              testID={`edit-${r.id}`}
+              label={t('profile.editRoute')}
+              variant="secondary"
+              onPress={() => edit(r)}
+            />
             <Button
               testID={`retire-${r.id}`}
               label={t('profile.retire')}

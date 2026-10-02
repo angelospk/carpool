@@ -90,3 +90,28 @@ func TestMyRoutesCountsTheDeparturesRetiringWouldKeep(t *testing.T) {
 		t.Fatalf("got %+v, want one route keeping its one booked departure", got.Routes)
 	}
 }
+
+// «Αλλαγή» opens the publish form filled in with the route, so the list has
+// to carry where the route goes, not only what its ends are called.
+func TestMyRoutesCarriesTheEndsAsCoordinates(t *testing.T) {
+	h := newHarness(t)
+	token, _ := driverWithRoute(t, h, "+306900001105")
+
+	rec := h.do(http.MethodGet, "/v1/me/routes", nil, token)
+	var got struct {
+		Routes []struct {
+			OriginLon      float64 `json:"origin_lon"`
+			OriginLat      float64 `json:"origin_lat"`
+			DestinationLon float64 `json:"destination_lon"`
+			DestinationLat float64 `json:"destination_lat"`
+		} `json:"routes"`
+	}
+	h.decode(rec, &got)
+	if len(got.Routes) != 1 {
+		t.Fatalf("got %+v", got.Routes)
+	}
+	r := got.Routes[0]
+	if r.OriginLon != 25.8743 || r.OriginLat != 40.8476 || r.DestinationLon != 26.1717 || r.DestinationLat != 40.8975 {
+		t.Errorf("ends: %+v", r)
+	}
+}

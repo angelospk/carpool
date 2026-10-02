@@ -6,8 +6,9 @@ import { Alert } from 'react-native';
 import MyRoutesScreen from '../profile/routes';
 import { api } from '../../src/api/endpoints';
 
+const mockPush = jest.fn();
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+  useRouter: () => ({ push: mockPush, replace: jest.fn() }),
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
@@ -27,6 +28,10 @@ const route = (over: Partial<Record<string, unknown>> = {}) => ({
   depart_latest: '08:00',
   upcoming_trips: 14,
   kept_trips: 0,
+  origin_lon: 26.3,
+  origin_lat: 41.19,
+  destination_lon: 25.87,
+  destination_lat: 40.84,
   ...over,
 });
 
@@ -65,4 +70,26 @@ test('a route with passengers says how many of its trips stay', async () => {
   (api.myRoutes as jest.Mock).mockResolvedValue({ routes: [route({ kept_trips: 2 })] });
   const message = await messageWhenRetiring();
   expect(message).toContain('Μένουν 2 με επιβάτες');
+});
+
+// «Αλλαγή» opens the publish form with this route in it, marked as the one
+// being replaced.
+test('changing a route opens the form filled in with it', async () => {
+  (api.myRoutes as jest.Mock).mockResolvedValue({ routes: [route()] });
+  render(wrap(<MyRoutesScreen />));
+
+  fireEvent.press(await screen.findByTestId('edit-r1'));
+
+  expect(mockPush).toHaveBeenCalledWith({
+    pathname: '/(tabs)/publish',
+    params: expect.objectContaining({
+      replaces: 'r1',
+      from_label: 'Σουφλί',
+      from_lon: '26.3',
+      to_label: 'Αλεξανδρούπολη',
+      weekdays: '1,2,3,4,5',
+      earliest: '07:30',
+      seats: '3',
+    }),
+  });
 });

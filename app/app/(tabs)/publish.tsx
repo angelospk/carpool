@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   api,
@@ -28,7 +28,7 @@ import { LuggagePicker } from '../../src/components/LuggagePicker';
 import { BootShare } from '../../src/components/BootShare';
 import { ContributionChoice } from '../../src/components/ContributionChoice';
 import { colors, space, type } from '../../src/design/tokens';
-import { type Pin } from '../../src/design/pin';
+import { pinsFromParams, type Pin } from '../../src/design/pin';
 import { PlaceField } from '../../src/components/PlaceField';
 import { MeetingPointField } from '../../src/components/MeetingPointField';
 import { ShareRouteButton } from '../../src/components/ShareRouteButton';
@@ -130,6 +130,43 @@ export default function PublishScreen() {
   const [outcome, setOutcome] = useState<string | null>(null);
   const [published, setPublished] = useState<ShareableRoute | null>(null);
 
+  // «Αλλαγή» from the list of routes: the form arrives filled in with the
+  // route, and publishing puts out the changed one and retires the old, which
+  // calls off its empty trips. Applied once per route, because the tab stays
+  // mounted and re-applying would undo what the driver then edited.
+  const params = useLocalSearchParams<Record<string, string | string[]>>();
+  const [replaces, setReplaces] = useState<{ id: string; label: string } | null>(null);
+  const applied = useRef<string | null>(null);
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const id = first(params.replaces);
+    if (!id || applied.current === id) return;
+    const pins = pinsFromParams(params);
+    if (!pins) return;
+    applied.current = id;
+    setFrom(pins.from);
+    setTo(pins.to);
+    setFromPoint(null);
+    setToPoint(null);
+    setLeavingNow(false);
+    const oneoff = first(params.oneoff_date);
+    if (first(params.kind) === 'oneoff' && oneoff) {
+      setKind('oneoff');
+      setOneoffDate(oneoff);
+    } else {
+      setKind('recurring');
+      const days = (first(params.weekdays) ?? '').split(',').map(Number).filter((d) => d >= 1 && d <= 7);
+      if (days.length) setWeekdays(days);
+    }
+    const earliestParam = first(params.earliest);
+    const latestParam = first(params.latest);
+    if (earliestParam) setEarliest(earliestParam);
+    if (latestParam) setLatest(latestParam);
+    const seatsParam = Number(first(params.seats));
+    if (seatsParam >= 1) setSeats(seatsParam);
+    setReplaces({ id, label: `${pins.from.label} → ${pins.to.label}` });
+  }, [params]);
+
 
   const publish = useMutation({
     mutationFn: (snap: ShareableRoute) =>
@@ -186,6 +223,16 @@ export default function PublishScreen() {
       setFromPoint(null);
       setToPoint(null);
       setLeavingNow(false);
+      if (replaces) {
+        // After the new one exists, never before: a failed publish must not
+        // leave the driver with neither.
+        const old = replaces.id;
+        setReplaces(null);
+        void api
+          .retireRoute(old)
+          .then(() => queryClient.invalidateQueries({ queryKey: ['my-routes'] }))
+          .catch(() => setOutcome(t('publish.replaceFailed')));
+      }
       if (nowWindow.current && r.first_occurrence_id) {
         router.push({ pathname: '/trip/[id]', params: { id: r.first_occurrence_id } });
       }
@@ -220,6 +267,9 @@ export default function PublishScreen() {
     <Screen topInset>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Title>{t('publish.title')}</Title>
+        {replaces ? (
+          <Hint testID="editing-route">{t('publish.replacing', { route: replaces.label })}</Hint>
+        ) : null}
 
         {/* Whoever is already looking for a lift, before the form asks for
             anything. A driver deciding whether this is worth ninety seconds is
@@ -588,6 +638,11 @@ function nextDates(today: string, n: number): string[] {
   const out = [today];
   while (out.length < n) out.push(nextDate(out[out.length - 1]));
   return out;
+}
+
+// A repeated query parameter arrives as an array; the first is what was meant.
+function first(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 // Whether the days chosen are exactly a preset's, so the preset can read as
