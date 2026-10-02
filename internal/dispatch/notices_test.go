@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -56,6 +57,14 @@ func TestEveryNoticeReachesThePersonItNames(t *testing.T) {
 			"Η σταθερή διαδρομή σταμάτησε",
 			"Οι επόμενες εβδομάδες ακυρώθηκαν.",
 		},
+		notices.DriveRetimed: {
+			"Ο οδηγός είπε πότε φεύγει",
+			"Άνοιξε τη διαδρομή για να δεις πότε περνά από το σημείο σου.",
+		},
+		notices.DriveNudge: {
+			"2 άτομα στον δρόμο σου θέλουν να πάνε τώρα",
+			"Έχεις ελεύθερες θέσεις. Πες πότε φεύγεις και τους ρωτάμε.",
+		},
 	}
 
 	for _, event := range notices.All() {
@@ -98,9 +107,12 @@ func TestEveryNoticeReachesThePersonItNames(t *testing.T) {
 			if got.Data["idempotency_key"] != msg.IdempotencyKey {
 				t.Errorf("carried key %v, want %q", got.Data["idempotency_key"], msg.IdempotencyKey)
 			}
-			field, absent := "booking_id", "arrangement_id"
-			if event != notices.BookingCancelledForPassenger && event != notices.BookingCancelledForDriver {
-				field, absent = absent, field
+			field := "arrangement_id"
+			switch event {
+			case notices.BookingCancelledForPassenger, notices.BookingCancelledForDriver, notices.DriveRetimed:
+				field = "booking_id"
+			case notices.DriveNudge:
+				field = "occurrence_id"
 			}
 			if got.Data[field] != resource.String() {
 				t.Errorf("carried %s %v, want %s", field, got.Data[field], resource)
@@ -108,16 +120,23 @@ func TestEveryNoticeReachesThePersonItNames(t *testing.T) {
 			// And nothing else. An id the event does not use has to be absent
 			// rather than present and zero, or the app follows it to a booking
 			// that was never made.
-			if _, ok := got.Data[absent]; ok {
-				t.Errorf("carried %s %v, which this event has none of", absent, got.Data[absent])
+			for _, absent := range []string{"booking_id", "arrangement_id", "occurrence_id"} {
+				if _, ok := got.Data[absent]; ok && absent != field {
+					t.Errorf("carried %s %v, which this event has none of", absent, got.Data[absent])
+				}
 			}
 		})
 	}
 }
 
 func build(event notices.Event, recipient, resource uuid.UUID) (outbox.Message, error) {
-	if event == notices.BookingCancelledForPassenger || event == notices.BookingCancelledForDriver {
+	switch event {
+	case notices.BookingCancelledForPassenger, notices.BookingCancelledForDriver:
 		return notices.BookingCancelled(event, recipient, resource)
+	case notices.DriveRetimed:
+		return notices.Retimed(recipient, resource, time.Date(2026, time.July, 30, 7, 0, 0, 0, time.UTC))
+	case notices.DriveNudge:
+		return notices.Nudge(recipient, resource, 2)
 	}
 	return notices.Arrangement(event, recipient, resource)
 }

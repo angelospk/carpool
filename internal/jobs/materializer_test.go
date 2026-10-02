@@ -871,3 +871,53 @@ func TestABookedDepartureKeepsTheRoadItWasPricedOn(t *testing.T) {
 		t.Errorf("the booked departure was repriced under somebody: %+v, was %+v", after, before)
 	}
 }
+
+// A drive is the driver saying when they are really leaving. The schedule's
+// window is what the next run would write back, so a drive is left alone the
+// way a booked departure is: neither retimed to the schedule nor cancelled
+// because the schedule moved.
+func TestMaterializeLeavesADriveAlone(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	var occurrenceID uuid.UUID
+	pinned := time.Date(2026, time.July, 13, 5, 12, 0, 0, time.UTC)
+	if err := f.pool.QueryRow(ctx, `
+		UPDATE trip_occurrences
+		   SET scheduled_earliest = depart_earliest, scheduled_latest = depart_latest,
+		       depart_earliest = $1, depart_latest = $1, drive_set_at = $1
+		 WHERE service_date = '2026-07-13' RETURNING id`, pinned).Scan(&occurrenceID); err != nil {
+		t.Fatalf("pinning a drive: %v", err)
+	}
+
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	var departs time.Time
+	if err := f.pool.QueryRow(ctx,
+		`SELECT depart_earliest FROM trip_occurrences WHERE id = $1`, occurrenceID).Scan(&departs); err != nil {
+		t.Fatalf("reading the drive: %v", err)
+	}
+	if !departs.Equal(pinned) {
+		t.Fatalf("the materializer moved a drive back to %v", departs)
+	}
+
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE route_schedules SET weekdays = ARRAY[2]::int[] WHERE template_id = $1`,
+		f.templateID); err != nil {
+		t.Fatalf("changing weekdays: %v", err)
+	}
+	if err := f.materializer().Run(ctx); err != nil {
+		t.Fatalf("third Run: %v", err)
+	}
+	var status string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT status FROM trip_occurrences WHERE id = $1`, occurrenceID).Scan(&status); err != nil {
+		t.Fatalf("reading the drive: %v", err)
+	}
+	if status != "scheduled" {
+		t.Fatalf("the materializer cancelled a drive: %q", status)
+	}
+}

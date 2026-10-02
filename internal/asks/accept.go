@@ -278,6 +278,23 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	if requestState != "open" && requestState != "asking" {
 		return uuid.Nil, ErrAskNotPending
 	}
+	// On a drive the answer has to come while the passenger can still reach
+	// the road before the car: the offer was made against the clock, and the
+	// clock has moved while it sat on the driver's phone. Read with both rows
+	// held, by the same rule the matcher used to make it.
+	var tooLate bool
+	if err := tx.QueryRow(ctx, `
+		SELECT o.drive_set_at IS NOT NULL AND NOT `+match.DriveReady("o.depart_earliest", "o.route_min",
+		"ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, rr.origin))",
+		"ST_Distance(o.route_geom::geography, rr.origin::geography)",
+		"GREATEST(rr.window_start, $3::timestamptz)", "rr.window_end")+`
+		  FROM trip_occurrences o, ride_requests rr
+		 WHERE o.id = $1 AND rr.id = $2`, occurrenceID, requestID, now).Scan(&tooLate); err != nil {
+		return uuid.Nil, fmt.Errorf("asks: checking the pickup is still in time: %w", err)
+	}
+	if tooLate {
+		return uuid.Nil, ErrAskExpired
+	}
 	var aboard bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM bookings

@@ -284,6 +284,9 @@ func (m *Materializer) upsert(
 func mutablePredicate(nowParam string) string {
 	return `
 	trip_occurrences.depart_earliest > ` + nowParam + `
+	-- A drive is the driver's own word on when they leave; the schedule's
+	-- window is exactly what it replaced.
+	AND trip_occurrences.drive_set_at IS NULL
 	AND NOT EXISTS (
 	      SELECT 1 FROM bookings b
 	      WHERE b.occurrence_id = trip_occurrences.id

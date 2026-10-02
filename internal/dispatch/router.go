@@ -81,6 +81,9 @@ type pushPayload struct {
 	PassengerID *uuid.UUID `json:"passenger_id"`
 	BookingID   *uuid.UUID `json:"booking_id"`
 	DetourMin   float64    `json:"detour_min"`
+
+	OccurrenceID *uuid.UUID `json:"occurrence_id"`
+	Count        int        `json:"count"`
 }
 
 func (r *Router) handlePush(ctx context.Context, m outbox.Message) error {
@@ -122,6 +125,9 @@ func (r *Router) handlePush(ctx context.Context, m outbox.Message) error {
 	}
 	if p.ArrangementID != nil {
 		data["arrangement_id"] = p.ArrangementID.String()
+	}
+	if p.OccurrenceID != nil {
+		data["occurrence_id"] = p.OccurrenceID.String()
 	}
 
 	// One message fans out to every device the user has, and the devices fail
@@ -217,13 +223,14 @@ func (p pushPayload) notification() (recipient uuid.UUID, title, body string, er
 	// What the words are is decided before the payload is checked to be
 	// complete, so that an event nobody has written words for is reported as
 	// exactly that rather than as a missing field.
-	title, body, ok := say(p.Event)
+	title, body, ok := say(p.Event, p.Count)
 	if !ok {
 		return uuid.Nil, "", "", fmt.Errorf("nothing to say for event %q", p.Event)
 	}
 	if err := (notices.Payload{
 		Event: p.Event, RecipientID: p.RecipientID,
 		BookingID: p.BookingID, ArrangementID: p.ArrangementID,
+		OccurrenceID: p.OccurrenceID, Count: p.Count,
 	}).Validate(); err != nil {
 		return uuid.Nil, "", "", err
 	}
@@ -237,8 +244,18 @@ func (p pushPayload) notification() (recipient uuid.UUID, title, body string, er
 // account for itself. The same fact reaches a passenger whether the driver
 // called the trip off, closed their account or was suspended, and only the
 // first of those is the driver's doing — so none of the three is claimed.
-func say(event notices.Event) (title, body string, ok bool) {
+func say(event notices.Event, count int) (title, body string, ok bool) {
 	switch event {
+	case notices.DriveRetimed:
+		return "Ο οδηγός είπε πότε φεύγει",
+			"Άνοιξε τη διαδρομή για να δεις πότε περνά από το σημείο σου.", true
+	case notices.DriveNudge:
+		title := "Κάποιος στον δρόμο σου θέλει να πάει τώρα"
+		if count > 1 {
+			title = fmt.Sprintf("%d άτομα στον δρόμο σου θέλουν να πάνε τώρα", count)
+		}
+		return title,
+			"Έχεις ελεύθερες θέσεις. Πες πότε φεύγεις και τους ρωτάμε.", true
 	case notices.BookingCancelledForPassenger:
 		// The second sentence is true whichever of the three it was: each of
 		// them puts the passenger's request back in the queue if it came from

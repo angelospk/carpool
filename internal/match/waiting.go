@@ -38,10 +38,12 @@ type WaitingQuery struct {
 // duplication would be most likely to drift. Gross remains the authority on
 // whether a pair is really a match, and the containment property is tested
 // rather than asserted from reading the two side by side.
-var waitingSQL = `
+// waitingFrom is everything Waiting and DriveDemand share: one trip, and the
+// open requests it could answer.
+var waitingFrom = `
 WITH trip AS (
 	SELECT o.id, o.route_geom, o.seats_free, o.luggage,
-	       o.depart_earliest, o.depart_latest,
+	       o.depart_earliest, o.depart_latest, o.drive_set_at, o.route_min,
 	       t.driver_id, d.notify_radius_km, du.gender AS driver_gender
 	FROM trip_occurrences o
 	JOIN route_templates t ON t.id = o.template_id
@@ -71,8 +73,10 @@ WHERE rr.status = 'open'
   -- between would offer somebody a lift to a journey they have already made or
   -- given up on.
   AND rr.window_end > $2
-  AND rr.window_start < trip.depart_latest
-  AND rr.window_end   > trip.depart_earliest
+  -- A drive is compared with when the car reaches the passenger, not when it
+  -- leaves; the forward filter does that, and this side stays looser.
+  AND (trip.drive_set_at IS NOT NULL OR (rr.window_start < trip.depart_latest
+                                         AND rr.window_end > trip.depart_earliest))
   AND rr.passenger_id <> trip.driver_id
   AND rr.seats <= trip.seats_free - ` + spokenForTrip + `
   AND trip.luggage >= rr.luggage
@@ -102,6 +106,9 @@ WHERE rr.status = 'open'
   -- leg and the road that merely crosses this one.
   AND ST_LineLocatePoint(trip.route_geom, ST_ClosestPoint(trip.route_geom, rr.origin))
     < ST_LineLocatePoint(trip.route_geom, ST_ClosestPoint(trip.route_geom, rr.destination))
+`
+
+var waitingSQL = waitingFrom + `
 -- Longest wait first, then a stable tie-break. With a limit in play this
 -- decides who makes the shortlist at all, so it is fairness rather than
 -- presentation: best-match-first would let somebody on an awkward corner of the
@@ -148,3 +155,22 @@ func Waiting(ctx context.Context, pool *pgxpool.Pool, q WaitingQuery) ([]uuid.UU
 
 // ExportedWaitingSQL is the query text, for plan assertions in tests.
 func ExportedWaitingSQL() string { return waitingSQL }
+
+// DriveDemand counts the people a trip could pick up if it left at its
+// earliest departure: everybody Waiting would wake, held to DriveReady. It is
+// what the nudge tells a driver, and it is a count of everybody rather than of
+// a shortlist, so a first page of people who are not ready cannot hide one who
+// is.
+func DriveDemand(ctx context.Context, pool *pgxpool.Pool, occurrenceID uuid.UUID, now time.Time) (int, error) {
+	var n int
+	err := pool.QueryRow(ctx, `SELECT count(*) FROM (`+waitingFrom+`
+		  AND `+DriveReady("trip.depart_earliest", "trip.route_min",
+		"ST_LineLocatePoint(trip.route_geom, ST_ClosestPoint(trip.route_geom, rr.origin))",
+		"ST_Distance(trip.route_geom::geography, rr.origin::geography)",
+		"GREATEST(rr.window_start, $2)", "rr.window_end")+`
+		) ready`, occurrenceID, now).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("match: counting who a drive could take: %w", err)
+	}
+	return n, nil
+}

@@ -20,6 +20,7 @@ import (
 	"carpool/internal/bookings"
 	"carpool/internal/clock"
 	"carpool/internal/drivers"
+	"carpool/internal/drives"
 	"carpool/internal/geo"
 	"carpool/internal/groups"
 	"carpool/internal/invites"
@@ -114,6 +115,7 @@ func newHarnessOpts(t *testing.T, devMode bool, matcher func(*asks.Service) *ask
 		Invites:       invites.NewService(pool, c, false),
 		Groups:        groups.NewService(pool, c),
 		Live:          live.NewService(pool, c),
+		Drives:        drives.NewService(pool, c),
 		Account:       account.NewService(pool, c),
 		Drivers:       drivers.NewService(pool, c),
 		Moderation:    moderation.NewService(pool, c),

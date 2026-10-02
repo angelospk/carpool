@@ -16,6 +16,7 @@ import (
 	"carpool/internal/bookings"
 	"carpool/internal/clock"
 	"carpool/internal/drivers"
+	"carpool/internal/drives"
 	"carpool/internal/geo"
 	"carpool/internal/groups"
 	"carpool/internal/invites"
@@ -59,6 +60,8 @@ type Deps struct {
 	// Live shares where the driver and their passengers are, around the time
 	// of a trip they are on together, and only then.
 	Live *live.Service
+	// Drives lets a driver pin the minute they leave.
+	Drives *drives.Service
 	// Account answers the two requests a person can make about their own data.
 	Account *account.Service
 	// Drivers records a driver's car, and works out what it drinks so that the
@@ -212,6 +215,7 @@ func NewRouter(deps Deps) http.Handler {
 			r.Get("/demand", deps.handleDemand)
 			r.Delete("/me/routes/{id}", deps.handleRetireRoute)
 			r.Post("/me/routes/{id}/share", deps.handleShareRoute)
+			r.Put("/me/routes/{id}/nudge", deps.handleRouteNudge)
 			r.Delete("/me/routes/{id}/share", deps.handleRevokeRouteShare)
 
 			if deps.PhoneChange != nil {
@@ -325,6 +329,9 @@ func NewRouter(deps Deps) http.Handler {
 				r.With(chat.perUser).Post("/messages", deps.handlePostMessage)
 				if deps.Hub != nil {
 					r.Get("/socket", deps.handleTripSocket)
+				}
+				if deps.Drives != nil {
+					r.Post("/drive", deps.handleStartDrive)
 				}
 				if deps.Live != nil {
 					r.Get("/live", deps.handleLive)

@@ -25,6 +25,7 @@ import (
 	"carpool/internal/config"
 	"carpool/internal/dispatch"
 	"carpool/internal/drivers"
+	"carpool/internal/drives"
 	"carpool/internal/geo"
 	"carpool/internal/groups"
 	"carpool/internal/invites"
@@ -181,6 +182,14 @@ func run() error {
 	// that corridor within seconds. This catches what has no event: a driver
 	// turning notifications back on, widening their radius, coming off a
 	// suspension — and whatever the wake's shortlist left behind.
+	// Tells drivers who asked for it that somebody on their road is waiting,
+	// shortly before a departure. A minute is fine-grained enough for a
+	// quarter-hour lead and cheap: it reads departures due in that quarter.
+	driveSvc := drives.NewService(pool, clk)
+	start(ctx, &workers, "drive nudger", nudgeInterval, func(ctx context.Context) error {
+		_, err := driveSvc.Nudge(ctx)
+		return err
+	})
 	reconciler := jobs.NewReconciler(pool, clk)
 	start(ctx, &workers, "match reconciler", jobs.ReconcileInterval, func(ctx context.Context) error {
 		_, err := reconciler.Run(ctx)
@@ -204,6 +213,7 @@ func run() error {
 		Invites:  invites.NewService(pool, clk, cfg.InviteOnly),
 		Groups:   groups.NewService(pool, clk),
 		Live:     live.NewService(pool, clk),
+		Drives:   driveSvc,
 		DevMode:  cfg.DevMode,
 		// Generous for a household or an office behind one address, far too
 		// few to be worth pumping SMS through.
@@ -246,6 +256,7 @@ const (
 	outboxInterval      = 5 * time.Second
 	sweepInterval       = 30 * time.Second
 	materializeInterval = 15 * time.Minute
+	nudgeInterval       = time.Minute
 	// Retention periods are measured in months, so an hour either way is
 	// nothing. What the cadence buys is that a restart does not leave the
 	// backlog for a day, since every loop also runs once on start.

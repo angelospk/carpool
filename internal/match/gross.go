@@ -118,6 +118,33 @@ func SeatsSpokenFor(occurrence, now string) string {
 		  AND a.expires_at > ` + now + `), 0)`
 }
 
+// DriveReady is the SQL condition for a pickup on a drive: the passenger can
+// be at the road before the car, and has not stopped waiting by the time it
+// arrives. See specs/DRIVING-NOW.md.
+//
+// The car reaches the pickup a fraction of the way along a route of known
+// length, leaving at a known minute. The passenger needs to have set off for
+// the road a margin earlier: three minutes for a guess that is only a guess,
+// plus the walk at 80 m a minute. Being early is fine and being late is not,
+// because the one rule a drive keeps is that the driver never waits.
+//
+// readyFrom is when the passenger can set off, which is never before now: a
+// window that opened an hour ago says they were ready then, not that they are
+// already standing at the road.
+//
+// It takes its operands as SQL so the matcher and the code that re-checks an
+// offer when a drive is set cannot disagree about what ready means.
+func DriveReady(departs, routeMin, fraction, walkM, readyFrom, windowEnd string) string {
+	eta := `(` + departs + ` + (` + fraction + ` * ` + routeMin + `) * interval '1 minute')`
+	return `(` + readyFrom + ` <= ` + eta + ` - (` + driveMarginMin + ` + ` + walkM + ` / ` + walkMetresPerMin + `) * interval '1 minute'
+	     AND ` + eta + ` <= ` + windowEnd + `)`
+}
+
+const (
+	driveMarginMin   = "3"
+	walkMetresPerMin = "80.0"
+)
+
 // grossSQL is the stage-1 filter from MATCHING.md.
 //
 // Three predicates do the real work:
@@ -151,7 +178,9 @@ WITH cand AS (
 	       d.notify_radius_km  AS notify_radius_km,
 	       o.allow_stops       AS allow_stops,
 	       o.detour_km         AS detour_km,
-	       o.detour_min        AS detour_min
+	       o.detour_min        AS detour_min,
+	       o.drive_set_at      AS drive_set_at,
+	       o.depart_earliest   AS departs
 	FROM trip_occurrences o
 	JOIN route_templates  t ON t.id = o.template_id
 	JOIN driver_profiles  d ON d.user_id = t.driver_id
@@ -177,8 +206,11 @@ WITH cand AS (
 	        SELECT sum(b.luggage_count) FROM bookings b
 	        WHERE b.occurrence_id = o.id AND b.status IN ('confirmed', 'completed')
 	      ), 0) >= $10
-	  AND o.depart_earliest < $4
-	  AND o.depart_latest   > $3
+	  -- A drive is held to DriveReady below instead, which compares the
+	  -- passenger's window with when the car reaches them. Comparing it with
+	  -- the departure would turn away everybody further down the road whose
+	  -- window opens after the car leaves its origin.
+	  AND (o.drive_set_at IS NOT NULL OR (o.depart_earliest < $4 AND o.depart_latest > $3))
 	  -- And it has not gone yet. The two lines above compare the departure
 	  -- against the *request's* window, which is written once and never moves:
 	  -- one driver is asked at a time with half an hour to answer, so a request
@@ -222,9 +254,10 @@ WITH cand AS (
 	  AND ($12::uuid IS NULL OR o.id = $12::uuid)
 ), located AS (
 	SELECT occurrence_id, driver_id, route_km, route_min, seats_free, itinerary_version,
-	       allow_stops, detour_km, detour_min,
+	       allow_stops, detour_km, detour_min, drive_set_at, departs,
 	       ST_LineLocatePoint(route_geom, ST_ClosestPoint(route_geom, $1)) AS f_o,
-	       ST_LineLocatePoint(route_geom, ST_ClosestPoint(route_geom, $2)) AS f_d
+	       ST_LineLocatePoint(route_geom, ST_ClosestPoint(route_geom, $2)) AS f_d,
+	       ST_Distance(route_geom::geography, $1::geography) AS walk_m
 	FROM cand
 )
 SELECT occurrence_id, driver_id, f_o, f_d,
@@ -233,6 +266,11 @@ SELECT occurrence_id, driver_id, f_o, f_d,
 FROM located
 WHERE f_o < f_d
   AND (f_d - f_o) * route_km >= GREATEST(1.0, 0.2 * $6)
+  -- A drive knows when the car reaches the pickup, so it is held to the rule
+  -- the scheduled window cannot express: the passenger is there first and is
+  -- still there when it comes. Without a drive the window overlap above is all
+  -- there is to go on, and it stays the whole test.
+  AND (drive_set_at IS NULL OR ` + DriveReady("departs", "route_min", "f_o", "walk_m", "GREATEST($3, $13)", "$4") + `)
 ORDER BY (f_d - f_o) * route_km DESC, occurrence_id
 LIMIT $8
 `

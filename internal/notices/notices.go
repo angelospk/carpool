@@ -22,6 +22,7 @@ package notices
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -53,6 +54,14 @@ const (
 	ArrangementDeclined Event = "arrangement_declined"
 	// ArrangementCancelled reaches whichever of the two did not end it.
 	ArrangementCancelled Event = "arrangement_cancelled"
+
+	// DriveRetimed reaches a passenger with a seat: the driver has said the
+	// minute they are leaving, so the time to be at the road has moved.
+	DriveRetimed Event = "drive_retimed"
+	// DriveNudge reaches a driver shortly before a departure they asked to be
+	// reminded about, when somebody on their road could be picked up. It says
+	// how many and nothing about who.
+	DriveNudge Event = "drive_nudge"
 )
 
 // All is every event a producer can emit, and the reason a new one cannot be
@@ -65,6 +74,8 @@ func All() []Event {
 		ArrangementApproved,
 		ArrangementDeclined,
 		ArrangementCancelled,
+		DriveRetimed,
+		DriveNudge,
 	}
 }
 
@@ -82,6 +93,9 @@ type Payload struct {
 	// would be handed an id to a booking that does not exist.
 	BookingID     *uuid.UUID `json:"booking_id,omitempty"`
 	ArrangementID *uuid.UUID `json:"arrangement_id,omitempty"`
+	OccurrenceID  *uuid.UUID `json:"occurrence_id,omitempty"`
+	// Count is how many people a nudge is about.
+	Count int `json:"count,omitempty"`
 }
 
 // Validate refuses a payload that could not be delivered to anybody, or that
@@ -94,13 +108,20 @@ func (p Payload) Validate() error {
 	switch p.Event {
 	case "":
 		return fmt.Errorf("notices: the payload names no event")
-	case BookingCancelledForPassenger, BookingCancelledForDriver:
+	case BookingCancelledForPassenger, BookingCancelledForDriver, DriveRetimed:
 		if p.BookingID == nil || *p.BookingID == uuid.Nil {
 			return fmt.Errorf("notices: %s names no booking", p.Event)
 		}
 	case ArrangementRequested, ArrangementApproved, ArrangementDeclined, ArrangementCancelled:
 		if p.ArrangementID == nil || *p.ArrangementID == uuid.Nil {
 			return fmt.Errorf("notices: %s names no arrangement", p.Event)
+		}
+	case DriveNudge:
+		if p.OccurrenceID == nil || *p.OccurrenceID == uuid.Nil {
+			return fmt.Errorf("notices: %s names no departure", p.Event)
+		}
+		if p.Count < 1 {
+			return fmt.Errorf("notices: %s is about nobody", p.Event)
 		}
 	default:
 		return fmt.Errorf("notices: unknown event %q", p.Event)
@@ -130,6 +151,21 @@ func BookingCancelled(event Event, recipient, booking uuid.UUID) (outbox.Message
 func Arrangement(event Event, recipient, arrangement uuid.UUID) (outbox.Message, error) {
 	return message(Payload{Event: event, RecipientID: recipient, ArrangementID: &arrangement},
 		string(event)+":"+arrangement.String())
+}
+
+// Retimed builds the notice for a passenger whose driver has pinned the
+// departure. The minute is in the key, so a driver changing their mind twice
+// tells the passenger twice and a retried request tells them once.
+func Retimed(recipient, booking uuid.UUID, departs time.Time) (outbox.Message, error) {
+	return message(Payload{Event: DriveRetimed, RecipientID: recipient, BookingID: &booking},
+		fmt.Sprintf("drive_retimed:%s:%d", booking, departs.Unix()))
+}
+
+// Nudge builds the notice that somebody on a driver's road is waiting. One per
+// departure, whatever happens after.
+func Nudge(driver, occurrence uuid.UUID, count int) (outbox.Message, error) {
+	return message(Payload{Event: DriveNudge, RecipientID: driver, OccurrenceID: &occurrence, Count: count},
+		"drive_nudge:"+occurrence.String())
 }
 
 func message(p Payload, key string) (outbox.Message, error) {

@@ -136,6 +136,16 @@ type TripDetail struct {
 	// ConfirmedByMe is whether the caller has said the ride happened: their own
 	// booking for a passenger, their passengers' bookings for the driver.
 	ConfirmedByMe bool
+	// Drive is set once the driver has said the minute they are leaving; see
+	// internal/drives. The window above is then that minute, and Scheduled is
+	// the window that was published.
+	DriveSetAt                         *time.Time
+	ScheduledEarliest, ScheduledLatest *time.Time
+	DetourMin                          int
+	// PickupAt is when the car reaches the caller's own pickup on a drive,
+	// worked out from the minute it leaves and how far along the road the
+	// pickup is. Nil for the driver and when no minute has been given.
+	PickupAt *time.Time
 }
 
 // ErrNotParticipant means the caller has no place on this trip. It is reported
@@ -183,7 +193,14 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		                 WHERE b.occurrence_id = o.id AND b.passenger_id = $2
 		                   AND b.status IN ('confirmed','completed')), false),
 		       EXISTS (SELECT 1 FROM bookings b JOIN ratings r ON r.booking_id = b.id
-		               WHERE b.occurrence_id = o.id AND b.passenger_id = $2 AND r.rater_id = $2)
+		               WHERE b.occurrence_id = o.id AND b.passenger_id = $2 AND r.rater_id = $2),
+		       o.drive_set_at, o.scheduled_earliest, o.scheduled_latest, o.detour_min,
+		       CASE WHEN o.drive_set_at IS NOT NULL THEN (
+		           SELECT o.depart_earliest + ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, b.pickup_point))
+		                                      * o.route_min * interval '1 minute'
+		             FROM bookings b
+		            WHERE b.occurrence_id = o.id AND b.passenger_id = $2 AND b.status = 'confirmed')
+		       END
 		FROM trip_occurrences o
 		JOIN route_templates t  ON t.id = o.template_id
 		JOIN driver_profiles dp ON dp.user_id = t.driver_id
@@ -193,7 +210,8 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		&d.OriginLabel, &d.DestLabel, &d.TemplateID, &d.Weekday, &d.BookingID, &d.RoutePolyline,
 		&d.Driver.UserID, &d.Driver.Name, &d.Driver.PhotoVersion, &d.Driver.FacebookHandle, &d.Driver.InstagramHandle, &d.Driver.Rating,
 		&d.Driver.CarModel, &d.Driver.CarColor, &d.Driver.CarPlate,
-		&d.Driver.Bio, &d.Driver.Preferences, &d.ConfirmedByMe, &d.Driver.CanRate, &d.Driver.Rated)
+		&d.Driver.Bio, &d.Driver.Preferences, &d.ConfirmedByMe, &d.Driver.CanRate, &d.Driver.Rated,
+		&d.DriveSetAt, &d.ScheduledEarliest, &d.ScheduledLatest, &d.DetourMin, &d.PickupAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TripDetail{}, ErrNotParticipant
 	}
