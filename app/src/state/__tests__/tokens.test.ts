@@ -117,3 +117,19 @@ test('clearing the credentials tells whoever is listening', async () => {
   await clearTokens();
   expect(heard).toHaveBeenCalledTimes(1);
 });
+
+// Clearing waits for the listeners, and one that fails does not stop it.
+test('clearing waits for slow listeners and survives a failing one', async () => {
+  let finished = false;
+  const stopSlow = onTokensCleared(async () => {
+    await new Promise((r) => setTimeout(r, 10));
+    finished = true;
+  });
+  const stopBad = onTokensCleared(() => {
+    throw new Error('boom');
+  });
+  await clearTokens();
+  expect(finished).toBe(true);
+  stopSlow();
+  stopBad();
+});

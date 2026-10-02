@@ -168,8 +168,9 @@ test('the booked stops are kept from the moment the drive starts', async () => {
 test('clearing the credentials stops the drive and detection', async () => {
   await storage.setItemAsync('carpool.driveTrip', 'trip-1');
   (Location.hasStartedLocationUpdatesAsync as jest.Mock).mockResolvedValue(true);
+  // No waiting after: clearing returns only once the clean-up has finished,
+  // which is what keeps a background task alive for it.
   await clearTokens();
-  await new Promise((r) => setTimeout(r, 0));
   expect(Location.stopLocationUpdatesAsync).toHaveBeenCalled();
   expect(mockDisableDetection).toHaveBeenCalled();
   expect(await storage.getItemAsync('carpool.driveTrip')).toBeNull();

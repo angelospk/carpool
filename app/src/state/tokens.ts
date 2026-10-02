@@ -76,14 +76,17 @@ export function setTokens(tokens: Tokens, expectedEpoch?: number): Promise<boole
   });
 }
 
-const cleared = new Set<() => void>();
+const cleared = new Set<() => void | Promise<void>>();
 
 /**
  * Called whenever the credentials are cleared — a sign-out, or a session the
  * server rejected — which is the one thing that means this phone is no longer
- * signed in as anybody. Returns the way to stop listening.
+ * signed in as anybody. Clearing waits for every listener to finish: inside a
+ * background task, the task ends when the request that failed returns, and
+ * clean-up still running then would be cut off. Returns the way to stop
+ * listening.
  */
-export function onTokensCleared(listener: () => void): () => void {
+export function onTokensCleared(listener: () => void | Promise<void>): () => void {
   cleared.add(listener);
   return () => void cleared.delete(listener);
 }
@@ -94,7 +97,8 @@ export function clearTokens(): Promise<void> {
     epoch += 1;
     cached = null;
     await storage.deleteItemAsync(KEY);
-    cleared.forEach((l) => l());
+    // One failing listener must not stop the others, nor the clearing.
+    await Promise.all([...cleared].map((l) => Promise.resolve().then(l).catch(() => undefined)));
   });
 }
 

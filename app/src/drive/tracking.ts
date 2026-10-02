@@ -118,9 +118,8 @@ async function stopSampling(): Promise<void> {
 // does on its own for the account: the drive's sampling and detection.
 // Registered when this module loads, so it is there in a background launch
 // too.
-onTokensCleared(() => {
-  void stopSampling();
-  void disableDetection();
+onTokensCleared(async () => {
+  await Promise.all([stopSampling(), disableDetection()]);
 });
 
 // Defined when this module loads, which _layout makes happen at start: the OS
