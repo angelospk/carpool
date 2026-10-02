@@ -331,3 +331,30 @@ func TestDriveDemandCountsPeopleStillBeingAskedButNotOnesThisDriverRefused(t *te
 		t.Fatalf("Waiting = %v, %v; want nobody", got, err)
 	}
 }
+
+// A party being asked about this very trip is holding its own seats on it.
+// Counted against itself, two people asked about a three-seat car would find
+// only one seat left and drop out of the count.
+func TestDriveDemandDoesNotCountAPartyAgainstItsOwnHold(t *testing.T) {
+	f := setup(t)
+	occ := f.addOccurrence(t, corridorWKT, withWindow(driveDeparts, driveDeparts.Add(30*time.Minute)))
+	now := driveDeparts.Add(-10 * time.Minute)
+	pair := f.addRequest(t, func(o *requestOpts) {
+		o.windowStart = now
+		o.windowEnd = driveDeparts.Add(2 * time.Hour)
+		o.status = "asking"
+		o.seats = 2
+	})
+	if _, err := f.pool.Exec(context.Background(), `
+		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
+			suggested_price_eur, itinerary_version, status, expires_at)
+		VALUES ($1, $2, 1, 1, ST_SetSRID(ST_MakePoint(25.82, 40.85), 4326),
+			ST_SetSRID(ST_MakePoint(25.98, 40.85), 4326), 2, 0, 'pending', $3)`,
+		pair, occ, now.Add(20*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	n, err := match.DriveDemand(context.Background(), f.pool, occ, now)
+	if err != nil || n != 1 {
+		t.Fatalf("DriveDemand = %d, %v; want the pair being asked", n, err)
+	}
+}

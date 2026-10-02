@@ -43,7 +43,7 @@ type WaitingQuery struct {
 // waitingFromWith is everything Waiting and DriveDemand share: one trip, and
 // the requests it could answer. They differ in which requests still count as
 // waiting and which earlier offers on this trip rule one out.
-func waitingFromWith(waitingStatuses, waitingSpentAsks string) string {
+func waitingFromWith(waitingStatuses, waitingSpentAsks, ownHold string) string {
 	return `
 WITH trip AS (
 	SELECT o.id, o.route_geom, o.seats_free, o.luggage,
@@ -82,7 +82,7 @@ WHERE rr.status IN (` + waitingStatuses + `)
   AND (trip.drive_set_at IS NOT NULL OR (rr.window_start < trip.depart_latest
                                          AND rr.window_end > trip.depart_earliest))
   AND rr.passenger_id <> trip.driver_id
-  AND rr.seats <= trip.seats_free - ` + spokenForTrip + `
+  AND rr.seats <= trip.seats_free - ` + spokenForTrip + ` + ` + ownHold + `
   AND trip.luggage >= rr.luggage
   -- A repeat named the trip it wants; it is woken by that trip and no other.
   -- Excluding targeted requests altogether would be a false negative: one whose
@@ -116,7 +116,7 @@ WHERE rr.status IN (` + waitingStatuses + `)
 
 // waitingFrom is the wake's filter: requests nobody is asking about yet, and
 // never one already offered this trip.
-var waitingFrom = waitingFromWith(`'open'`, `'pending','accepted','declined','expired','cancelled'`)
+var waitingFrom = waitingFromWith(`'open'`, `'pending','accepted','declined','expired','cancelled'`, `0`)
 
 var waitingSQL = waitingFrom + `
 -- Longest wait first, then a stable tie-break. With a limit in play this
@@ -170,7 +170,14 @@ func ExportedWaitingSQL() string { return waitingSQL }
 // this driver or another — is still waiting, and is exactly whom a pinned
 // minute helps; only somebody this driver has already turned down, or let an
 // offer lapse on, is not news to them.
-var demandFrom = waitingFromWith(`'open','asking'`, `'declined','expired'`)
+//
+// A request being asked about this very trip is holding its own seats on it,
+// and those are given back to it when its room is counted: counted against
+// itself, a pair asked about a three-seat car would find one seat left.
+var demandFrom = waitingFromWith(`'open','asking'`, `'declined','expired'`, `CASE WHEN EXISTS (
+	SELECT 1 FROM asks own
+	 WHERE own.request_id = rr.id AND own.occurrence_id = trip.id
+	   AND own.status = 'pending' AND own.expires_at > $2) THEN rr.seats ELSE 0 END`)
 
 // DriveDemand counts the people a trip could pick up if it left at its
 // earliest departure: everybody still waiting on its road, held to DriveReady. It is
