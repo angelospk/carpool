@@ -38,12 +38,16 @@ export function Map({
   centre,
   pins = [],
   polyline: encoded,
+  lines = [],
+  zoom = 13,
   onPick,
   testID,
 }: {
   centre: MapPin;
   pins?: MapPin[];
   polyline?: string;
+  lines?: string[];
+  zoom?: number;
   onPick?: (pin: MapPin) => void;
   testID?: string;
 }) {
@@ -58,7 +62,10 @@ export function Map({
   if (!haveTiles()) return <MapFallback testID={testID} />;
 
   // @mapbox/polyline yields [lat, lon]; GeoJSON wants the other order.
-  const line = encoded ? polyline.decode(encoded, 6).map(([lat, lon]) => [lon, lat]) : [];
+  const drawn = [encoded, ...lines]
+    .filter((e): e is string => !!e)
+    .map((e) => polyline.decode(e, 6).map(([lat, lon]) => [lon, lat]))
+    .filter((l) => l.length > 1);
 
   return (
     <View testID={testID} style={styles.box}>
@@ -72,7 +79,7 @@ export function Map({
             : undefined
         }
       >
-        <Camera ref={camera} initialViewState={{ center: [centre.lon, centre.lat], zoom: 13 }} />
+        <Camera ref={camera} initialViewState={{ center: [centre.lon, centre.lat], zoom }} />
 
         {pins.map((p, i) => (
           <Marker key={`${p.lon},${p.lat},${i}`} lngLat={[p.lon, p.lat]}>
@@ -80,13 +87,13 @@ export function Map({
           </Marker>
         ))}
 
-        {line.length > 1 ? (
+        {drawn.length > 0 ? (
           <GeoJSONSource
             id="route"
             data={{
               type: 'Feature',
               properties: {},
-              geometry: { type: 'LineString', coordinates: line },
+              geometry: { type: 'MultiLineString', coordinates: drawn },
             }}
           >
             <Layer

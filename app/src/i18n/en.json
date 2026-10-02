@@ -626,5 +626,13 @@
     "shortcutTitle": "On an iPhone, with Shortcuts",
     "shortcutSteps": "Shortcuts → Automation → + → Driving Focus (or CarPlay) → When turning on → Run immediately → Open URL: carpool://driving",
     "none": "You have no trip near this time."
+  },
+  "onRoad": {
+    "title": "On the road now",
+    "none": "No car on the road right now.",
+    "seats_one": "{{count}} seat",
+    "seats_other": "{{count}} seats",
+    "more_one": "and {{count}} more",
+    "more_other": "and {{count}} more"
   }
 }

@@ -314,6 +314,8 @@ func NewRouter(deps Deps) http.Handler {
 			}
 
 			r.Get("/trips/upcoming", deps.handleUpcomingTrips)
+			// What is on the road now, anonymously. See store.LiveMap.
+			r.Get("/live/map", deps.handleLiveMap)
 			r.Get("/trips/past", deps.handlePastTrips)
 			r.Get("/invites/mine", deps.handleMyInvite)
 			if deps.Groups != nil {

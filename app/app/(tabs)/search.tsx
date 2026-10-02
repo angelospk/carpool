@@ -11,6 +11,7 @@ import { PlaceField } from '../../src/components/PlaceField';
 import { LuggagePicker } from '../../src/components/LuggagePicker';
 import { WhenPicker } from '../../src/components/WhenPicker';
 import { Estimate } from '../../src/components/Estimate';
+import { LiveMapCard } from '../../src/components/LiveMapCard';
 import { Supply } from '../../src/components/Supply';
 import { colors, space, type } from '../../src/design/tokens';
 import { pinsFromParams, type Pin } from '../../src/design/pin';
@@ -89,6 +90,9 @@ export default function SearchScreen() {
     <Screen topInset>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Title>{t('search.title')}</Title>
+        {/* Who is already on the road, before asking: a seat is likelier
+            on a road somebody is driving. */}
+        <LiveMapCard />
 
         <Card>
           <View style={styles.pins}>

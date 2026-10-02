@@ -15,6 +15,10 @@ export declare function Map(props: {
   pins?: MapPin[];
   /** An encoded polyline to draw as a line, for a trip's route. */
   polyline?: string;
+  /** More encoded polylines, drawn the same way: the cars on the road now. */
+  lines?: string[];
+  /** How far in to start. 13 is a town; 8 is the whole of Evros. */
+  zoom?: number;
   /** When given, tapping the map moves the pin and reports where. */
   onPick?: (pin: MapPin) => void;
   testID?: string;

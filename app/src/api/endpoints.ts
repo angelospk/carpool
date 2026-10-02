@@ -415,6 +415,9 @@ export const api = {
    * token would be protecting.
    */
   /** The settlement at a coordinate, for «Από εδώ». 404 when nothing is near. */
+  /** The cars on the road now, anonymously: names of the ends, a trimmed line, free seats. */
+  liveMap: () =>
+    request<{ trips: { from: string; to: string; seats_free: number; polyline: string }[] }>('/v1/live/map'),
   placeNear: (lon: number, lat: number) =>
     request<{ place: Place }>(`/v1/places/near?lon=${lon}&lat=${lat}`, { anonymous: true }),
   places: (q: string) =>

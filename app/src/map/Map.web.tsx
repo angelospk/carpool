@@ -23,12 +23,16 @@ export function Map({
   centre,
   pins = [],
   polyline: encoded,
+  lines = [],
+  zoom = 13,
   onPick,
   testID,
 }: {
   centre: MapPin;
   pins?: MapPin[];
   polyline?: string;
+  lines?: string[];
+  zoom?: number;
   onPick?: (pin: MapPin) => void;
   testID?: string;
 }) {
@@ -46,7 +50,7 @@ export function Map({
       container: host.current,
       style: rasterStyle(),
       center: [centre.lon, centre.lat],
-      zoom: 13,
+      zoom,
       attributionControl: { compact: false },
     });
     created.on('click', (e: MapMouseEvent) =>
@@ -74,13 +78,18 @@ export function Map({
     markers.current = pins.map((p) => new Marker().setLngLat([p.lon, p.lat]).addTo(m));
   }, [pins]);
 
+  // One key for every line, so the effect below runs when any of them change
+  // rather than whenever the array is rebuilt. Joined on a newline: an encoded
+  // polyline is ASCII 63-126, which includes '|', and never a newline.
+  const drawnKey = [encoded, ...lines].filter(Boolean).join('\n');
+
   useEffect(() => {
     const m = map.current;
     if (!m) return;
 
     // A route that has gone has to be taken off, layer before source — the
     // source cannot be removed while a layer still points at it.
-    if (!encoded) {
+    if (!drawnKey) {
       if (m.getLayer('route')) m.removeLayer('route');
       if (m.getSource('route')) m.removeSource('route');
       return;
@@ -88,11 +97,13 @@ export function Map({
 
     const draw = () => {
       // @mapbox/polyline yields [lat, lon]; GeoJSON wants the other order.
-      const line = polyline.decode(encoded, 6).map(([lat, lon]) => [lon, lat]);
+      const drawn = drawnKey
+        .split('\n')
+        .map((e) => polyline.decode(e, 6).map(([lat, lon]) => [lon, lat]));
       const data = {
         type: 'Feature' as const,
         properties: {},
-        geometry: { type: 'LineString' as const, coordinates: line },
+        geometry: { type: 'MultiLineString' as const, coordinates: drawn },
       };
 
       const existing = m.getSource('route');
@@ -115,7 +126,7 @@ export function Map({
     return () => {
       m.off('load', draw);
     };
-  }, [encoded]);
+  }, [drawnKey]);
 
   if (!haveTiles()) return <MapFallback testID={testID} />;
 
