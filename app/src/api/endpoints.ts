@@ -18,6 +18,8 @@ export type MyRoute = {
   depart_earliest: string;
   depart_latest: string;
   upcoming_trips: number;
+  /** How many of those retiring leaves standing: somebody has a seat or is being asked. */
+  kept_trips: number;
   /** How many times a person opened this route's link. */
   link_opens?: number;
   /** Told, as a departure comes up, that somebody on the road is waiting. */

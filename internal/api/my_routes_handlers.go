@@ -31,6 +31,9 @@ type myRoute struct {
 	// UpcomingTrips is what makes retiring an informed decision rather than a
 	// guess: it says how many materialised departures are still ahead.
 	UpcomingTrips int `json:"upcoming_trips"`
+	// KeptTrips is how many of those retiring would leave standing, because
+	// somebody has a seat on them or is being asked about one.
+	KeptTrips int `json:"kept_trips"`
 	// LinkOpens is how many times a person opened the route's link: whether
 	// sharing it reached anybody.
 	LinkOpens int `json:"link_opens"`
@@ -56,13 +59,21 @@ func (d Deps) handleMyRoutes(w http.ResponseWriter, r *http.Request) {
 		       to_char(rs.depart_earliest, 'HH24:MI'), to_char(rs.depart_latest, 'HH24:MI'),
 		       (SELECT count(*) FROM trip_occurrences o
 		         WHERE o.template_id = rt.id
-		           AND o.depart_earliest > now()
+		           AND o.depart_earliest > $2
 		           AND o.status <> 'cancelled'),
+		       (SELECT count(*) FROM trip_occurrences o
+		         WHERE o.template_id = rt.id
+		           AND o.depart_earliest > $2
+		           AND o.status <> 'cancelled'
+		           AND (EXISTS (SELECT 1 FROM bookings b
+		                         WHERE b.occurrence_id = o.id AND b.status = 'confirmed')
+		             OR EXISTS (SELECT 1 FROM asks a
+		                         WHERE a.occurrence_id = o.id AND a.status = 'pending'))),
 		       rt.share_opens, rt.nudge_when_leaving
 		  FROM route_templates rt
 		  JOIN route_schedules rs ON rs.template_id = rt.id
 		 WHERE rt.driver_id = $1 AND rt.active
-		 ORDER BY rs.depart_earliest, rt.created_at`, userID)
+		 ORDER BY rs.depart_earliest, rt.created_at`, userID, d.now())
 	if err != nil {
 		slog.Error("listing routes", "driver", userID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal", "could not read your routes")
@@ -78,7 +89,7 @@ func (d Deps) handleMyRoutes(w http.ResponseWriter, r *http.Request) {
 		var oneoff *string
 		if err := rows.Scan(&m.ID, &m.OriginLabel, &m.DestinationLabel, &m.RouteKm,
 			&m.Seats, &m.PricingMode, &m.Kind, &m.Weekdays, &oneoff,
-			&m.DepartEarliest, &m.DepartLatest, &m.UpcomingTrips, &m.LinkOpens, &m.NudgeWhenLeaving); err != nil {
+			&m.DepartEarliest, &m.DepartLatest, &m.UpcomingTrips, &m.KeptTrips, &m.LinkOpens, &m.NudgeWhenLeaving); err != nil {
 			slog.Error("reading a route", "driver", userID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal", "could not read your routes")
 			return
@@ -101,11 +112,12 @@ func (d Deps) handleMyRoutes(w http.ResponseWriter, r *http.Request) {
 // passenger who rode it last week can still open that trip. Deleting would take
 // their record with it.
 //
-// Departures already materialised are deliberately left alone. A driver who
-// wants to call off a specific morning cancels that trip; retiring the route
-// means "stop offering this from now on", and silently cancelling on somebody
-// who has a seat booked for tomorrow is a different act that should look
-// different.
+// The departures already materialised that nobody is in go with it: up to
+// three weeks of them, which a driver otherwise had to call off one morning at
+// a time, and which kept a retired route in everybody's search until then. A
+// departure somebody has a seat on, or is being asked about, stays. Calling
+// that off is a different act, which tells the passenger, and the driver takes
+// it on the trip itself.
 func (d Deps) handleRetireRoute(w http.ResponseWriter, r *http.Request) {
 	userID, ok := callerID(r.Context())
 	if !ok {
@@ -148,6 +160,22 @@ func (d Deps) handleRetireRoute(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "no such route")
 			return
 		}
+	}
+
+	// Also on a second retire, so a route retired before this existed can be
+	// cleared by retiring it again.
+	if _, err := d.Pool.Exec(r.Context(), `
+		UPDATE trip_occurrences o SET status = 'cancelled', updated_at = now()
+		 WHERE o.template_id = $1
+		   AND o.status = 'scheduled'
+		   AND o.depart_earliest > $2
+		   AND NOT EXISTS (SELECT 1 FROM bookings b
+		                    WHERE b.occurrence_id = o.id AND b.status = 'confirmed')
+		   AND NOT EXISTS (SELECT 1 FROM asks a
+		                    WHERE a.occurrence_id = o.id AND a.status = 'pending')`,
+		routeID, d.now()); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "the route was retired but its departures were not called off")
+		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)

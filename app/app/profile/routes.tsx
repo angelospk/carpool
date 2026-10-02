@@ -64,8 +64,10 @@ export default function MyRoutesScreen() {
 
   const confirmRetire = (route: MyRoute) => {
     const ask =
-      route.upcoming_trips > 0
-        ? t('profile.retireWithTrips', { count: route.upcoming_trips })
+      // Retiring calls off the empty departures with it; the ones somebody is
+      // in stay, and the driver is told how many.
+      route.kept_trips > 0
+        ? t('profile.retireWithTrips', { count: route.kept_trips })
         : t('profile.retireConfirm');
     confirm({
       title: t('profile.retire'),

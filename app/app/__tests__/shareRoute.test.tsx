@@ -26,6 +26,7 @@ const route = (over: Partial<Record<string, unknown>> = {}) => ({
   depart_earliest: '07:30',
   depart_latest: '08:00',
   upcoming_trips: 0,
+  kept_trips: 0,
   ...over,
 });
 
