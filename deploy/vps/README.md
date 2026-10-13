@@ -36,6 +36,23 @@ Cloudflare tunnel ──> Caddy 127.0.0.1:8180 ──> /get        APK in /opt/c
 | Tunnel | `/etc/cloudflared/config.yml`, ingress `carpool.haroldpoi.dev` → `http://127.0.0.1:8180` |
 | APK signing key | GitHub secrets, and `~/.config/carpool/release.keystore` on the mini PC. Lose it and installed apps can no longer be updated. |
 
+## Firewall
+
+The VM's public IP is in this repo (`pull-backup.sh`), so the origin must not
+serve anything Cloudflare does not front. Every site on the VM (carpool, vault,
+push, hub, dsn, symvouli) arrives through the cloudflared tunnel, which dials
+out; nothing listens publicly on 80/443, and Caddy binds to loopback.
+
+So no inbound web port is open at all, not even to Cloudflare's ranges (a
+tunnel never needs them, so there is no range list to refresh). Since
+2026-10-13 `/etc/iptables/rules.v4` (loaded at boot by `netfilter-persistent`)
+accepts only established traffic, ICMP, loopback and port 22; everything else
+gets `REJECT`. The previous file is `/etc/iptables/rules.v4.bak-20261013`.
+
+Check from outside: `curl -m 8 http://79.76.114.184/` must fail to connect.
+A new public site goes through the tunnel (`/etc/cloudflared/config.yml`), never
+through a new INPUT rule.
+
 ## Backups
 
 Nightly at 03:30 the mini PC pulls a `pg_dump` into `~/backups/carpool/` and
