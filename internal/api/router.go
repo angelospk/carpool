@@ -100,6 +100,10 @@ type Deps struct {
 	// Only an https address is ever shown.
 	InstallURL string
 
+	// WebDir holds the Expo web build, served under /app. Empty means there is
+	// none, and neither the landing page nor a route link offers it.
+	WebDir string
+
 	// DevMode relaxes things that must stay strict in a deployment: OTP codes
 	// go to the log instead of an SMS, and the browser is allowed to call this
 	// API cross-origin so the Expo web build can be used for testing.
@@ -137,6 +141,18 @@ func NewRouter(deps Deps) http.Handler {
 	// The few routes anybody can open without an account share one limit per
 	// address. See perIP for why it exists when the tokens cannot be guessed.
 	public := newPerIP(60, time.Minute, time.Now)
+
+	// The root of the hostname is a page for a person, like a route link.
+	r.Get("/", deps.handleLanding)
+	r.Head("/", deps.handleLanding)
+	if deps.WebDir != "" {
+		app := webApp(deps.WebDir)
+		toApp := http.RedirectHandler("/app/", http.StatusMovedPermanently).ServeHTTP
+		r.Get("/app", toApp)
+		r.Head("/app", toApp)
+		r.Get("/app/*", app)
+		r.Head("/app/*", app)
+	}
 	// Twenty messages a minute is a conversation typed fast. Each one is a push
 	// on somebody's phone, and nothing else stopped forty in two seconds.
 	chat := newPerIP(20, time.Minute, time.Now)

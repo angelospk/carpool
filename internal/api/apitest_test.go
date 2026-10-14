@@ -106,6 +106,7 @@ func newHarnessDeps(t *testing.T, devMode bool, matcher func(*asks.Service) *ask
 		DevMode:       devMode,
 		PublicBaseURL: "https://carpool.test/",
 		InstallURL:    "https://carpool.test/get",
+		WebDir:        t.TempDir(),
 		Ready:         pool.Ping,
 		Pool:          pool,
 		Clock:         c,

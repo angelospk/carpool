@@ -1,0 +1,9 @@
+# Nothing the image builds from lives in these, and some are large.
+.git
+bin
+osrm-data
+**/node_modules
+app/android
+app/.expo
+app/.env
+app/google-services.json

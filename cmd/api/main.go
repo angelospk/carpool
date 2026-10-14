@@ -222,6 +222,7 @@ func run() error {
 
 		PublicBaseURL: cfg.PublicBaseURL,
 		InstallURL:    cfg.InstallURL,
+		WebDir:        cfg.WebDir,
 		Account:       account.NewService(pool, clk),
 		Drivers:       drivers.NewService(pool, clk),
 		Moderation:    moderation.NewService(pool, clk),
