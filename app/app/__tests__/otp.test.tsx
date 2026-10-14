@@ -111,3 +111,29 @@ describe('getting out of the code screen', () => {
     expect(screen.queryByText('Σου στείλαμε νέο κωδικό.')).toBeNull();
   });
 });
+
+// A resend that lands after the code was checked would issue a new code over
+// the one just used. One request at a time.
+describe('one request at a time', () => {
+  it('cannot check the code while a new one is being asked for', async () => {
+    (api.requestOtp as jest.Mock).mockReturnValue(new Promise(() => {}));
+    render(<OtpScreen />);
+
+    fireEvent.press(screen.getByTestId('otp-resend'));
+    await waitFor(() => expect(api.requestOtp).toHaveBeenCalled());
+    fireEvent.press(screen.getByTestId('otp-submit'));
+    expect(api.verifyOtp).not.toHaveBeenCalled();
+  });
+
+  it('cannot resend or change number while the code is being checked', async () => {
+    (api.verifyOtp as jest.Mock).mockReturnValue(new Promise(() => {}));
+    render(<OtpScreen />);
+
+    fireEvent.press(screen.getByTestId('otp-submit'));
+    await waitFor(() => expect(api.verifyOtp).toHaveBeenCalled());
+    fireEvent.press(screen.getByTestId('otp-resend'));
+    fireEvent.press(screen.getByTestId('otp-change-number'));
+    expect(api.requestOtp).not.toHaveBeenCalled();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+});

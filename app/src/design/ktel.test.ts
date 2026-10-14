@@ -20,3 +20,10 @@ test('anywhere else keeps ΚΤΕΛ Έβρου, where the pilot started', () => {
   expect(ktelFor('Αλεξανδρούπολη')).toEqual({ name: 'Έβρου', url: 'https://ktelevrou.gr/' });
   expect(ktelFor('Φέρες').name).toBe('Έβρου');
 });
+
+// A label is typed by a person; one that happens to name an Object property
+// must still fall back, not return something that is not a ΚΤΕΛ.
+test('a label that names an object property still falls back', () => {
+  expect(ktelFor('constructor')).toEqual({ name: 'Έβρου', url: 'https://ktelevrou.gr/' });
+  expect(ktelFor('__proto__')).toEqual({ name: 'Έβρου', url: 'https://ktelevrou.gr/' });
+});

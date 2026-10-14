@@ -18,6 +18,9 @@ import { usePushReach } from './reach';
  */
 export function usePushRegistration(signedIn: boolean) {
   useEffect(() => {
+    // Off until this account, on this launch, has a token. Neither the last
+    // account on the phone nor the last launch counts.
+    usePushReach.getState().set(false);
     if (!signedIn) return;
     let cancelled = false;
 

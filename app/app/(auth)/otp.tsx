@@ -41,7 +41,10 @@ export default function OtpScreen() {
   const [resending, setResending] = useState(false);
   const [resent, setResent] = useState(false);
 
+  // One request at a time: a new code issued after this one was checked would
+  // replace the code the sign-up was just proved with.
   const resend = async () => {
+    if (busy || resending) return;
     setResending(true);
     setResent(false);
     setError(null);
@@ -57,6 +60,7 @@ export default function OtpScreen() {
   };
 
   const submit = async () => {
+    if (busy || resending) return;
     setBusy(true);
     setError(null);
     try {
@@ -117,6 +121,7 @@ export default function OtpScreen() {
         <Pressable
           testID="otp-change-number"
           accessibilityRole="button"
+          disabled={busy}
           onPress={() => router.replace('/(auth)/phone')}
         >
           <Text style={styles.link}>{t('auth.changeNumber')}</Text>
@@ -124,10 +129,10 @@ export default function OtpScreen() {
         <Pressable
           testID="otp-resend"
           accessibilityRole="button"
-          disabled={resending}
+          disabled={resending || busy}
           onPress={resend}
         >
-          <Text style={[styles.link, resending && styles.linkDisabled]}>{t('auth.resend')}</Text>
+          <Text style={[styles.link, (resending || busy) && styles.linkDisabled]}>{t('auth.resend')}</Text>
         </Pressable>
       </View>
 
@@ -145,7 +150,7 @@ export default function OtpScreen() {
         testID="otp-submit"
         label={t('common.next')}
         onPress={submit}
-        disabled={code.length !== 6 || busy}
+        disabled={code.length !== 6 || busy || resending}
       />
     </Screen>
   );

@@ -16,14 +16,15 @@ const fold = (s: string) =>
     .trim();
 
 // Greek and Latin spellings of the towns people start from.
-const TOWNS: Record<string, Ktel> = {};
+// A Map, not an object: a label like «constructor» must not find anything.
+const TOWNS = new Map<string, Ktel>();
 for (const town of ['Κομοτηνή', 'Komotini', 'Σάπες', 'Sapes', 'Ίασμος', 'Iasmos', 'Ξυλαγανή', 'Μαρώνεια', 'Αρριανά', 'Οργάνη']) {
-  TOWNS[fold(town)] = RODOPI;
+  TOWNS.set(fold(town), RODOPI);
 }
 for (const town of ['Ξάνθη', 'Xanthi', 'Άβδηρα', 'Avdira', 'Σταυρούπολη', 'Γενισέα', 'Εχίνος', 'Μύκη']) {
-  TOWNS[fold(town)] = XANTHI;
+  TOWNS.set(fold(town), XANTHI);
 }
 
 export function ktelFor(originLabel: string): Ktel {
-  return TOWNS[fold(originLabel)] ?? EVROS;
+  return TOWNS.get(fold(originLabel)) ?? EVROS;
 }
