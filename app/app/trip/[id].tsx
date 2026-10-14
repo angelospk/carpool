@@ -36,7 +36,7 @@ import { Map } from '../../src/map/Map';
 import polyline from '@mapbox/polyline';
 import { haveTiles } from '../../src/map/tiles';
 import { colors, radius, space, type } from '../../src/design/tokens';
-import { athensDay, athensTime } from '../../src/design/format';
+import { athensDay, athensTime, eur, km } from '../../src/design/format';
 
 export default function TripScreen() {
   const { t } = useTranslation();
@@ -229,30 +229,37 @@ export default function TripScreen() {
                 {/* The route's own shape, drawn from the geometry the server
                     routed — the pilot ships without map tiles. */}
                 <Card>
+                  {/* Laid out as the card on the home screen that opened it:
+                      when, then who and where, so the trip does not change
+                      shape between the list and its own page. */}
                   <View style={styles.hero}>
-                    <RouteGlyph
-                      points={decodeRoute(trip.data.route_polyline)}
-                      seed={`${trip.data.origin_label}${trip.data.destination_label}`}
-                      width={120}
-                      height={104}
-                      testID="route-glyph"
-                    />
-                    <View style={styles.heroSide}>
+                    <View style={styles.heroWhen}>
                       <Text style={styles.time}>{athensTime(trip.data.depart_earliest)}</Text>
                       <Text style={styles.date}>{athensDay(trip.data.depart_earliest)}</Text>
-                      <View style={styles.badges}>
-                        <Badge
-                          label={
-                            trip.data.role === 'driver' ? t('home.asDriver') : t('home.asPassenger')
-                          }
-                          tone={trip.data.role === 'driver' ? 'primary' : 'quiet'}
-                        />
-                        <TripStatus phase={phase} confirmed={!!trip.data.confirmed_by_me} />
-                      </View>
+                    </View>
+                    <View style={styles.badges}>
+                      <Badge
+                        label={
+                          trip.data.role === 'driver' ? t('home.asDriver') : t('home.asPassenger')
+                        }
+                        tone={trip.data.role === 'driver' ? 'primary' : 'quiet'}
+                      />
+                      <TripStatus phase={phase} confirmed={!!trip.data.confirmed_by_me} />
                     </View>
                   </View>
 
-                  <RouteSpine from={trip.data.origin_label} to={trip.data.destination_label} />
+                  <View style={styles.heroBody}>
+                    <View style={styles.heroRoute}>
+                      <RouteSpine from={trip.data.origin_label} to={trip.data.destination_label} />
+                    </View>
+                    <RouteGlyph
+                      points={decodeRoute(trip.data.route_polyline)}
+                      seed={`${trip.data.origin_label}${trip.data.destination_label}`}
+                      width={72}
+                      height={64}
+                      testID="route-glyph"
+                    />
+                  </View>
 
                   {trip.data.pickup_at ? (
                     <Text testID="pickup-at" style={styles.pickupAt}>
@@ -268,10 +275,10 @@ export default function TripScreen() {
                       total={trip.data.seats_free + trip.data.passengers.length}
                       testID="seat-pips"
                     />
-                    <Text style={styles.meta}>{trip.data.route_km.toFixed(1)} χλμ</Text>
+                    <Text style={styles.meta}>{km(trip.data.route_km)}</Text>
                     {trip.data.price_eur > 0 ? (
                       <Text style={styles.price}>
-                        {trip.data.price_eur.toFixed(2)} €{' '}
+                        {eur(trip.data.price_eur)}{' '}
                         <Text style={styles.meta}>{t('ask.suggested')}</Text>
                       </Text>
                     ) : null}
@@ -467,7 +474,7 @@ export default function TripScreen() {
                   <Button
                     testID="trip-cancel"
                     label={t('trip.cancel')}
-                    variant="danger"
+                    variant="quietDanger"
                     disabled={cancel.isPending}
                     onPress={() =>
                       askFirst({
@@ -489,7 +496,7 @@ export default function TripScreen() {
                   <Button
                     testID="trip-leave"
                     label={t('trip.leave')}
-                    variant="danger"
+                    variant="quietDanger"
                     disabled={leave.isPending}
                     onPress={() => {
                       const bookingId = trip.data.booking_id;
@@ -605,8 +612,10 @@ const styles = StyleSheet.create({
   chatList: { gap: space.sm, flexGrow: 1, justifyContent: 'flex-end' },
   head: { gap: space.md, paddingBottom: space.sm },
 
-  hero: { flexDirection: 'row', gap: space.lg, alignItems: 'center' },
-  heroSide: { flex: 1, gap: space.xs, alignItems: 'flex-start' },
+  hero: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: space.md },
+  heroWhen: { gap: 2 },
+  heroBody: { flexDirection: 'row', gap: space.lg, alignItems: 'center' },
+  heroRoute: { flex: 1 },
   time: { ...type.display, fontSize: 34, color: colors.ink },
   date: { ...type.caption, color: colors.muted },
 
@@ -627,7 +636,7 @@ const styles = StyleSheet.create({
 
   notice: { ...type.body, color: colors.danger },
   sendFailed: { ...type.caption, color: colors.danger, marginBottom: space.xs },
-  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
+  badges: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: space.xs, flexShrink: 1 },
   cardLabel: { ...type.label, color: colors.muted },
   chatLabel: { ...type.label, color: colors.muted, marginTop: space.sm },
 

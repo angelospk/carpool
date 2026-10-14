@@ -5,14 +5,15 @@ import { api } from '../../src/api/endpoints';
 import { useSession } from '../../src/state/session';
 
 const mockPush = jest.fn();
+const mockReplace = jest.fn();
 
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: mockPush, replace: jest.fn() }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace }),
   useLocalSearchParams: () => ({ phone: '+306900000103', devCode: '123456' }),
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
-  api: { verifyOtp: jest.fn() },
+  api: { verifyOtp: jest.fn(), requestOtp: jest.fn() },
 }));
 
 jest.mock('../../src/state/session', () => ({
@@ -73,5 +74,40 @@ describe('the code screen', () => {
     expect(await screen.findByTestId('otp-error')).toBeTruthy();
     expect(mockPush).not.toHaveBeenCalled();
     expect(mockSignIn).not.toHaveBeenCalled();
+  });
+});
+
+// A code that never arrives, or a number typed wrong, left nothing to press:
+// the screen had one button and it needed the code.
+describe('getting out of the code screen', () => {
+  it('says which number the code went to', () => {
+    render(<OtpScreen />);
+    expect(screen.getByText(/\+306900000103/)).toBeTruthy();
+  });
+
+  it('goes back to change the number', () => {
+    render(<OtpScreen />);
+    fireEvent.press(screen.getByTestId('otp-change-number'));
+    expect(mockReplace).toHaveBeenCalledWith('/(auth)/phone');
+  });
+
+  it('asks for a new code and says it did', async () => {
+    (api.requestOtp as jest.Mock).mockResolvedValue({ dev_code: '654321' });
+    render(<OtpScreen />);
+
+    fireEvent.press(screen.getByTestId('otp-resend'));
+
+    await waitFor(() => expect(api.requestOtp).toHaveBeenCalledWith('+306900000103'));
+    expect(await screen.findByText('Σου στείλαμε νέο κωδικό.')).toBeTruthy();
+  });
+
+  it('a refused resend says so rather than claiming a code went out', async () => {
+    (api.requestOtp as jest.Mock).mockRejectedValue(new Error('429'));
+    render(<OtpScreen />);
+
+    fireEvent.press(screen.getByTestId('otp-resend'));
+
+    await waitFor(() => expect(api.requestOtp).toHaveBeenCalled());
+    expect(screen.queryByText('Σου στείλαμε νέο κωδικό.')).toBeNull();
   });
 });

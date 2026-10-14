@@ -16,7 +16,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
 import { type PriceBreakdownData } from '../api/endpoints';
-import { euros } from '../design/format';
+import { decimal, euros } from '../design/format';
 import { colors, space, type } from '../design/tokens';
 
 export function PriceBreakdown({
@@ -67,9 +67,9 @@ export function PriceBreakdown({
     <View testID={testID} style={styles.box}>
       <Line
         label={t('price.fuelForTheTrip', {
-          litres: b.consumption_l_100km.toFixed(1),
-          price: b.fuel_price_eur.toFixed(3).replace('.', ','),
-          km: b.trip_km.toFixed(0),
+          litres: decimal(b.consumption_l_100km, 1),
+          price: decimal(b.fuel_price_eur, 3),
+          km: decimal(b.trip_km, 0),
         })}
         value={euros(b.fuel_cost_cents)}
         testID={testID ? `${testID}-fuel` : undefined}

@@ -60,6 +60,10 @@ export function WhenPicker({
       hour12: false,
     }).format(d);
 
+  // A band whose last minute has gone is not a ride anybody can take, and
+  // offering it produces a request the matcher will never fill.
+  const bands = BANDS.filter((b) => bandIsOpen(day, b, at) && !(b === 'now' && day === 'tomorrow'));
+
   return (
     <View testID={testID} style={styles.box}>
       <Text style={styles.label}>{t('search.when')}</Text>
@@ -77,16 +81,16 @@ export function WhenPicker({
       </View>
 
       <View style={styles.row}>
-        {BANDS.map((b) => {
-          // A band whose last minute has gone is not a ride anybody can take,
-          // and offering it produces a request the matcher will never fill.
-          if (!bandIsOpen(day, b, at)) return null;
-          if (b === 'now' && day === 'tomorrow') return null;
+        {bands.map((b) => {
           return (
             <Chip
               key={b}
               testID={testID ? `${testID}-band-${b}` : undefined}
               glyph={BAND_GLYPH[b]}
+              // Five do not fit one row at phone width («Μεσημέρι» ran into
+              // «Απόγευμα»), so they wrap into an even grid: three and two,
+              // or two and two.
+              minWidth={bands.length > 4 ? '30%' : bands.length === 4 ? '45%' : undefined}
               label={t(`when.${b}`)}
               selected={band === b}
               onPress={() => onChange({ day, band: b })}

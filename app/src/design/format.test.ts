@@ -1,4 +1,4 @@
-import { athensDay, athensTime, calendarDay, greetingKey, repeatUntil, startsNewDay } from './format';
+import { athensDay, athensTime, calendarDay, decimal, eur, greetingKey, km, repeatUntil, startsNewDay } from './format';
 
 // Every time in this app is an instant from the server rendered in Athens. A
 // device left on UTC must still show the departure the driver agreed to.
@@ -60,4 +60,24 @@ test('names a calendar date the way the trip cards do', () => {
   expect(label).toMatch(/2/);
   expect(label).not.toContain('2026-10-02');
   expect(calendarDay('not a date')).toBe('not a date');
+});
+
+describe('figures written the Greek way', () => {
+  // A decimal point reads as a thousands separator to somebody who writes
+  // «2,37 €», and the app was showing both shapes on neighbouring screens.
+  it('writes a contribution with a decimal comma', () => {
+    expect(eur(2.37)).toBe('2,37\u00a0€');
+    expect(eur(3.5)).toBe('3,50\u00a0€');
+  });
+
+  it('writes a distance to one decimal with a decimal comma', () => {
+    expect(km(57.94)).toBe('57,9\u00a0χλμ');
+    expect(km(2.13)).toBe('2,1\u00a0χλμ');
+  });
+
+  it('writes a plain decimal with as many places as asked', () => {
+    expect(decimal(6.25, 1)).toBe('6,3');
+    expect(decimal(1.8589, 3)).toBe('1,859');
+    expect(decimal(58, 0)).toBe('58');
+  });
 });

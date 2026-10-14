@@ -173,8 +173,7 @@ func TestTheDriverIsGivenWhatTheMapsHandOffNeeds(t *testing.T) {
 // Publishing a trip to leave on now: the answer names its departure, so the
 // app can open it, where «Φεύγω» is.
 func TestPublishingNamesTheFirstDeparture(t *testing.T) {
-	var h *harness
-	h = newRoutingHarness(t, func(d *api.Deps) {
+	h := newRoutingHarness(t, func(d *api.Deps) {
 		d.Materializer = jobs.NewMaterializer(d.Pool, d.Clock, testLocation())
 	})
 	token, _ := h.signUp("+306900000521", "Οδηγός")

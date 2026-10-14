@@ -14,6 +14,7 @@ import { Estimate } from '../../src/components/Estimate';
 import { LiveMapCard } from '../../src/components/LiveMapCard';
 import { Supply } from '../../src/components/Supply';
 import { colors, space, type } from '../../src/design/tokens';
+import { usePushReach } from '../../src/push/reach';
 import { pinsFromParams, type Pin } from '../../src/design/pin';
 import { athensDate, departureWindow, nextDate, type Band, type Day } from '../../src/design/when';
 
@@ -21,6 +22,7 @@ export default function SearchScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const on = usePushReach((s) => s.on);
   // The place itself rather than the text naming it: PlaceField only hands one
   // up once it refers to somewhere real, and takes it back the moment the text
   // is edited.
@@ -76,7 +78,7 @@ export default function SearchScreen() {
     onSuccess: (res) => {
       // No driver yet is a normal outcome, not an error: the request stays open
       // and the server asks someone when a route appears.
-      setOutcome(res.asking ? t('search.asking') : t('search.noDrivers'));
+      setOutcome(res.asking ? t('search.asking') : t(on ? 'search.noDrivers' : 'search.noDriversNoPush'));
       // It belongs on the home screen from this moment, not from whenever that
       // screen next happens to refetch.
       void queryClient.invalidateQueries({ queryKey: ['requests'] });
@@ -154,7 +156,7 @@ export default function SearchScreen() {
 
         {outcome ? <Hint>{outcome}</Hint> : null}
 
-        <Hint>{t('search.whatHappens')}</Hint>
+        <Hint>{t(on ? 'search.whatHappens' : 'search.whatHappensNoPush')}</Hint>
 
         <Button
           testID="search-submit"

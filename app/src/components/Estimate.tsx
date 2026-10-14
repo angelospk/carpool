@@ -16,7 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api, type PlanningEstimate } from '../api/endpoints';
 import { type Pin } from '../design/pin';
-import { euros } from '../design/format';
+import { decimal, euros } from '../design/format';
 import { colors, radius, space, type } from '../design/tokens';
 
 export function Estimate({
@@ -65,7 +65,7 @@ export function Estimate({
         </Text>
       ) : null}
       <Text style={styles.detail}>
-        {t('estimate.basis', { km: data.route_km.toFixed(0), seats: data.assumptions.divisor - 1 })}
+        {t('estimate.basis', { km: decimal(data.route_km, 0), seats: data.assumptions.divisor - 1 })}
       </Text>
       {/* The sentence that keeps this from being a price. */}
       <Text testID={testID ? `${testID}-caveat` : undefined} style={styles.detail}>

@@ -92,3 +92,22 @@ export function calendarDay(date: string): string {
   if (Number.isNaN(d.getTime())) return date;
   return d.toLocaleDateString(LOCALE, { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
 }
+
+/** A number with a fixed count of decimals, written the Greek way: 2,37. */
+export function decimal(n: number, digits: number): string {
+  return new Intl.NumberFormat(LOCALE, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+    useGrouping: false,
+  }).format(n);
+}
+
+/** A contribution in euros (not cents), e.g. «2,37 €». */
+export function eur(amount: number): string {
+  return euros(Math.round(amount * 100));
+}
+
+/** A distance to one decimal, e.g. «57,9 χλμ». */
+export function km(n: number): string {
+  return `${decimal(n, 1)}\u00a0χλμ`;
+}
