@@ -14,6 +14,7 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type DimensionValue,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -220,7 +221,7 @@ export function Button({
   label: string;
   onPress: () => void;
   disabled?: boolean;
-  variant?: 'primary' | 'secondary' | 'danger';
+  variant?: 'primary' | 'secondary' | 'danger' | 'quietDanger';
   testID?: string;
 }) {
   return (
@@ -232,13 +233,19 @@ export function Button({
       disabled={disabled}
       style={({ pressed }) => [
         styles.button,
-        variant === 'secondary' && styles.buttonSecondary,
+        (variant === 'secondary' || variant === 'quietDanger') && styles.buttonSecondary,
         variant === 'danger' && styles.buttonDanger,
         disabled && styles.buttonDisabled,
         pressed && styles.pressed,
       ]}
     >
-      <Text style={[styles.buttonLabel, variant === 'secondary' && styles.buttonLabelSecondary]}>
+      <Text
+        style={[
+          styles.buttonLabel,
+          variant === 'secondary' && styles.buttonLabelSecondary,
+          variant === 'quietDanger' && styles.buttonLabelQuietDanger,
+        ]}
+      >
         {label}
       </Text>
     </Pressable>
@@ -543,9 +550,13 @@ export function Chip({
   onPress,
   testID,
   fit,
+  minWidth,
   disabled,
 }: {
   label: string;
+  /** The least share of the row this chip takes, e.g. '30%' for three to a
+      row. The row then wraps into an even grid instead of a ragged one. */
+  minWidth?: DimensionValue;
   /** Sized to the label rather than an equal share of the row, for words too
       long to squeeze: the row then wraps instead of cutting them. */
   fit?: boolean;
@@ -571,6 +582,7 @@ export function Chip({
       style={[
         styles.chip,
         fit && styles.chipFit,
+        minWidth !== undefined && { minWidth, flexGrow: 1, flexBasis: 'auto' },
         selected && styles.chipSelected,
         disabled && styles.buttonDisabled,
       ]}
@@ -693,6 +705,7 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.35 },
   buttonLabel: { ...type.label, fontSize: 16, color: colors.primaryInk },
   buttonLabelSecondary: { color: colors.ink },
+  buttonLabelQuietDanger: { color: colors.danger },
 
   badge: {
     paddingHorizontal: space.md,

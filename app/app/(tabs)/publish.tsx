@@ -36,7 +36,7 @@ import { ShareRouteButton } from '../../src/components/ShareRouteButton';
 import { Demand } from '../../src/components/Demand';
 import type { ShareableRoute } from '../../src/design/shareRoute';
 import { athensDate, nextDate } from '../../src/design/when';
-import { athensTime } from '../../src/design/format';
+import { athensTime, km } from '../../src/design/format';
 import { calendarDay } from '../../src/design/format';
 
 // The three answers that cover almost every published route. They replace the
@@ -236,7 +236,7 @@ export default function PublishScreen() {
       setPublished(null);
     },
     onSuccess: (r, snap) => {
-      setOutcome(`${t('publish.published')} · ${r.route_km.toFixed(1)} km`);
+      setOutcome(`${t('publish.published')} · ${km(r.route_km)}`);
       setPublished({ ...snap, id: r.template_id });
       // The places go, so a second press cannot publish the same route again
       // and the next route starts from empty. Schedule, seats and car stay: a

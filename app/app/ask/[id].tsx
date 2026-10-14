@@ -18,10 +18,9 @@ import {
   Card,
   Screen,
   Spacer,
-  Title,
 } from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
-import { athensTime } from '../../src/design/format';
+import { athensTime, eur } from '../../src/design/format';
 import { mapsUrl, remainingStops, type LonLat } from '../../src/drive/maps';
 import { setDriveStops, visitedStops } from '../../src/drive/tracking';
 import { decodeRoute } from '../../src/components/RouteGlyph';
@@ -85,7 +84,11 @@ export default function AskScreen() {
     mutationFn: () => api.acceptAsk(id),
     onSuccess: (result) => {
       if (take === '1' && ask.data) return void handOff(ask.data.occurrence_id, result.booking_id);
-      answered();
+      // The trip it made, rather than the home list with no word about it.
+      if (!ask.data) return answered();
+      void queryClient.invalidateQueries({ queryKey: ['trips'] });
+      void queryClient.invalidateQueries({ queryKey: ['asks'] });
+      router.replace({ pathname: '/trip/[id]', params: { id: ask.data.occurrence_id } });
     },
     onError,
   });
@@ -130,8 +133,6 @@ export default function AskScreen() {
 
   return (
     <Screen>
-      <Title>{t('ask.title')}</Title>
-
       <AsyncState
         loading={ask.isLoading}
         error={gone ? null : ask.error}
@@ -157,7 +158,7 @@ export default function AskScreen() {
               </Text>
               {ask.data.price_eur > 0 ? (
                 <Text style={styles.price}>
-                  {ask.data.price_eur.toFixed(2)} €{' '}
+                  {eur(ask.data.price_eur)}{' '}
                   <Text style={styles.suggested}>{t('ask.suggested')}</Text>
                 </Text>
               ) : null}

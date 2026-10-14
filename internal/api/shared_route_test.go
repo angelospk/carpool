@@ -75,7 +75,9 @@ func TestALinkShowsTheRouteAndNothingAboutTheDriver(t *testing.T) {
 		t.Fatalf("page: %d %s", page.Code, page.Body.String())
 	}
 	html := page.Body.String()
-	for _, want := range []string{"Αλεξανδρούπολη → Φέρες", "Δευ Τρι Τετ", "carpool://r/" + link.Token, "https://carpool.test/get"} {
+	for _, want := range []string{"Αλεξανδρούπολη → Φέρες", "Δευ Τρι Τετ", "carpool://r/" + link.Token, "https://carpool.test/get",
+		// Somebody without the app, on an iPhone, continues in the browser.
+		`href="/app/r/` + link.Token + `"`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("page missing %q", want)
 		}

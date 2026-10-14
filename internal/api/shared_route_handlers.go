@@ -160,7 +160,8 @@ a.quiet{background:#e7e5df;color:#1d2521}
 <p>{{.Route.Seats}} θέσεις προσφέρονται{{if .Route.ForGroup}}, μόνο για τα μέλη μιας ομάδας{{end}}.</p>
 <p class="muted">Ο οδηγός μοιράζεται τα έξοδα, δεν πουλάει διαδρομή. Για να ζητήσεις θέση, άνοιξε την εφαρμογή.</p>
 <a class="button" href="{{.AppLink}}">Άνοιγμα στην εφαρμογή</a>
-{{if .InstallURL}}<a class="button quiet" href="{{.InstallURL}}">Κατέβασε την εφαρμογή</a>{{end}}
+{{if .WebLink}}<a class="button quiet" href="{{.WebLink}}">Συνέχισε στον browser</a>{{end}}
+{{if .InstallURL}}<a class="button quiet" href="{{.InstallURL}}">Κατέβασε την εφαρμογή για Android</a>{{end}}
 {{else}}
 <h1>{{.Gone}}</h1>
 {{end}}
@@ -194,6 +195,11 @@ func (d Deps) handleRoutePage(w http.ResponseWriter, r *http.Request) {
 		// unsafe URL. The token is base64url, so it cannot carry anything but
 		// itself.
 		data["AppLink"] = template.URL("carpool://r/" + token)
+		// The same route in the web build, for a phone without the app. Same
+		// origin, so a relative address.
+		if d.WebDir != "" {
+			data["WebLink"] = "/app/r/" + token
+		}
 		if r.Method == http.MethodGet && openedByAPerson(r.UserAgent()) {
 			// Best effort: a count that misses one open is better than a page
 			// that fails to show the route.

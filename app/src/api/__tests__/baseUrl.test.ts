@@ -37,6 +37,27 @@ describe('resolveBaseUrl on web', () => {
     ).toBe('https://carpool.example.gr:8080');
   });
 
+  // The production web build is served by the API itself, under /app, so the
+  // API is the page's own origin. A configured address without a port means
+  // exactly that, and the old fallback to :8080 sent every request to a port
+  // nothing listens on behind the tunnel.
+  it('uses the page origin when the configured URL names no port', () => {
+    expect(
+      resolveBaseUrl({
+        platform: 'web',
+        env: { EXPO_PUBLIC_API_URL: 'https://carpool.example.gr' },
+        location: { hostname: 'carpool.example.gr', protocol: 'https:', port: '' } as Location,
+      }),
+    ).toBe('https://carpool.example.gr');
+    expect(
+      resolveBaseUrl({
+        platform: 'web',
+        env: { EXPO_PUBLIC_API_URL: 'http://192.168.0.154' },
+        location: { hostname: '127.0.0.1', protocol: 'http:', port: '8187' } as Location,
+      }),
+    ).toBe('http://127.0.0.1:8187');
+  });
+
   it('obeys an explicit override, which is the only way to reach another host', () => {
     expect(
       resolveBaseUrl({

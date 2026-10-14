@@ -31,6 +31,7 @@ import {
   Title,
 } from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
+import { decimal } from '../../src/design/format';
 
 const FUELS = ['petrol', 'diesel', 'petrol_hybrid', 'diesel_hybrid'] as const;
 
@@ -239,7 +240,7 @@ function VehicleCard({
           car it came from — and because a figure at the ceiling should not
           quietly look like a measurement. */}
       <Text style={styles.detail}>
-        {t('garage.drinks', { litres: vehicle.consumption_l_100km.toFixed(1) })}
+        {t('garage.drinks', { litres: decimal(vehicle.consumption_l_100km, 1) })}
         {vehicle.consumption_source === 'band' ? ` · ${t('garage.sourceBand')}` : ''}
         {vehicle.consumption_capped ? ` · ${t('garage.capped')}` : ''}
       </Text>

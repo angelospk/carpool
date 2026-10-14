@@ -6,6 +6,7 @@ import Constants from 'expo-constants';
 
 import { api } from '../api/endpoints';
 import { register, type Platform as PushPlatform } from './register';
+import { usePushReach } from './reach';
 
 /**
  * usePushRegistration hands this device's push token to the server whenever
@@ -17,6 +18,9 @@ import { register, type Platform as PushPlatform } from './register';
  */
 export function usePushRegistration(signedIn: boolean) {
   useEffect(() => {
+    // Off until this account, on this launch, has a token. Neither the last
+    // account on the phone nor the last launch counts.
+    usePushReach.getState().set(false);
     if (!signedIn) return;
     let cancelled = false;
 
@@ -40,7 +44,9 @@ export function usePushRegistration(signedIn: boolean) {
       getToken: (projectId) => Notifications.getExpoPushTokenAsync({ projectId }),
       send: (token, platform) => api.registerPushToken(token, platform as PushPlatform),
     }).then((result) => {
-      if (cancelled || result.done) return;
+      if (cancelled) return;
+      usePushReach.getState().set(result.done);
+      if (result.done) return;
       // Logged rather than shown: somebody who opened the app to find a lift
       // does not need to be told that a notification token could not be
       // fetched, and the next launch tries again.

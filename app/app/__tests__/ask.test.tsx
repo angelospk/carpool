@@ -55,17 +55,29 @@ test('shows the detour the driver is being asked to make', async () => {
 
   const detour = String((await screen.findByTestId('ask-detour')).props.children);
   expect(detour).toContain('6');
-  expect(detour).toContain('2.1');
+  expect(detour).toContain('2,1');
 });
 
-test('accepting sends the accept and returns to the trip list', async () => {
+// Accepting used to drop the driver back on the home list with no word about
+// what had just happened. The trip they agreed to is the answer.
+test('accepting sends the accept and opens the trip it made', async () => {
   (api.acceptAsk as jest.Mock).mockResolvedValue({ booking_id: 'b1' });
 
   render(wrap(<AskScreen />));
   fireEvent.press(await screen.findByTestId('ask-accept'));
 
   await waitFor(() => expect(api.acceptAsk).toHaveBeenCalledWith('ask-1'));
-  await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(tabs)'));
+  await waitFor(() =>
+    expect(mockReplace).toHaveBeenCalledWith({ pathname: '/trip/[id]', params: { id: 'occ-1' } }),
+  );
+});
+
+// The stack header already names the screen; a second, larger copy of the
+// same words under it pushed the ask itself down the screen.
+test('names the screen once, in the header', async () => {
+  render(wrap(<AskScreen />));
+  await screen.findByTestId('ask-accept');
+  expect(screen.queryByText('Αίτημα επιβάτη')).toBeNull();
 });
 
 test('declining sends the decline', async () => {

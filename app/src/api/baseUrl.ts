@@ -15,13 +15,16 @@
 // So on web the API is assumed to sit on the same host as the page it came
 // from, which is true of every way this is served: one machine runs the API and
 // the static files. Only the port is taken from configuration, since that is a
-// deployment detail rather than a routing one. Set EXPO_PUBLIC_API_SAME_HOST to
-// "false" to point a web build at a genuinely different host.
+// deployment detail rather than a routing one. A configured URL with no port
+// means the API is the page's own origin — the production build is served by
+// the API under /app — so the page's port is kept instead. Set
+// EXPO_PUBLIC_API_SAME_HOST to "false" to point a web build at a genuinely
+// different host.
 
 type Input = {
   platform: string;
   env: Record<string, string | undefined>;
-  location?: Pick<Location, 'hostname' | 'protocol'>;
+  location?: Pick<Location, 'hostname' | 'protocol'> & { port?: string };
   extraApiUrl?: string;
 };
 
@@ -41,12 +44,10 @@ export function resolveBaseUrl({ platform, env, location, extraApiUrl }: Input):
   let port = '8080';
   try {
     const parsed = new URL(configured);
-    if (parsed.port) {
-      port = parsed.port;
-    }
+    port = parsed.port || location.port || '';
   } catch {
     // leave the default
   }
 
-  return `${location.protocol}//${location.hostname}:${port}`;
+  return `${location.protocol}//${location.hostname}${port ? `:${port}` : ''}`;
 }

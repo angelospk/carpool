@@ -15,8 +15,17 @@ module.exports = ({ config }) => {
   const googleServices =
     process.env.GOOGLE_SERVICES_JSON ?? path.join(__dirname, 'google-services.json');
 
+  // EXPO_WEB_BASE_URL serves the web build under a path rather than at the
+  // root: the API image ships it at /app, next to the landing page at /.
+  // Native builds ignore baseUrl.
+  const webBaseUrl = process.env.EXPO_WEB_BASE_URL;
+
   return {
     ...config,
+    experiments: {
+      ...config.experiments,
+      ...(webBaseUrl ? { baseUrl: webBaseUrl } : {}),
+    },
     extra: {
       ...config.extra,
       ...(projectId ? { eas: { ...config.extra?.eas, projectId } } : {}),

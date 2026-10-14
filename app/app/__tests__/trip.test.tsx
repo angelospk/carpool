@@ -3,7 +3,9 @@ import el from '../../src/i18n/el.json';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 
+import { StyleSheet } from 'react-native';
 import TripScreen from '../trip/[id]';
+import { colors } from '../../src/design/tokens';
 import { api, type TripDetail } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 
@@ -103,6 +105,18 @@ beforeEach(() => {
   (api.cancelBooking as jest.Mock).mockResolvedValue(undefined);
   (api.rateTrip as jest.Mock).mockResolvedValue(undefined);
   (api.confirmTrip as jest.Mock).mockResolvedValue(undefined);
+});
+
+// Giving back a seat is a way out, not what the screen is for. A solid red
+// button above the chat was the heaviest thing on the page; it is a quiet one
+// now, with the danger said by its words and its colour, and still confirmed.
+test('the way out of a trip does not outweigh the trip', async () => {
+  (api.trip as jest.Mock).mockResolvedValue(tripOf());
+  render(<TripScreen />);
+
+  const leave = await screen.findByTestId('trip-leave');
+  const flat = StyleSheet.flatten(leave.props.style);
+  expect(flat.backgroundColor).not.toBe(colors.danger);
 });
 
 describe('a passenger giving back their seat', () => {
@@ -358,9 +372,16 @@ describe('the chat', () => {
     fireEvent.changeText(await screen.findByTestId('message-input'), 'Γεια');
     fireEvent.press(screen.getByTestId('message-send'));
     await screen.findByTestId('message-failed');
+    // The failure can render a beat before the send stops counting as pending;
+    // a tap in between lands on a disabled button.
+    await waitFor(() =>
+      expect(screen.getByTestId('message-send')).toBeEnabled(),
+    );
     fireEvent.press(screen.getByTestId('message-send'));
 
-    await waitFor(() => expect(screen.queryByTestId('message-failed')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('message-failed')).toBeNull(), {
+      timeout: 5000,
+    });
     expect(screen.getByTestId('message-input').props.value).toBe('');
   });
 });

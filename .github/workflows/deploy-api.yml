@@ -13,6 +13,9 @@ on:
       - "go.mod"
       - "go.sum"
       - "Dockerfile"
+      - ".dockerignore"
+      # The image carries the Expo web build, served under /app.
+      - "app/**"
       - ".github/workflows/deploy-api.yml"
   workflow_dispatch:
 
@@ -52,6 +55,19 @@ jobs:
           go test -timeout 20m ./...
           go build ./...
 
+      # The image ships the web build, so the app's own gate runs here too.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Typecheck and test the app
+        working-directory: app
+        run: |
+          npm ci --legacy-peer-deps
+          npm run check
+
       - name: Build image
         run: docker build -t "carpool-api:${GITHUB_SHA}" .
 
@@ -68,4 +84,7 @@ jobs:
             ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes "deploy@${HOST}" "api ${GITHUB_SHA}"
 
       - name: Smoke test through the public hostname
-        run: curl -fsS -m 10 --retry 5 --retry-delay 3 --retry-all-errors https://carpool.haroldpoi.dev/v1/readyz
+        run: |
+          curl -fsS -m 10 --retry 5 --retry-delay 3 --retry-all-errors https://carpool.haroldpoi.dev/v1/readyz
+          curl -fsS -m 10 --retry 3 --retry-delay 3 -o /dev/null https://carpool.haroldpoi.dev/
+          curl -fsS -m 10 --retry 3 --retry-delay 3 https://carpool.haroldpoi.dev/app/ | grep -q 'id="root"'

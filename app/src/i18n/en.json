@@ -39,7 +39,11 @@
     "birthDatePlaceholder": "DD/MM/YYYY",
     "birthDateHint": "Needed to confirm you are an adult. It is never shown to anyone.",
     "underage": "This app is for adults. You have to be 18.",
-    "tagline": "Shared rides, shared costs."
+    "tagline": "Shared rides, shared costs.",
+    "otpSentTo": "Sent to {{phone}}.",
+    "changeNumber": "Different number",
+    "resend": "Send a new code",
+    "resent": "We sent you a new code."
   },
   "common": {
     "back": "Back",
@@ -56,10 +60,10 @@
   "contribution": {
     "label": "What about the fuel?",
     "share": {
-      "100": "The whole share",
-      "75": "Three quarters",
+      "25": "A quarter",
       "50": "Half",
-      "25": "A quarter"
+      "75": "Three quarters",
+      "100": "The whole share"
     },
     "hint": "You decide what you ask for. The app works out what the trip burns and will not let you ask for more than your share, because profit is not allowed.",
     "title": "Contribution",
@@ -122,7 +126,7 @@
     "againNone": "No next trip with a free seat",
     "requests": "What you are waiting on",
     "requestNobody": "No driver has been asked yet.",
-    "requestNoDrivers": "Nobody has published this road yet. Your request stays open and you will be told as soon as somebody does.",
+    "requestNoDrivers": "Nobody has published this road yet. Your request stays open. As soon as somebody does, we ask them, and you will see it here.",
     "requestAsking": "A driver is being asked right now.",
     "requestSearching": "Looking for the next driver.",
     "requestWaiting": "Waiting for an answer.",
@@ -132,7 +136,7 @@
     "suggestions": "Routes you take often",
     "suggestionHint": "Tap one to ask for a seat again.",
     "emptyTitle": "Where do you usually go?",
-    "emptyBody": "Shared journeys around Evros, with drivers already going that way. Early on, somebody may not turn up straight away.",
+    "emptyBody": "Shared journeys with people from your area who already go that way. Early on, somebody may not turn up straight away.",
     "emptyAskSeat": "I need a seat",
     "emptyOfferSeat": "I have a seat in my car",
     "seatsFree_one": "{{count}} seat free",
@@ -148,7 +152,10 @@
     "sideTitle": "At a glance",
     "statTrips": "trips ahead",
     "statKm": "kilometres",
-    "statSeats": "your free seats"
+    "statSeats": "your free seats",
+    "withDriver": "Driver: {{name}}",
+    "laterCount_one": "And {{count}} more departure in the weeks after",
+    "laterCount_other": "And {{count}} more departures in the weeks after"
   },
   "luggage": {
     "bulky": "A bicycle, skis, a pushchair",
@@ -336,9 +343,10 @@
     "noAlternatives": "No other car on your road for now. The request stays open.",
     "seatsFree_one": "{{count}} seat",
     "seatsFree_other": "{{count}} seats",
-    "busFallback": "KTEL Evros timetables",
+    "busFallback": "KTEL {{name}} timetables",
     "strandedNobody": "Your driver cancelled. Your request stays open and we will ask any driver who appears on your road.",
-    "alternativesFailed": "The other cars did not load."
+    "alternativesFailed": "The other cars did not load.",
+    "leaveOkNoPush": "The app does not send notifications yet. Open it again in a little while: this page updates itself as soon as a driver accepts."
   },
   "search": {
     "asking": "Asking a driver…",
@@ -351,7 +359,9 @@
     "to": "To",
     "when": "When",
     "whatHappens": "We ask drivers heading that way, one at a time, and tell you as soon as somebody says yes. Nothing is charged.",
-    "supply": "At least three drivers go this way that day"
+    "supply": "At least three drivers go this way that day",
+    "whatHappensNoPush": "We ask drivers heading that way, one at a time. The answer shows here and on the home screen, so check back in a little while. Nothing is charged.",
+    "noDriversNoPush": "No driver right now. The request stays open: check the home screen again later."
   },
   "share": {
     "button": "Share this route",
@@ -634,5 +644,11 @@
     "seats_other": "{{count}} seats",
     "more_one": "and {{count}} more",
     "more_other": "and {{count}} more"
+  },
+  "tabs": {
+    "home": "Home",
+    "search": "Find a seat",
+    "publish": "Publish",
+    "profile": "Profile"
   }
 }

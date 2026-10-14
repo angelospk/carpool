@@ -6,6 +6,8 @@ import RequestScreen from '../request/[id]';
 import { ApiError } from '../../src/api/client';
 import { api } from '../../src/api/endpoints';
 import { shareText } from '../../src/components/shareText';
+import { usePushReach } from '../../src/push/reach';
+import { Linking } from 'react-native';
 
 const mockReplace = jest.fn();
 
@@ -216,4 +218,53 @@ test('there is nothing to share for a request that is no longer open', async () 
 
   await screen.findByTestId('request-closed');
   expect(screen.queryByTestId('request-share')).toBeNull();
+});
+
+describe('what the screen promises about being told', () => {
+  afterEach(() => usePushReach.setState({ on: false }));
+
+  // Push is off on every build until the Expo and Firebase projects exist, and
+  // always off on the web. «Θα σου έρθει ειδοποίηση» then sends somebody away
+  // from the only place the answer will appear.
+  it('does not promise a notification this device cannot get', async () => {
+    (api.myRequests as jest.Mock).mockResolvedValue({ requests: [asking] });
+    render(wrap(<RequestScreen />));
+
+    const leave = await screen.findByTestId('request-leave');
+    expect(String(leave.props.children)).not.toContain('ειδοποίηση');
+    expect(String(leave.props.children)).toContain('ενημερώνεται');
+  });
+
+  it('says it may be closed once notifications reach this device', async () => {
+    usePushReach.setState({ on: true });
+    (api.myRequests as jest.Mock).mockResolvedValue({ requests: [asking] });
+    render(wrap(<RequestScreen />));
+
+    const leave = await screen.findByTestId('request-leave');
+    expect(String(leave.props.children)).toContain('Θα σου έρθει ειδοποίηση');
+  });
+});
+
+// The stack header already says «Το αίτημά σου».
+test('names the screen once, in the header', async () => {
+  (api.myRequests as jest.Mock).mockResolvedValue({ requests: [asking] });
+  render(wrap(<RequestScreen />));
+  await screen.findByTestId('request-leave');
+  expect(screen.queryByText('Το αίτημά σου')).toBeNull();
+});
+
+// The pilot runs along the whole Thracian corridor, and a passenger stranded in
+// Κομοτηνή has no use for the Έβρος timetable.
+test('the bus fallback is the ΚΤΕΛ of the town the trip starts from', async () => {
+  (api.myRequests as jest.Mock).mockResolvedValue({
+    requests: [{ ...asking, origin_label: 'Κομοτηνή', destination_label: 'Ξάνθη', stranded: true }],
+  });
+  (api.requestAlternatives as jest.Mock).mockResolvedValue({ alternatives: [] });
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+
+  render(wrap(<RequestScreen />));
+  const bus = await screen.findByTestId('request-bus');
+  expect(screen.getByText('Δρομολόγια ΚΤΕΛ Ροδόπης')).toBeTruthy();
+  fireEvent.press(bus);
+  expect(open).toHaveBeenCalledWith('https://ktelrodopis.gr/');
 });

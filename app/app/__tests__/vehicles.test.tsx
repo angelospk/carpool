@@ -65,7 +65,7 @@ test('the cars are listed with what they are priced as drinking', async () => {
   expect(screen.getByTestId('garage-car-v2')).toBeTruthy();
   // The number every contribution on this car comes from. Hiding it would mean
   // the driver cannot tell a measurement from a class floor.
-  expect(screen.getAllByText(/4\.6/).length).toBe(2);
+  expect(screen.getAllByText(/4,6/).length).toBe(2);
 });
 
 // Nowhere on this screen may somebody type what their car drinks. That is the

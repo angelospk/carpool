@@ -13,19 +13,21 @@ import {
   Hint,
   Screen,
   Spacer,
-  Title,
 } from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
 import { athensTime } from '../../src/design/format';
 import { JourneySummary } from '../../src/components/JourneySummary';
 import { shareText } from '../../src/components/shareText';
 import { shareRequestMessage } from '../../src/design/shareRequest';
+import { ktelFor } from '../../src/design/ktel';
+import { usePushReach } from '../../src/push/reach';
 
 export default function RequestScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const queryClient = useQueryClient();
+  const on = usePushReach((s) => s.on);
   const [outcome, setOutcome] = useState<string | null>(null);
   // A driver took it. Different from an ordinary failure: there is nothing left
   // to retry here, and there is now a trip to go and look at.
@@ -48,6 +50,7 @@ export default function RequestScreen() {
   // happening, and a list under it would read as a choice the passenger has to
   // make when the dispatcher is making it.
   const stranded = mine?.stranded === true;
+  const ktel = ktelFor(mine?.origin_label ?? '');
   const alternatives = useQuery({
     queryKey: ['requests', id, 'alternatives'],
     queryFn: () => api.requestAlternatives(id),
@@ -81,8 +84,6 @@ export default function RequestScreen() {
       {/* This is a receipt for something that has been asked, not a dispatch in
           progress. The journey reads first and the pulse is a small mark beside
           the status line, rather than a countdown filling the screen. */}
-      <Title>{t('request.title')}</Title>
-
       <Card>
         {loading ? (
           <Hint testID="request-loading">{t('common.loading')}</Hint>
@@ -159,14 +160,14 @@ export default function RequestScreen() {
           ) : alternatives.isSuccess ? (
             <Hint testID="request-no-alternatives">{t('request.noAlternatives')}</Hint>
           ) : null}
-          {/* The fallback that is always there. The pilot runs in Έβρος, so it
-              is that ΚΤΕΛ, named, rather than a link that pretends to know
-              about every bus in the country. */}
+          {/* The fallback that is always there. The pilot spans Thrace, so it
+              is the ΚΤΕΛ of the prefecture the trip starts from, named, rather
+              than a link that pretends to know about every bus in the country. */}
           <Button
             testID="request-bus"
-            label={t('request.busFallback')}
+            label={t('request.busFallback', { name: ktel.name })}
             variant="secondary"
-            onPress={() => void Linking.openURL(KTEL_URL).catch(() => setOutcome(t('common.error')))}
+            onPress={() => void Linking.openURL(ktel.url).catch(() => setOutcome(t('common.error')))}
           />
         </Card>
       ) : null}
@@ -192,7 +193,7 @@ export default function RequestScreen() {
 
       {/* Nobody should sit here watching. Saying so is the difference between a
           waiting room and a thing you can walk away from. */}
-      <Hint>{t('request.leaveOk')}</Hint>
+      <Hint testID="request-leave">{t(on ? 'request.leaveOk' : 'request.leaveOkNoPush')}</Hint>
 
       {outcome ? (
         <Text testID="request-outcome" style={styles.outcome}>
@@ -236,8 +237,6 @@ export default function RequestScreen() {
     </Screen>
   );
 }
-
-const KTEL_URL = 'https://ktelevrou.gr/';
 
 const styles = StyleSheet.create({
   strandedTitle: { ...type.body, color: colors.ink, fontWeight: '700' },

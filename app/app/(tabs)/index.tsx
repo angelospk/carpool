@@ -23,7 +23,8 @@ import {
 } from '../../src/components/ui';
 import { RouteGlyph, decodeRoute } from '../../src/components/RouteGlyph';
 import { colors, lift, radius, space, type } from '../../src/design/tokens';
-import { athensDay, athensTime, greetingKey, startsNewDay } from '../../src/design/format';
+import { athensDay, athensTime, eur, greetingKey, km, startsNewDay } from '../../src/design/format';
+import { thisWeek } from '../../src/design/upcoming';
 
 export default function HomeScreen() {
   const { t } = useTranslation();
@@ -59,7 +60,23 @@ export default function HomeScreen() {
   const requests = useOpenRequests();
 
   const all = trips.data?.trips ?? [];
-  const [next, ...rest] = all;
+  const [next, ...upcoming] = all;
+  // A recurring route is materialised weeks ahead; the list keeps the coming
+  // week and counts the rest.
+  const { shown: rest, later } = thisWeek(upcoming, new Date());
+
+  // Everything has to be both settled and empty. A request still loading
+  // is not an absence, and neither is one that failed to load.
+  const empty =
+    !all.length &&
+    !(past.data?.trips.length ?? 0) &&
+    !(requests.data?.requests.length ?? 0) &&
+    // Neither still asking nor having failed to ask. A query that broke
+    // knows nothing about whether there is anything there, and "δεν έχεις
+    // επόμενες διαδρομές" is a claim rather than a shrug.
+    !requests.isLoading &&
+    !requests.isError &&
+    !past.isError;
 
   const wide = useBreakpoint() === 'wide';
 
@@ -86,12 +103,19 @@ export default function HomeScreen() {
         </View>
       }
       ListFooterComponent={
-        wide ? null : (
-          <>
-            <PastTrips />
-            <Suggestions />
-          </>
-        )
+        <>
+          {later > 0 ? (
+            <Text testID="later-count" style={styles.day}>
+              {t('home.laterCount', { count: later })}
+            </Text>
+          ) : null}
+          {wide ? null : (
+            <>
+              <PastTrips />
+              <Suggestions />
+            </>
+          )}
+        </>
       }
       renderItem={({ item, index }) => (
         <>
@@ -111,6 +135,7 @@ export default function HomeScreen() {
         photoUrl={me?.photo_url}
         onAsk={() => router.push('/search')}
         onOffer={() => router.push('/publish')}
+        quick={!(empty && !trips.isLoading && !trips.error)}
       />
 
       {/* A question waiting on this driver comes before anything else here:
@@ -122,19 +147,7 @@ export default function HomeScreen() {
         loading={trips.isLoading}
         error={trips.error}
         onRetry={() => void trips.refetch()}
-        // Everything has to be both settled and empty. A request still loading
-        // is not an absence, and neither is one that failed to load.
-        empty={
-          !all.length &&
-          !(past.data?.trips.length ?? 0) &&
-          !(requests.data?.requests.length ?? 0) &&
-          // Neither still asking nor having failed to ask. A query that broke
-          // knows nothing about whether there is anything there, and "δεν έχεις
-          // επόμενες διαδρομές" is a claim rather than a shrug.
-          !requests.isLoading &&
-          !requests.isError &&
-          !past.isError
-        }
+        empty={empty}
         emptySlot={<FirstRun onAsk={() => router.push('/search')} onOffer={() => router.push('/publish')} />}
       >
         {wide ? (
@@ -170,11 +183,13 @@ function Hero({
   photoUrl,
   onAsk,
   onOffer,
+  quick,
 }: {
   name: string;
   photoUrl?: string | null;
   onAsk: () => void;
   onOffer: () => void;
+  quick: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -188,16 +203,18 @@ function Hero({
           </Text>
         </View>
       </View>
-      <View style={styles.quick}>
-        <QuickAction testID="quick-ask" glyph="⌕" label={t('home.quickAsk')} onPress={onAsk} />
-        <QuickAction
-          testID="quick-offer"
-          glyph="＋"
-          label={t('home.quickOffer')}
-          onPress={onOffer}
-          tone="accent"
-        />
-      </View>
+      {quick ? (
+        <View style={styles.quick}>
+          <QuickAction testID="quick-ask" glyph="⌕" label={t('home.quickAsk')} onPress={onAsk} />
+          <QuickAction
+            testID="quick-offer"
+            glyph="＋"
+            label={t('home.quickOffer')}
+            onPress={onOffer}
+            tone="accent"
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -310,17 +327,23 @@ function NextTrip({ trip, onPress }: { trip: TripSummary; onPress: () => void })
         {/* Said in words rather than in pips. The pips drew a total of
             `seats_free + 1`, which is not the car's capacity and never was —
             it made a five-seater with one seat left look like a two-seater. */}
-        <Text testID="seats-free" style={styles.meta}>
-          {trip.seats_free > 0
-            ? t('home.seatsFree', { count: trip.seats_free })
-            : t('home.seatsFull')}
-        </Text>
-        <Text style={styles.meta}>{trip.route_km.toFixed(1)} χλμ</Text>
+        {trip.role === 'driver' ? (
+          <Text testID="seats-free" style={styles.meta}>
+            {trip.seats_free > 0
+              ? t('home.seatsFree', { count: trip.seats_free })
+              : t('home.seatsFull')}
+          </Text>
+        ) : detail.data ? (
+          // A passenger's trip is somebody else's car: who is driving is what
+          // they check, not how many seats the driver has left.
+          <Text style={styles.meta}>{t('home.withDriver', { name: detail.data.driver.name })}</Text>
+        ) : null}
+        <Text style={styles.meta}>{km(trip.route_km)}</Text>
         {trip.price_eur > 0 ? (
           <View style={styles.priceBox}>
             {/* Bare euros beside a journey reads as a fare. It is not one. */}
             <Text style={styles.priceLabel}>{t('home.contribution')}</Text>
-            <Text style={styles.price}>{trip.price_eur.toFixed(2)} €</Text>
+            <Text style={styles.price}>{eur(trip.price_eur)}</Text>
           </View>
         ) : null}
       </View>
@@ -372,8 +395,8 @@ function TripCard({ trip, onPress }: { trip: TripSummary; onPress: () => void })
             {trip.origin_label} → {trip.destination_label}
           </Text>
           <Text style={styles.meta}>
-            {trip.route_km.toFixed(1)} χλμ
-            {trip.price_eur > 0 ? ` · ${trip.price_eur.toFixed(2)} €` : ''}
+            {km(trip.route_km)}
+            {trip.price_eur > 0 ? ` · ${eur(trip.price_eur)}` : ''}
           </Text>
         </View>
         <Badge

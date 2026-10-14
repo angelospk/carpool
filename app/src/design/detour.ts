@@ -1,5 +1,7 @@
 import type { TFunction } from 'i18next';
 
+import { decimal } from './format';
+
 /**
  * The detour a driver is asked to make, in words.
  *
@@ -9,5 +11,5 @@ import type { TFunction } from 'i18next';
 export function detourText(minutes: number, km: number, t: TFunction): string {
   const m = Math.round(minutes);
   if (m === 0 && km < 0.05) return t('ask.noDetour');
-  return t('ask.detour', { minutes: m, km: km.toFixed(1) });
+  return t('ask.detour', { minutes: m, km: decimal(km, 1) });
 }

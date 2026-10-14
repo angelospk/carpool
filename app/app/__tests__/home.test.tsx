@@ -73,13 +73,13 @@ beforeEach(() => {
 // The morning question is "when do I leave", so the departure has to be on the
 // card in Athens time — not the device's, and not after a tap.
 test('shows the next departure in Athens time, with its route glyph', async () => {
-  (api.upcomingTrips as jest.Mock).mockResolvedValue({ trips: [trip()] });
+  (api.upcomingTrips as jest.Mock).mockResolvedValue({ trips: [trip({ role: 'driver' })] });
 
   render(wrap(<HomeScreen />));
 
   expect(await screen.findByText('07:30')).toBeTruthy();
   expect(screen.getByTestId('route-glyph')).toBeTruthy();
-  // In words, not in pips. The pips drew a total of `seats_free + 1`, so a
+  // A driver's seats, in words, not in pips. The pips drew a total of `seats_free + 1`, so a
   // five-seater with two seats left rendered as a three-seater.
   expect(screen.getByTestId('seats-free')).toHaveTextContent(/2/);
 });
@@ -130,6 +130,80 @@ test('gives the hero card to the next trip only', async () => {
   expect(screen.getByTestId('trip-t2')).toBeTruthy();
 });
 
+
+// A passenger's next trip is somebody else's car. Who is driving is the thing
+// they check; how many seats the driver still has free is the driver's business.
+test('a passenger next trip names the driver instead of the free seats', async () => {
+  (api.upcomingTrips as jest.Mock).mockResolvedValue({ trips: [trip()] });
+  (api.trip as jest.Mock).mockResolvedValue({
+    ...trip(),
+    route_polyline: '_p~iF~ps|U_ulLnnqC',
+    driver: { id: 'd1', name: 'Μαρία', photo_url: null, rating: null },
+    passengers: [],
+  });
+
+  render(wrap(<HomeScreen />));
+
+  expect(await screen.findByText('Οδηγός: Μαρία')).toBeTruthy();
+  expect(screen.queryByTestId('seats-free')).toBeNull();
+});
+
+test('a driver next trip still says how many seats are free', async () => {
+  (api.upcomingTrips as jest.Mock).mockResolvedValue({ trips: [trip({ role: 'driver' })] });
+
+  render(wrap(<HomeScreen />));
+
+  expect(await screen.findByTestId('seats-free')).toBeTruthy();
+});
+
+// «2.37 €» beside «1,00 €» on the next screen: one shape, the Greek one.
+test('writes the contribution and the distance with a decimal comma', async () => {
+  (api.upcomingTrips as jest.Mock).mockResolvedValue({ trips: [trip({ price_eur: 2.37 })] });
+
+  render(wrap(<HomeScreen />));
+
+  expect(await screen.findByText('2,37\u00a0€')).toBeTruthy();
+  expect(screen.getByText('57,8\u00a0χλμ')).toBeTruthy();
+});
+
+// The first-run card offers both sides of the deal in full; the two pills in
+// the header said the same thing a second time, and the tab bar a third.
+test('an empty account is offered each action once, not twice', async () => {
+  (api.upcomingTrips as jest.Mock).mockResolvedValue({ trips: [] });
+  (api.pastTrips as jest.Mock).mockResolvedValue({ trips: [] });
+
+  render(wrap(<HomeScreen />));
+
+  expect(await screen.findByTestId('empty-ask')).toBeTruthy();
+  expect(screen.queryByTestId('quick-ask')).toBeNull();
+  expect(screen.queryByTestId('quick-offer')).toBeNull();
+});
+
+test('somebody with trips keeps the quick actions', async () => {
+  (api.upcomingTrips as jest.Mock).mockResolvedValue({ trips: [trip()] });
+
+  render(wrap(<HomeScreen />));
+
+  expect(await screen.findByTestId('quick-ask')).toBeTruthy();
+});
+
+test('departures past the coming week are counted, not listed', async () => {
+  const inDays = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString();
+  (api.upcomingTrips as jest.Mock).mockResolvedValue({
+    trips: [
+      trip({ id: 'n', role: 'driver', depart_earliest: inDays(1) }),
+      trip({ id: 'soon', role: 'driver', depart_earliest: inDays(2) }),
+      trip({ id: 'far1', role: 'driver', depart_earliest: inDays(10) }),
+      trip({ id: 'far2', role: 'driver', depart_earliest: inDays(12) }),
+    ],
+  });
+
+  render(wrap(<HomeScreen />));
+
+  expect(await screen.findByTestId('trip-soon')).toBeTruthy();
+  expect(screen.queryByTestId('trip-far1')).toBeNull();
+  expect(String(screen.getByTestId('later-count').props.children)).toContain('2');
+});
 
 // The tab navigator mounts before the session is settled. Asking the server for
 // this user's trips before there is a user gets two 401s on every cold start —

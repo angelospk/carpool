@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 
@@ -38,8 +38,29 @@ export default function OtpScreen() {
   const [code, setCode] = useState(devCode ?? '');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resent, setResent] = useState(false);
+
+  // One request at a time: a new code issued after this one was checked would
+  // replace the code the sign-up was just proved with.
+  const resend = async () => {
+    if (busy || resending) return;
+    setResending(true);
+    setResent(false);
+    setError(null);
+    try {
+      const res = await api.requestOtp(phone);
+      if (res && typeof res === 'object' && res.dev_code) setCode(res.dev_code);
+      setResent(true);
+    } catch {
+      setError(t('common.error'));
+    } finally {
+      setResending(false);
+    }
+  };
 
   const submit = async () => {
+    if (busy || resending) return;
     setBusy(true);
     setError(null);
     try {
@@ -78,6 +99,7 @@ export default function OtpScreen() {
       <View style={styles.top}>
         <Title>{t('auth.otpTitle')}</Title>
         <Hint>{t('auth.otpHint')}</Hint>
+        <Hint>{t('auth.otpSentTo', { phone })}</Hint>
       </View>
 
       <Card>
@@ -95,6 +117,27 @@ export default function OtpScreen() {
         />
       </Card>
 
+      <View style={styles.actions}>
+        <Pressable
+          testID="otp-change-number"
+          accessibilityRole="button"
+          disabled={busy}
+          onPress={() => router.replace('/(auth)/phone')}
+        >
+          <Text style={styles.link}>{t('auth.changeNumber')}</Text>
+        </Pressable>
+        <Pressable
+          testID="otp-resend"
+          accessibilityRole="button"
+          disabled={resending || busy}
+          onPress={resend}
+        >
+          <Text style={[styles.link, (resending || busy) && styles.linkDisabled]}>{t('auth.resend')}</Text>
+        </Pressable>
+      </View>
+
+      {resent ? <Hint>{t('auth.resent')}</Hint> : null}
+
       {error ? (
         <Text testID="otp-error" style={styles.error}>
           {error}
@@ -107,7 +150,7 @@ export default function OtpScreen() {
         testID="otp-submit"
         label={t('common.next')}
         onPress={submit}
-        disabled={code.length !== 6 || busy}
+        disabled={code.length !== 6 || busy || resending}
       />
     </Screen>
   );
@@ -115,6 +158,9 @@ export default function OtpScreen() {
 
 const styles = StyleSheet.create({
   top: { gap: space.sm },
+  actions: { flexDirection: 'row', justifyContent: 'space-between', gap: space.md },
+  link: { ...type.label, color: colors.primary },
+  linkDisabled: { opacity: 0.5 },
   error: { ...type.body, color: colors.danger },
   input: {
     ...type.display,

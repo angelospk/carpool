@@ -62,6 +62,10 @@ type Config struct {
 	PublicBaseURL string
 	InstallURL    string
 
+	// WebDir is where the Expo web build lies, served under /app. The image
+	// sets it; empty serves no web app.
+	WebDir string
+
 	// DevMode enables developer conveniences that must never be reachable in
 	// production — most importantly printing the OTP to the console instead of
 	// sending an SMS. It defaults to false so production is the safe default.
@@ -90,6 +94,7 @@ func Load(lookup LookupFunc) (Config, error) {
 
 		PublicBaseURL: optional(lookup, "PUBLIC_BASE_URL", ""),
 		InstallURL:    optional(lookup, "INSTALL_URL", ""),
+		WebDir:        optional(lookup, "WEB_DIR", ""),
 
 		RegionFixture:   optional(lookup, "REGION_FIXTURE", ""),
 		FuelPriceSource: optional(lookup, "FUEL_PRICE_SOURCE", "configured at deploy"),

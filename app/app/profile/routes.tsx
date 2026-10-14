@@ -28,7 +28,7 @@ import {
 import { ShareRouteButton } from '../../src/components/ShareRouteButton';
 import { confirm } from '../../src/components/confirm';
 import { colors, space, type } from '../../src/design/tokens';
-import { calendarDay } from '../../src/design/format';
+import { calendarDay, km } from '../../src/design/format';
 
 export default function MyRoutesScreen() {
   const { t } = useTranslation();
@@ -153,7 +153,7 @@ export default function MyRoutesScreen() {
             </View>
 
             <Text style={styles.meta}>
-              {r.route_km.toFixed(1)} χλμ · {t('publish.seatsN', { count: r.seats })}
+              {km(r.route_km)} · {t('publish.seatsN', { count: r.seats })}
             </Text>
 
             <View style={styles.badges}>

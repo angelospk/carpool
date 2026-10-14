@@ -1,5 +1,6 @@
 import i18n from '../../i18n';
 import el from '../../i18n/el.json';
+import en from '../../i18n/en.json';
 
 import { requestProgress } from '../OpenRequests';
 import type { OpenRequest } from '../../api/endpoints';
@@ -46,7 +47,14 @@ test('nobody driving the road is its own answer, not the asking one', () => {
 // abandoned, and it is why there is no "notify me" button to press — it is
 // already what happens.
 test('the no-drivers sentence says the request stays open', () => {
-  expect(el.home.requestNoDrivers).toMatch(/ανοιχτ|μόλις|ειδοποι/i);
+  expect(el.home.requestNoDrivers).toMatch(/ανοιχτ|μόλις/i);
+});
+
+// It shows wherever push is off (every web build, every build today), so it
+// must not promise a notification it cannot send.
+test('the no-drivers sentence promises no notification', () => {
+  expect(el.home.requestNoDrivers).not.toMatch(/ειδοποι/i);
+  expect(en.home.requestNoDrivers).not.toMatch(/notif|told/i);
 });
 
 // Somebody does drive it, and nobody has been asked yet. That is a different
