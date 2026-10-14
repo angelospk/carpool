@@ -126,7 +126,7 @@
     "againNone": "No next trip with a free seat",
     "requests": "What you are waiting on",
     "requestNobody": "No driver has been asked yet.",
-    "requestNoDrivers": "Nobody has published this road yet. Your request stays open and you will be told as soon as somebody does.",
+    "requestNoDrivers": "Nobody has published this road yet. Your request stays open. As soon as somebody does, we ask them, and you will see it here.",
     "requestAsking": "A driver is being asked right now.",
     "requestSearching": "Looking for the next driver.",
     "requestWaiting": "Waiting for an answer.",

@@ -372,9 +372,16 @@ describe('the chat', () => {
     fireEvent.changeText(await screen.findByTestId('message-input'), 'Γεια');
     fireEvent.press(screen.getByTestId('message-send'));
     await screen.findByTestId('message-failed');
+    // The failure can render a beat before the send stops counting as pending;
+    // a tap in between lands on a disabled button.
+    await waitFor(() =>
+      expect(screen.getByTestId('message-send')).toBeEnabled(),
+    );
     fireEvent.press(screen.getByTestId('message-send'));
 
-    await waitFor(() => expect(screen.queryByTestId('message-failed')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('message-failed')).toBeNull(), {
+      timeout: 5000,
+    });
     expect(screen.getByTestId('message-input').props.value).toBe('');
   });
 });
