@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react-native';
+import { render, screen, waitFor } from '@testing-library/react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
@@ -36,10 +36,19 @@ test('draws every car on the road and says where each goes', async () => {
   expect(screen.getByText(/Φέρες → Ορεστιάδα/)).toBeTruthy();
 });
 
-test('says so when nobody is on the road, without a map', async () => {
+// An empty card at the top of the search screen only pushed the form down:
+// with nobody on the road there is nothing to decide by, so it is not drawn.
+test('draws nothing when nobody is on the road', async () => {
   (api.liveMap as jest.Mock).mockResolvedValue({ trips: [] });
-  render(wrap(<LiveMapCard />));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <LiveMapCard />
+    </QueryClientProvider>,
+  );
 
-  expect(await screen.findByTestId('live-map-none')).toBeTruthy();
+  // Answered, so a card would be on screen by now if one were coming.
+  await waitFor(() => expect(client.getQueryState(['live-map'])?.status).toBe('success'));
+  expect(screen.queryByTestId('live-map')).toBeNull();
   expect(screen.queryByTestId('live-map-map')).toBeNull();
 });

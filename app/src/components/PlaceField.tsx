@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next';
 import { api, type Place } from '../api/endpoints';
 import { Field } from './ui';
 import { Icon } from './Icon';
+import { areaLabel } from '../design/area';
 import { parsePin, type Pin } from '../design/pin';
 import { colors, radius, space, type as typography } from '../design/tokens';
 
@@ -246,7 +247,7 @@ export function PlaceField({
                   what tells otherwise identical rows apart, and the kind is
                   what says which of them is a city and which is five houses. */}
               <Text style={styles.kind}>
-                {place.area ? `${place.area} · ` : ''}
+                {place.area ? `${areaLabel(place.area)} · ` : ''}
                 {t(`places.${place.kind}`)}
               </Text>
             </Pressable>
@@ -283,10 +284,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.control,
     overflow: 'hidden',
   },
+  // Name over area: side by side, a long name and a long area ran into each
+  // other on a phone.
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 2,
     paddingVertical: space.sm,
     paddingHorizontal: space.md,
     borderBottomWidth: StyleSheet.hairlineWidth,

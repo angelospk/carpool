@@ -137,3 +137,18 @@ func webApp(dir string) http.HandlerFunc {
 		http.ServeFile(w, r, filepath.Join(root, "index.html"))
 	}
 }
+
+// favicon serves the web build's icon at the root of the hostname. A day of
+// cache: the name never changes, so a new icon has to be able to arrive.
+func favicon(dir string) http.HandlerFunc {
+	name := filepath.Join(filepath.Clean(dir), "favicon.ico")
+	return func(w http.ResponseWriter, r *http.Request) {
+		if info, err := os.Stat(name); err != nil || info.IsDir() {
+			writeError(w, http.StatusNotFound, "not_found", "the requested resource does not exist")
+			return
+		}
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		http.ServeFile(w, r, name)
+	}
+}

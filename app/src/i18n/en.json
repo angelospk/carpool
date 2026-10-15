@@ -79,7 +79,8 @@
     "people_other": "{{count}} people are looking for {{from}} → {{to}}"
   },
   "estimate": {
-    "about": "Estimated share of the fuel: about {{amount}}",
+    "about": "About {{amount}} for the fuel, not an offer from a driver.",
+    "how": "How is this worked out?",
     "basis": "For {{km}} km, with a typical car and {{seats}} seats offered.",
     "notAnOffer": "This is not an offer of a trip. No driver has been found or agreed. The real contribution appears with the specific car and may differ.",
     "upTo": "With a thirstier car, up to {{amount}}."
@@ -425,6 +426,7 @@
     "blocked": "User blocked",
     "report": "Report",
     "reported": "Report sent",
+    "someone": "User",
     "title": "Profile",
     "reportWhat": "What happened?",
     "reportDetail": "Tell us a little more (optional)",
@@ -639,7 +641,6 @@
   },
   "onRoad": {
     "title": "On the road now",
-    "none": "No car on the road right now.",
     "seats_one": "{{count}} seat",
     "seats_other": "{{count}} seats",
     "more_one": "and {{count}} more",

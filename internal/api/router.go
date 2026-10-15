@@ -152,6 +152,10 @@ func NewRouter(deps Deps) http.Handler {
 		r.Head("/app", toApp)
 		r.Get("/app/*", app)
 		r.Head("/app/*", app)
+		// Browsers ask the root for it on every page, the landing included.
+		icon := favicon(deps.WebDir)
+		r.Get("/favicon.ico", icon)
+		r.Head("/favicon.ico", icon)
 	}
 	// Twenty messages a minute is a conversation typed fast. Each one is a push
 	// on somebody's phone, and nothing else stopped forty in two seconds.

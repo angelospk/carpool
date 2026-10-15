@@ -10,11 +10,13 @@
 // arrives with a specific car. A screen that showed a confident number here
 // would be describing a price for a service that nobody has offered.
 
-import { StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 
 import { api, type PlanningEstimate } from '../api/endpoints';
+import { Icon } from './Icon';
 import { type Pin } from '../design/pin';
 import { decimal, euros } from '../design/format';
 import { colors, radius, space, type } from '../design/tokens';
@@ -29,6 +31,7 @@ export function Estimate({
   testID?: string;
 }) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
 
   const { data, isError } = useQuery<PlanningEstimate>({
     // Keyed on the coordinates, so moving either pin asks again and a stale
@@ -52,25 +55,41 @@ export function Estimate({
 
   return (
     <View testID={testID} style={styles.box}>
+      {/* One sentence, and it says it is not an offer: that half is what keeps
+          this from being a price, so it is never folded away. */}
       <Text testID={testID ? `${testID}-headline` : undefined} style={styles.headline}>
         {t('estimate.about', { amount: euros(data.contribution_cents) })}
       </Text>
-      {/* The upper bound, and only the upper bound. Nobody is upset by paying
-          less than they expected; somebody quoted 12 € and asked for 25 € has
-          been misled. A matching lower figure would make the pair five times
-          wide, which reads as "nobody knows" and gets ignored. */}
-      {data.ceiling_cents > data.contribution_cents ? (
-        <Text testID={testID ? `${testID}-ceiling` : undefined} style={styles.detail}>
-          {t('estimate.upTo', { amount: euros(data.ceiling_cents) })}
-        </Text>
+      <Pressable
+        testID={testID ? `${testID}-how` : undefined}
+        accessibilityRole="button"
+        aria-expanded={open}
+        onPress={() => setOpen((o) => !o)}
+        hitSlop={8}
+        style={styles.how}
+      >
+        <Text style={styles.howText}>{t('estimate.how')}</Text>
+        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} color={colors.ink} />
+      </Pressable>
+      {open ? (
+        <>
+          {/* The upper bound, and only the upper bound. Nobody is upset by paying
+              less than they expected; somebody quoted 12 € and asked for 25 € has
+              been misled. A matching lower figure would make the pair five times
+              wide, which reads as "nobody knows" and gets ignored. */}
+          {data.ceiling_cents > data.contribution_cents ? (
+            <Text testID={testID ? `${testID}-ceiling` : undefined} style={styles.detail}>
+              {t('estimate.upTo', { amount: euros(data.ceiling_cents) })}
+            </Text>
+          ) : null}
+          <Text style={styles.detail}>
+            {t('estimate.basis', { km: decimal(data.route_km, 0), seats: data.assumptions.divisor - 1 })}
+          </Text>
+          <Text testID={testID ? `${testID}-caveat` : undefined} style={styles.detail}>
+            {t('estimate.notAnOffer')}
+          </Text>
+        </>
       ) : null}
-      <Text style={styles.detail}>
-        {t('estimate.basis', { km: decimal(data.route_km, 0), seats: data.assumptions.divisor - 1 })}
-      </Text>
-      {/* The sentence that keeps this from being a price. */}
-      <Text testID={testID ? `${testID}-caveat` : undefined} style={styles.detail}>
-        {t('estimate.notAnOffer')}
-      </Text>
     </View>
   );
 }
@@ -83,5 +102,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.control,
   },
   headline: { ...type.label, color: colors.ink },
+  how: { flexDirection: 'row', alignItems: 'center', gap: space.xs, alignSelf: 'flex-start' },
+  howText: { ...type.caption, color: colors.ink, textDecorationLine: 'underline' },
   detail: { ...type.caption, color: colors.muted },
 });

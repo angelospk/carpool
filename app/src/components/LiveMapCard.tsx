@@ -10,7 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api } from '../api/endpoints';
 import { Map } from '../map/Map';
-import { Card, Hint } from './ui';
+import { Card } from './ui';
 import { colors, space, type } from '../design/tokens';
 
 // The middle of Evros, at a zoom that shows it from Αλεξανδρούπολη to Ορμένιο.
@@ -27,29 +27,25 @@ export function LiveMapCard() {
   });
 
   // Nothing at all rather than an error: this card is context, not the task.
-  if (!live.isSuccess) return null;
+  // Nor when the road is empty: it sits above the search form, and a card
+  // saying there is nothing only pushes the form down.
+  if (!live.isSuccess || live.data.trips.length === 0) return null;
   const trips = live.data.trips;
 
   return (
     <Card testID="live-map">
       <Text style={styles.title}>{t('onRoad.title')}</Text>
-      {trips.length === 0 ? (
-        <Hint testID="live-map-none">{t('onRoad.none')}</Hint>
-      ) : (
-        <>
-          <Map testID="live-map-map" centre={EVROS} zoom={8} lines={trips.map((trip) => trip.polyline)} />
-          <View style={styles.rows}>
-            {trips.slice(0, ROWS).map((trip, i) => (
-              <Text key={i} style={styles.row}>
-                {`${trip.from} → ${trip.to} · ${t('onRoad.seats', { count: trip.seats_free })}`}
-              </Text>
-            ))}
-            {trips.length > ROWS ? (
-              <Text style={styles.more}>{t('onRoad.more', { count: trips.length - ROWS })}</Text>
-            ) : null}
-          </View>
-        </>
-      )}
+      <Map testID="live-map-map" centre={EVROS} zoom={8} lines={trips.map((trip) => trip.polyline)} />
+      <View style={styles.rows}>
+        {trips.slice(0, ROWS).map((trip, i) => (
+          <Text key={i} style={styles.row}>
+            {`${trip.from} → ${trip.to} · ${t('onRoad.seats', { count: trip.seats_free })}`}
+          </Text>
+        ))}
+        {trips.length > ROWS ? (
+          <Text style={styles.more}>{t('onRoad.more', { count: trips.length - ROWS })}</Text>
+        ) : null}
+      </View>
     </Card>
   );
 }

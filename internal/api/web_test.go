@@ -29,6 +29,7 @@ func webBuild(t *testing.T) string {
 		"_expo/static/js/web/entry-abc.js": `console.log("app")`,
 		"assets/node_modules/icon.png":     "png",
 		"metadata.json":                    `{}`,
+		"favicon.ico":                      "ico",
 	}
 	for name, body := range files {
 		p := filepath.Join(dir, filepath.FromSlash(name))
@@ -163,5 +164,28 @@ func TestNoWebBuildMeansNoApp(t *testing.T) {
 	h := NewRouter(Deps{Ready: ready})
 	if rec := get(t, h, http.MethodGet, "/app/"); rec.Code != http.StatusNotFound {
 		t.Fatalf("GET /app/ without a build = %d, want 404", rec.Code)
+	}
+}
+
+// Browsers ask for /favicon.ico on every page of the hostname, the landing
+// page and route links included. The web build has one; serve it there too.
+func TestFaviconAtTheRoot(t *testing.T) {
+	h := NewRouter(Deps{Ready: ready, WebDir: webBuild(t)})
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		rec := get(t, h, method, "/favicon.ico")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s /favicon.ico = %d, want 200", method, rec.Code)
+		}
+	}
+	rec := get(t, h, http.MethodGet, "/favicon.ico")
+	if rec.Body.String() != "ico" {
+		t.Errorf("body = %q, want the build's favicon", rec.Body.String())
+	}
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age") {
+		t.Errorf("Cache-Control = %q, want it cached", cc)
+	}
+
+	if rec := get(t, NewRouter(Deps{Ready: ready}), http.MethodGet, "/favicon.ico"); rec.Code != http.StatusNotFound {
+		t.Errorf("without a build = %d, want 404", rec.Code)
 	}
 }
