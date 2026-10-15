@@ -341,7 +341,8 @@ function NextTrip({ trip, onPress }: { trip: TripSummary; onPress: () => void })
           ? {
               name: detail.data.driver.name,
               label: t('home.withDriver', { name: detail.data.driver.name }),
-              photoUrl: detail.data.driver.photo_url,
+              // Initials only: the photo would be one more request on the
+              // home screen, and the trip page shows it.
               line: [detail.data.driver.car_model, detail.data.driver.car_color].filter(Boolean).join(' · '),
             }
           : undefined

@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { api, type MeetingPoint } from '../api/endpoints';
 import { type Pin } from '../design/pin';
 import { ProposePoint } from './ProposePoint';
-import { colors, radius, space, type } from '../design/tokens';
+import { border, colors, radius, space, type } from '../design/tokens';
 
 export function MeetingPointField({
   place,
@@ -87,12 +87,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    minHeight: 44,
     paddingVertical: space.sm,
-    paddingHorizontal: space.md,
+    paddingHorizontal: space.md + border.selected - border.rest,
     borderRadius: radius.control,
-    backgroundColor: colors.surface,
+    borderWidth: border.rest,
+    borderColor: colors.line,
   },
-  chosen: { backgroundColor: colors.ink },
+  // Selected is the 3px ink border; it takes its width out of the padding.
+  chosen: { borderWidth: border.selected, borderColor: colors.ink, paddingHorizontal: space.md },
   name: { ...type.body, color: colors.ink, flexShrink: 1 },
   kind: { ...type.caption, color: colors.muted, marginLeft: space.sm },
   none: { ...type.caption, color: colors.muted, marginTop: space.sm },
