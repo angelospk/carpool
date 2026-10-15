@@ -160,7 +160,7 @@ export default function OtpScreen() {
 const styles = StyleSheet.create({
   top: { gap: space.sm },
   actions: { flexDirection: 'row', justifyContent: 'space-between', gap: space.md },
-  link: { ...type.label, color: colors.ink },
+  link: { ...type.label, color: colors.ink, textDecorationLine: 'underline' },
   linkDisabled: { opacity: 0.5 },
   error: { ...type.body, color: colors.danger },
   input: {

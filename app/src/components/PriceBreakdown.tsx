@@ -139,6 +139,6 @@ const styles = StyleSheet.create({
   value: { ...type.caption, color: colors.muted },
   strong: { color: colors.ink },
   rule: { height: 1, backgroundColor: colors.line, marginVertical: space.xs },
-  link: { ...type.caption, color: colors.ink, marginTop: space.sm },
+  link: { ...type.caption, color: colors.ink, textDecorationLine: 'underline', marginTop: space.sm },
   note: { ...type.caption, color: colors.muted, marginTop: space.xs },
 });

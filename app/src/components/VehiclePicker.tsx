@@ -142,5 +142,5 @@ const styles = StyleSheet.create({
   single: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   carName: { ...type.label, color: colors.ink },
   hint: { ...type.caption, color: colors.muted },
-  link: { ...type.caption, color: colors.ink },
+  link: { ...type.caption, color: colors.ink, textDecorationLine: 'underline' },
 });

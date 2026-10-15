@@ -276,7 +276,7 @@ const styles = StyleSheet.create({
   name: { ...type.title, color: colors.ink },
   phone: { ...type.caption, color: colors.muted },
   photoActions: { flexDirection: 'row', gap: space.md, marginTop: space.xs },
-  link: { ...type.caption, color: colors.ink },
+  link: { ...type.caption, color: colors.ink, textDecorationLine: 'underline' },
   divider: { height: 1, backgroundColor: colors.line },
   hint: { ...type.caption, color: colors.muted, marginTop: space.sm },
   error: { ...type.caption, color: colors.danger },
