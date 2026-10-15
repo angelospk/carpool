@@ -18,6 +18,7 @@ import polyline from '@mapbox/polyline';
 import { haveTiles, rasterStyle } from './tiles';
 import { MapFallback } from './Fallback';
 import type { MapPin } from './Map';
+import { border, colors, radius } from '../design/tokens';
 
 export function Map({
   centre,
@@ -75,7 +76,7 @@ export function Map({
     if (!m) return;
 
     markers.current.forEach((marker) => marker.remove());
-    markers.current = pins.map((p) => new Marker().setLngLat([p.lon, p.lat]).addTo(m));
+    markers.current = pins.map((p) => new Marker({ color: colors.ink }).setLngLat([p.lon, p.lat]).addTo(m));
   }, [pins]);
 
   // One key for every line, so the effect below runs when any of them change
@@ -114,7 +115,7 @@ export function Map({
         id: 'route',
         type: 'line',
         source: 'route',
-        paint: { 'line-width': 4, 'line-color': '#1f6f4a' },
+        paint: { 'line-width': 4, 'line-color': colors.ink },
       });
     };
 
@@ -140,6 +141,12 @@ export function Map({
 }
 
 const styles = StyleSheet.create({
-  box: { height: 260, borderRadius: 12, overflow: 'hidden' },
+  box: {
+    height: 260,
+    borderRadius: radius.card,
+    borderWidth: border.rest,
+    borderColor: colors.line,
+    overflow: 'hidden',
+  },
   canvas: { flex: 1 },
 });

@@ -122,7 +122,7 @@ export function Settings() {
           value={womenOnly}
           disabled={!female || update.isPending}
           onValueChange={(on) => change({ women_only: on })}
-          trackColor={{ true: colors.primary, false: colors.line }}
+          trackColor={{ true: colors.ink, false: colors.line }}
         />
       </View>
       <Text testID={female ? undefined : 'women-only-hint'} style={styles.hint}>
@@ -142,7 +142,7 @@ export function Settings() {
               value={me.asks_paused}
               disabled={update.isPending}
               onValueChange={(on) => change({ asks_paused: on })}
-              trackColor={{ true: colors.accent, false: colors.line }}
+              trackColor={{ true: colors.ink, false: colors.line }}
             />
           </View>
           <Text style={styles.hint}>
@@ -178,7 +178,7 @@ export function Settings() {
               testID="detect-driving"
               value={detect}
               onValueChange={(on) => void toggleDetect(on)}
-              trackColor={{ true: colors.primary, false: colors.line }}
+              trackColor={{ true: colors.ink, false: colors.line }}
             />
           </View>
           <Text style={styles.hint}>{t('detect.hint')}</Text>

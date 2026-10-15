@@ -30,3 +30,14 @@ require('./src/i18n');
 jest.mock('react-native-safe-area-context', () =>
   require('react-native-safe-area-context/jest/mock').default,
 );
+
+// Ionicons loads its font asynchronously and re-renders when it arrives, which
+// jest reports as an update outside act() in every screen that draws an icon.
+// The stand-in renders the icon's name synchronously, so a test can still say
+// which icon is where.
+jest.mock('@expo/vector-icons/Ionicons', () => {
+  const { Text } = require('react-native');
+  const Ionicons = ({ name, ...rest }) => require('react').createElement(Text, { ...rest, name }, name);
+  Ionicons.glyphMap = {};
+  return { __esModule: true, default: Ionicons };
+});

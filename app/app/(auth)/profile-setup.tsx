@@ -122,6 +122,7 @@ export default function ProfileSetupScreen() {
 
         <Button
           testID="profile-submit"
+          dot
           label={t('common.next')}
           onPress={submit}
           disabled={!name.trim() || !placeID || !oldEnough || busy}

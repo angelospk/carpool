@@ -27,7 +27,7 @@ import { useTranslation } from 'react-i18next';
 
 import { type PricingMode } from '../api/endpoints';
 import { Chip } from './ui';
-import { colors, radius, space, type } from '../design/tokens';
+import { border, colors, radius, space, type } from '../design/tokens';
 
 /** The fractions offered under the formula. Not a free field: the figure varies
     with each passenger's own distance, so there is no single euro amount to
@@ -142,11 +142,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: space.md,
-    padding: space.md,
-    borderRadius: radius.inner,
-    backgroundColor: colors.sunken,
+    padding: space.md + border.selected - border.rest,
+    borderRadius: radius.control,
+    borderWidth: border.rest,
+    borderColor: colors.line,
   },
-  optionOn: { backgroundColor: colors.accentSoft },
+  // Selected is the 3px ink border; it takes its width out of the padding.
+  optionOn: { borderWidth: border.selected, borderColor: colors.ink, padding: space.md },
   dot: {
     width: 18,
     height: 18,
@@ -155,7 +157,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     marginTop: 2,
   },
-  dotOn: { borderColor: colors.primary, borderWidth: 6 },
+  dotOn: { borderColor: colors.ink, borderWidth: 6 },
   optionText: { flex: 1, gap: 2 },
   optionTitle: { ...type.label, color: colors.muted },
   optionTitleOn: { color: colors.ink },

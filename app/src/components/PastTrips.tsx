@@ -82,13 +82,13 @@ const styles = StyleSheet.create({
   heading: { ...type.title, color: colors.ink, marginBottom: space.xs },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   text: { flex: 1 },
-  route: { ...type.body, color: colors.ink, fontWeight: '600' },
+  route: { ...type.label, fontSize: 16, color: colors.ink },
   meta: { ...type.caption, color: colors.muted, marginTop: 2 },
   notice: {
     ...type.caption,
     color: colors.ink,
-    backgroundColor: colors.sunken,
-    borderRadius: radius.inner,
+    backgroundColor: colors.surface,
+    borderRadius: radius.control,
     padding: space.sm,
   },
 });

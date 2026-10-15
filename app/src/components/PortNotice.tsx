@@ -28,10 +28,10 @@ export function PortNotice({ endsAtPort }: { endsAtPort: boolean }) {
 
 const styles = StyleSheet.create({
   box: {
-    backgroundColor: colors.sunken,
-    borderRadius: radius.inner,
+    backgroundColor: colors.surface,
+    borderRadius: radius.control,
     borderLeftWidth: 3,
-    borderLeftColor: colors.primary,
+    borderLeftColor: colors.ink,
     padding: space.md,
     gap: space.xs,
   },

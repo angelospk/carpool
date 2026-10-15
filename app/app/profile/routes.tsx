@@ -181,7 +181,7 @@ export default function MyRoutesScreen() {
                 value={!!r.nudge_when_leaving}
                 disabled={nudge.isPending}
                 onValueChange={(on) => nudge.mutate({ id: r.id, on })}
-                trackColor={{ true: colors.primary, false: colors.line }}
+                trackColor={{ true: colors.ink, false: colors.line }}
               />
             </View>
             <Text style={styles.meta}>{t('drive.nudgeHint')}</Text>

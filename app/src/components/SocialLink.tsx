@@ -95,6 +95,6 @@ function InstagramMark() {
 const styles = StyleSheet.create({
   rows: { marginTop: space.xs, gap: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
-  link: { ...type.caption, color: colors.primary, flexShrink: 1 },
+  link: { ...type.caption, color: colors.ink, textDecorationLine: 'underline', flexShrink: 1 },
   caveat: { ...type.caption, color: colors.muted, fontSize: 11 },
 });

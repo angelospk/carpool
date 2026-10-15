@@ -14,6 +14,7 @@ import {
 import { ApiError } from '../../src/api/client';
 import { refusalText } from '../../src/api/errorText';
 import {
+  BottomBar,
   Button,
   Card,
   Chip,
@@ -582,6 +583,16 @@ export default function PublishScreen() {
           )}
         </Card>
 
+        {noCar ? <Hint>{t('publish.noDriverProfile')}</Hint> : null}
+        {/* A boot with nothing left in it and a luggage size still chosen is a
+            pair the database refuses. Saying so here is better than a 400 after
+            the driver has filled in everything else. */}
+        {noBootLeft ? <Hint>{t('publish.bootFullHint')}</Hint> : null}
+
+      </ScrollView>
+      {/* The result and the button stay in sight at the bottom, whatever the
+          form has been scrolled to. */}
+      <BottomBar bleed inset={false}>
         {outcome ? <Hint>{outcome}</Hint> : null}
         {published !== null ? (
           <ShareRouteButton
@@ -590,15 +601,10 @@ export default function PublishScreen() {
             failedTestID="publish-share-failed"
           />
         ) : null}
-        {noCar ? <Hint>{t('publish.noDriverProfile')}</Hint> : null}
-        {/* A boot with nothing left in it and a luggage size still chosen is a
-            pair the database refuses. Saying so here is better than a 400 after
-            the driver has filled in everything else. */}
-        {noBootLeft ? <Hint>{t('publish.bootFullHint')}</Hint> : null}
-
         <Button
           testID="publish-submit"
           label={t('publish.publish')}
+          dot
           // The snapshot is what was sent, not what the form says later: the
           // form stays editable after publishing, and sharing the edited
           // fields would send a schedule nobody can be picked up on.
@@ -630,13 +636,13 @@ export default function PublishScreen() {
             !from || !to || (kind === 'recurring' && !weekdays.length) || noCar || noBootLeft || publish.isPending || !myGroups.isSuccess
           }
         />
-      </ScrollView>
+      </BottomBar>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  body: { gap: space.md, paddingBottom: 140 },
+  body: { gap: space.md, paddingBottom: space.xl },
   label: { ...type.caption, color: colors.muted },
   days: { flexDirection: 'row', gap: 6 },
   // Group names are long, and a row of them runs off the screen otherwise.
@@ -644,7 +650,7 @@ const styles = StyleSheet.create({
   times: { flexDirection: 'row', gap: space.sm },
   seats: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   seatsLabel: { ...type.body, color: colors.ink },
-  toggle: { ...type.label, color: colors.primary },
+  toggle: { ...type.label, color: colors.ink },
   hint: { ...type.caption, color: colors.muted, marginTop: space.xs },
   divider: { height: 1, backgroundColor: colors.line, marginVertical: space.sm },
 });

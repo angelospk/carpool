@@ -1,13 +1,16 @@
 // The shared UI language.
 //
-// Everything here is built from four ideas: a warm canvas, white cards floating
-// on it, pill-shaped controls, and the route glyph (components/RouteGlyph) that
-// gives every trip its own recognisable mark. See src/design/tokens.ts for why
-// the palette is what it is.
+// "Mono Ticket": black type on white paper, outlined cards with no shadows,
+// selection drawn as a thick black border, one black button per screen. The
+// ride itself is a ticket (components/Ticket). See src/design/tokens.ts for the
+// palette and why it has one colour.
 
 import {
-  ActivityIndicator,
+  AccessibilityInfo,
+  Animated,
+  Easing,
   Image,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -17,14 +20,18 @@ import {
   type DimensionValue,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, initials, lift, radius, space, tileColor, type } from '../design/tokens';
+import { border, colors, initials, radius, size as sizes, space, type } from '../design/tokens';
+import { Icon, type IconName } from './Icon';
 import { photoSource } from '../api/images';
 import { breakpoint, columnWidth, type Breakpoint, type ColumnKind } from '../design/layout';
 
 export { colors };
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+export type { IconName };
 
 // The app draws edge to edge (`edgeToEdgeEnabled` in gradle.properties), so a
 // screen with no navigation header above it starts underneath the Android
@@ -58,7 +65,6 @@ export function Screen({
   const roomy = breakpoint(width) !== 'compact';
   return (
     <View style={styles.screen}>
-      <Backdrop />
       <View
         style={[
           styles.column,
@@ -73,44 +79,6 @@ export function Screen({
       >
         {children}
       </View>
-    </View>
-  );
-}
-
-/**
- * Faint roads across the top of the canvas.
- *
- * The same idea as the route glyph, used as texture: a few lines that bend the
- * way the roads here do, too pale to read as anything but paper. Behind the
- * content and out of the way of touches.
- */
-function Backdrop() {
-  // Drawn in pixels at the window's width rather than scaled from a viewBox:
-  // scaling stretched the strokes into blobs on a wide window.
-  const { width } = useWindowDimensions();
-  const h = 200;
-  const x = (f: number) => (f * width).toFixed(1);
-  return (
-    <View pointerEvents="none" style={styles.backdrop}>
-      <Svg width={width} height={h}>
-        <Path
-          d={`M${x(-0.05)} 150 C ${x(0.15)} 118, ${x(0.28)} 172, ${x(0.45)} 128 S ${x(0.75)} 58, ${x(1.05)} 92`}
-          stroke={colors.primary}
-          strokeOpacity={0.06}
-          strokeWidth={14}
-          strokeLinecap="round"
-          fill="none"
-        />
-        <Path
-          d={`M${x(-0.05)} 56 C ${x(0.2)} 86, ${x(0.35)} 22, ${x(0.58)} 48 S ${x(0.86)} 132, ${x(1.05)} 104`}
-          stroke={colors.primary}
-          strokeOpacity={0.08}
-          strokeWidth={2}
-          strokeDasharray="2 10"
-          strokeLinecap="round"
-          fill="none"
-        />
-      </Svg>
     </View>
   );
 }
@@ -136,13 +104,13 @@ export function BrandMark({ tagline }: { tagline: string }) {
         <Svg width={28} height={28} viewBox="0 0 28 28">
           <Path
             d="M5 21 C 9 12, 14 20, 18 11 S 23 6, 23 6"
-            stroke={colors.primaryInk}
+            stroke={colors.paper}
             strokeWidth={2.5}
             strokeLinecap="round"
             fill="none"
           />
-          <Circle cx={5} cy={21} r={2.5} fill={colors.primaryInk} />
-          <Circle cx={23} cy={6} r={3} fill={colors.accent} />
+          <Circle cx={5} cy={21} r={2.5} fill={colors.paper} />
+          <Circle cx={23} cy={6} r={3} fill={colors.paper} />
         </Svg>
       </View>
       <View>
@@ -181,7 +149,55 @@ export function Hint({ children, testID }: { children: ReactNode; testID?: strin
   );
 }
 
-/** The floating white surface everything else sits in. */
+/**
+ * Press feedback: a 0.98 scale over 120ms, on a timing curve. No spring, no
+ * bounce, and nothing at all when the system asks for reduced motion.
+ */
+export function usePressScale() {
+  const scale = useRef(new Animated.Value(1)).current;
+  const [still, setStill] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void AccessibilityInfo.isReduceMotionEnabled?.()
+      .then((on) => alive && setStill(!!on))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const to = (value: number) =>
+    still
+      ? undefined
+      : Animated.timing(scale, {
+          toValue: value,
+          duration: 120,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: Platform.OS !== 'web',
+        }).start();
+  return {
+    style: { transform: [{ scale }] },
+    onPressIn: () => to(0.98),
+    onPressOut: () => to(1),
+  };
+}
+
+/** One fade-in per screen at most: 200ms, opacity only. */
+export function FadeIn({ children, style }: { children: ReactNode; style?: object }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(opacity, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [opacity]);
+  return <Animated.View style={[{ opacity }, style]}>{children}</Animated.View>;
+}
+
+/**
+ * The outlined white surface everything else sits in. `tone="accent"` is for
+ * something that wants an answer, and is drawn with the selected border.
+ */
 export function Card({
   children,
   onPress,
@@ -193,6 +209,7 @@ export function Card({
   testID?: string;
   tone?: 'plain' | 'accent';
 }) {
+  const press = usePressScale();
   const body = (
     <View style={[styles.card, tone === 'accent' && styles.cardAccent]}>{children}</View>
   );
@@ -204,55 +221,78 @@ export function Card({
       testID={testID}
       accessibilityRole="button"
       onPress={onPress}
-      style={({ pressed }) => (pressed ? styles.pressed : undefined)}
+      onPressIn={press.onPressIn}
+      onPressOut={press.onPressOut}
     >
-      {body}
+      <Animated.View style={press.style}>{body}</Animated.View>
     </Pressable>
   );
 }
 
+/**
+ * Primary is ink with paper text, secondary paper with an ink outline, danger
+ * paper with a red outline. `quietDanger` is a red word on a grey outline, for
+ * a destructive action that is not the point of the screen. `dot` puts the
+ * lime dot in front of the label: the one main action on a screen gets it.
+ */
 export function Button({
   label,
   onPress,
   disabled,
   variant = 'primary',
   testID,
+  icon,
+  dot,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
   variant?: 'primary' | 'secondary' | 'danger' | 'quietDanger';
   testID?: string;
+  icon?: IconName;
+  dot?: boolean;
 }) {
+  const press = usePressScale();
+  const tint =
+    variant === 'primary'
+      ? colors.paper
+      : variant === 'danger' || variant === 'quietDanger'
+        ? colors.danger
+        : colors.ink;
   return (
-    <Pressable
+    <AnimatedPressable
       testID={testID}
       accessibilityRole="button"
       aria-disabled={!!disabled}
       onPress={onPress}
+      onPressIn={press.onPressIn}
+      onPressOut={press.onPressOut}
       disabled={disabled}
-      style={({ pressed }) => [
+      style={[
         styles.button,
-        (variant === 'secondary' || variant === 'quietDanger') && styles.buttonSecondary,
+        variant === 'secondary' && styles.buttonSecondary,
         variant === 'danger' && styles.buttonDanger,
-        disabled && styles.buttonDisabled,
-        pressed && styles.pressed,
+        variant === 'quietDanger' && styles.buttonQuietDanger,
+        disabled && (variant === 'primary' ? styles.buttonDisabled : styles.buttonDisabledOutline),
+        press.style,
       ]}
     >
+      {dot && variant === 'primary' && !disabled ? <View style={styles.buttonDot} /> : null}
+      {icon ? <Icon name={icon} size={20} color={disabled && variant === 'primary' ? colors.paper : tint} /> : null}
       <Text
-        style={[
-          styles.buttonLabel,
-          variant === 'secondary' && styles.buttonLabelSecondary,
-          variant === 'quietDanger' && styles.buttonLabelQuietDanger,
-        ]}
+        numberOfLines={2}
+        style={[styles.buttonLabel, { color: tint }, disabled && variant !== 'primary' && styles.textDisabled]}
       >
         {label}
       </Text>
-    </Pressable>
+    </AnimatedPressable>
   );
 }
 
-/** A small pill. `tone="accent"` is for anything that wants an answer. */
+/**
+ * A small outlined tag. `tone="accent"` is for anything that wants an answer;
+ * it is drawn in ink, because the one colour here belongs to the fare.
+ */
 export function Badge({
   label,
   tone = 'quiet',
@@ -269,16 +309,16 @@ export function Badge({
         styles.badge,
         tone === 'accent' && styles.badgeAccent,
         tone === 'primary' && styles.badgePrimary,
-        tone === 'success' && styles.badgeSuccess,
+        tone === 'success' && styles.badgeAccent,
         tone === 'danger' && styles.badgeDanger,
       ]}
     >
+      {tone === 'success' ? <Icon name="checkmark" size={14} color={colors.ink} /> : null}
       <Text
         style={[
           styles.badgeLabel,
-          tone === 'accent' && styles.badgeLabelAccent,
+          (tone === 'accent' || tone === 'success') && styles.badgeLabelAccent,
           tone === 'primary' && styles.badgeLabelPrimary,
-          tone === 'success' && styles.badgeLabelSuccess,
           tone === 'danger' && styles.badgeLabelDanger,
         ]}
       >
@@ -292,8 +332,8 @@ export function Badge({
  * Seats as pips rather than "3/4".
  *
  * How full a car is decides whether you bother tapping, so it should read
- * without being parsed. Filled pips are taken seats; the last free one turns
- * amber, which is the only warning the list needs.
+ * without being parsed. Filled pips are taken seats; the last free one is a
+ * thick ring, which is the only warning the list needs.
  */
 export function SeatPips({ free, total, testID }: { free: number; total: number; testID?: string }) {
   const capped = Math.max(0, Math.min(total, 8));
@@ -310,20 +350,6 @@ export function SeatPips({ free, total, testID }: { free: number; total: number;
           ]}
         />
       ))}
-    </View>
-  );
-}
-
-/** A circular tile carrying an emoji or a letter, coloured from its label. */
-export function IconTile({ label, glyph, size = 44 }: { label: string; glyph: string; size?: number }) {
-  return (
-    <View
-      style={[
-        styles.tile,
-        { width: size, height: size, borderRadius: size / 2, backgroundColor: tileColor(label) },
-      ]}
-    >
-      <Text style={{ fontSize: size * 0.42 }}>{glyph}</Text>
     </View>
   );
 }
@@ -359,7 +385,7 @@ export function Avatar({
     return <Image source={{ uri }} style={[styles.avatar, shape]} />;
   }
   return (
-    <View style={[styles.avatar, shape, { backgroundColor: tileColor(name) }]}>
+    <View style={[styles.avatar, shape]}>
       <Text style={[styles.avatarInitials, { fontSize: size * 0.36 }]}>{initials(name)}</Text>
     </View>
   );
@@ -475,20 +501,30 @@ export function Field({
   testID?: string;
   keyboardType?: 'default' | 'number-pad' | 'phone-pad';
   autoCapitalize?: 'none' | 'sentences';
-  /** Draws the pine underline once the value parses. */
+  /** Draws the border in ink once the value parses. */
   valid?: boolean;
   compact?: boolean;
   /** For a few sentences rather than a name. */
   multiline?: boolean;
 }) {
+  const [focused, setFocused] = useState(false);
   return (
-    <View style={[styles.field, compact && styles.fieldCompact, valid && styles.fieldValid]}>
+    <View
+      style={[
+        styles.field,
+        compact && styles.fieldCompact,
+        valid && styles.fieldValid,
+        focused && styles.fieldFocused,
+      ]}
+    >
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
         testID={testID}
         style={[styles.fieldInput, multiline && styles.fieldMultiline]}
         value={value}
         onChangeText={onChangeText}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         placeholder={placeholder}
         placeholderTextColor={colors.muted}
         keyboardType={keyboardType}
@@ -526,7 +562,7 @@ export function Stepper({
         onPress={() => onChange(Math.max(min, value - step))}
         style={styles.stepperButton}
       >
-        <Text style={styles.stepperGlyph}>−</Text>
+        <Icon name="remove" size={20} color={colors.ink} />
       </Pressable>
       <Text style={styles.stepperValue}>{value}</Text>
       <Pressable
@@ -536,16 +572,16 @@ export function Stepper({
         onPress={() => onChange(Math.min(max, value + step))}
         style={styles.stepperButton}
       >
-        <Text style={styles.stepperGlyph}>+</Text>
+        <Icon name="add" size={20} color={colors.ink} />
       </Pressable>
     </View>
   );
 }
 
-/** A selectable pill, used for weekdays. */
+/** A selectable outlined chip, used for weekdays. Selected is the 3px ink border. */
 export function Chip({
   label,
-  glyph,
+  icon,
   selected,
   onPress,
   testID,
@@ -560,10 +596,10 @@ export function Chip({
   /** Sized to the label rather than an equal share of the row, for words too
       long to squeeze: the row then wraps instead of cutting them. */
   fit?: boolean;
-  /** A pictogram shown before the label. Decoration over a word that already
+  /** An icon shown before the label. Decoration over a word that already
       says it, so it is hidden from a screen reader rather than read out under
-      whatever name the platform happens to give the character. */
-  glyph?: string;
+      whatever name the platform happens to give it. */
+  icon?: IconName;
   selected: boolean;
   onPress: () => void;
   testID?: string;
@@ -581,21 +617,21 @@ export function Chip({
       onPress={onPress}
       style={[
         styles.chip,
+        icon && styles.chipStacked,
         fit && styles.chipFit,
         minWidth !== undefined && { minWidth, flexGrow: 1, flexBasis: 'auto' },
         selected && styles.chipSelected,
         disabled && styles.buttonDisabled,
       ]}
     >
-      {glyph ? (
-        <Text
+      {icon ? (
+        <Icon
           testID={testID ? `${testID}-glyph` : undefined}
-          accessibilityElementsHidden
-          importantForAccessibility="no"
-          style={styles.chipGlyph}
-        >
-          {glyph}
-        </Text>
+          hidden
+          name={icon}
+          size={20}
+          color={selected ? colors.ink : colors.muted}
+        />
       ) : null}
       <Text style={[styles.chipLabel, selected && styles.chipLabelSelected]}>{label}</Text>
     </Pressable>
@@ -621,11 +657,13 @@ export function AsyncState({
   emptySlot?: ReactNode;
   children: ReactNode;
 }) {
-  if (loading) return <ActivityIndicator testID="loading" color={colors.primary} style={styles.centered} />;
+  // Skeleton blocks in the shape of a list, not a spinner over the screen.
+  if (loading) return <Skeleton testID="loading" />;
 
   if (error) {
     return (
       <View style={styles.centered}>
+        <Icon name="alert-circle-outline" size={32} color={colors.ink} />
         <Text testID="error" style={styles.error}>
           {error instanceof Error ? error.message : String(error)}
         </Text>
@@ -640,6 +678,7 @@ export function AsyncState({
     if (emptySlot) return <>{emptySlot}</>;
     return (
       <View style={styles.centered}>
+        <Icon name="file-tray-outline" size={32} color={colors.ink} />
         <Text testID="empty" style={styles.hint}>
           {emptyLabel}
         </Text>
@@ -650,25 +689,128 @@ export function AsyncState({
   return <>{children}</>;
 }
 
+/** Grey blocks with the shape of the content, while it loads. */
+export function Skeleton({ rows = 3, testID }: { rows?: number; testID?: string }) {
+  return (
+    <View testID={testID} style={styles.skeleton} accessibilityLabel="…">
+      {Array.from({ length: rows }, (_, i) => (
+        <View key={i} style={styles.skeletonBlock} />
+      ))}
+    </View>
+  );
+}
+
+/**
+ * Two to four options in a grey track; the chosen one is paper with an ink
+ * outline. For sorting and for tabs inside a screen.
+ */
+export function SegmentedControl<T extends string>({
+  options,
+  value,
+  onChange,
+  testID,
+}: {
+  options: readonly { value: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+  testID?: string;
+}) {
+  return (
+    <View testID={testID} style={styles.segTrack} accessibilityRole="tablist">
+      {options.map((o) => {
+        const on = o.value === value;
+        return (
+          <Pressable
+            key={o.value}
+            testID={testID ? `${testID}-${o.value}` : undefined}
+            accessibilityRole="tab"
+            aria-selected={on}
+            onPress={() => onChange(o.value)}
+            style={[styles.seg, on && styles.segOn]}
+          >
+            <Text numberOfLines={1} style={[styles.segLabel, on && styles.segLabelOn]}>
+              {o.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * The bottom of a flow screen: a paper strip with a hairline over it, holding
+ * the one black button. It sits in the layout under a scrolling body rather
+ * than floating over it, so it never covers the last field.
+ */
+export function BottomBar({
+  children,
+  bleed = false,
+  inset = true,
+}: {
+  children: ReactNode;
+  /** Inside a padded Screen: reach out over its side padding to the edges. */
+  bleed?: boolean;
+  /** Off above the tab bar, which already keeps clear of the home indicator. */
+  inset?: boolean;
+}) {
+  const insets = useSafeAreaInsets();
+  const roomy = useBreakpoint() !== 'compact';
+  return (
+    <View
+      style={[
+        styles.bottomBar,
+        bleed && { marginHorizontal: -(roomy ? space.xl : space.gutter), paddingHorizontal: roomy ? space.xl : space.gutter },
+        { paddingBottom: inset ? Math.max(insets.bottom, space.md) : space.md },
+      ]}
+    >
+      {children}
+    </View>
+  );
+}
+
+/** A round 44pt icon button with a hairline ring. Icon-only, so it must be labelled. */
+export function IconButton({
+  name,
+  label,
+  onPress,
+  testID,
+}: {
+  name: IconName;
+  label: string;
+  onPress: () => void;
+  testID?: string;
+}) {
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+    >
+      <Icon name={name} size={22} color={colors.ink} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.canvas },
+  screen: { flex: 1, backgroundColor: colors.paper },
   column: { flex: 1, width: '100%', alignSelf: 'center', gap: space.md },
-  screenPadded: { paddingHorizontal: space.lg, paddingTop: space.lg },
+  screenPadded: { paddingHorizontal: space.gutter, paddingTop: space.lg },
   screenRoomy: { paddingHorizontal: space.xl },
-  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, height: 200 },
   spacer: { flex: 1 },
   spacerRoomy: { height: space.xl },
   brand: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: space.md },
   brandGlyph: {
     width: 48,
     height: 48,
-    borderRadius: radius.inner,
-    backgroundColor: colors.primary,
+    borderRadius: radius.button,
+    backgroundColor: colors.ink,
     alignItems: 'center',
     justifyContent: 'center',
-    ...lift,
   },
-  brandName: { ...type.title, color: colors.primary, letterSpacing: -0.2 },
+  brandName: { ...type.title, color: colors.ink },
   brandTagline: { ...type.caption, color: colors.muted },
 
   display: { ...type.display, color: colors.ink },
@@ -679,71 +821,89 @@ const styles = StyleSheet.create({
     marginTop: space.sm,
   },
   sectionTitle: { ...type.title, color: colors.ink },
-  hint: { ...type.body, color: colors.muted, lineHeight: 22 },
+  hint: { ...type.body, color: colors.muted },
   error: { ...type.body, color: colors.danger, textAlign: 'center' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.md, padding: space.xl },
 
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.paper,
     borderRadius: radius.card,
+    borderWidth: border.rest,
+    borderColor: colors.line,
     padding: space.lg,
     gap: space.md,
-    ...lift,
   },
-  cardAccent: { backgroundColor: colors.accentSoft },
-  pressed: { opacity: 0.85, transform: [{ scale: 0.995 }] },
+  // The border grows inward by the padding it takes, so the content does not move.
+  cardAccent: {
+    borderWidth: border.selected,
+    borderColor: colors.ink,
+    padding: space.lg - (border.selected - border.rest),
+  },
+  pressed: { opacity: 0.7 },
 
   button: {
-    backgroundColor: colors.primary,
-    paddingVertical: space.lg,
-    paddingHorizontal: space.xl,
-    borderRadius: radius.pill,
+    minHeight: sizes.cta,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
+    backgroundColor: colors.ink,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.xl,
+    borderRadius: radius.button,
+    borderWidth: border.rest,
+    borderColor: colors.ink,
   },
-  buttonSecondary: { backgroundColor: colors.sunken },
-  buttonDanger: { backgroundColor: colors.danger },
-  buttonDisabled: { opacity: 0.35 },
-  buttonLabel: { ...type.label, fontSize: 16, color: colors.primaryInk },
-  buttonLabelSecondary: { color: colors.ink },
-  buttonLabelQuietDanger: { color: colors.danger },
+  buttonSecondary: { backgroundColor: colors.paper },
+  buttonDanger: { backgroundColor: colors.paper, borderColor: colors.danger },
+  buttonQuietDanger: { backgroundColor: colors.paper, borderColor: colors.line },
+  // Grey, not faded: a see-through black button reads as a pressed one.
+  buttonDisabled: { backgroundColor: '#9E9E9E', borderColor: '#9E9E9E' },
+  buttonDisabledOutline: { borderColor: colors.line },
+  textDisabled: { color: colors.muted },
+  buttonDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent },
+  buttonLabel: { ...type.button, color: colors.paper, textAlign: 'center', flexShrink: 1 },
 
   badge: {
-    paddingHorizontal: space.md,
-    paddingVertical: 5,
-    borderRadius: radius.pill,
-    backgroundColor: colors.sunken,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.chip,
+    borderWidth: border.rest,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
     alignSelf: 'flex-start',
   },
-  badgeAccent: { backgroundColor: colors.accentSoft },
-  badgePrimary: { backgroundColor: colors.primary },
-  badgeLabel: { ...type.caption, color: colors.muted },
-  badgeLabelAccent: { color: '#8A4A12' },
-  badgeLabelPrimary: { color: colors.primaryInk },
-  badgeSuccess: { backgroundColor: '#E1EEE5' },
-  badgeLabelSuccess: { color: colors.success },
-  badgeDanger: { backgroundColor: '#F6E0DB' },
+  badgeAccent: { borderColor: colors.ink },
+  badgePrimary: { backgroundColor: colors.ink, borderColor: colors.ink },
+  badgeDanger: { borderColor: colors.danger },
+  badgeLabel: { ...type.label, fontSize: 13, lineHeight: 17, color: colors.muted },
+  badgeLabelAccent: { color: colors.ink },
+  badgeLabelPrimary: { color: colors.paper },
   badgeLabelDanger: { color: colors.danger },
 
   pips: { flexDirection: 'row', gap: 5, alignItems: 'center' },
-  pip: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.line },
-  pipTaken: { backgroundColor: colors.primary },
-  pipLast: { backgroundColor: colors.accent },
+  pip: { width: 10, height: 10, borderRadius: 5, borderWidth: border.rest, borderColor: colors.ink },
+  pipTaken: { backgroundColor: colors.ink },
+  pipLast: { borderWidth: border.selected },
 
-  tile: { alignItems: 'center', justifyContent: 'center' },
-
-  avatar: { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.sunken },
-  avatarInitials: { ...type.label, color: colors.ink },
+  avatar: { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.ink },
+  avatarInitials: { ...type.button, color: colors.paper },
   stack: { flexDirection: 'row', alignItems: 'center' },
   stacked: { marginLeft: -10 },
   stackRest: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.sunken,
+    backgroundColor: colors.surface,
+    borderWidth: border.rest,
+    borderColor: colors.paper,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stackRestLabel: { ...type.caption, fontSize: 11, color: colors.muted },
+  stackRestLabel: { ...type.caption, fontSize: 11, color: colors.ink },
 
   spine: { flexDirection: 'row', gap: space.md },
   spineRail: { alignItems: 'center', paddingVertical: 6 },
@@ -751,72 +911,132 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    borderWidth: 2.5,
-    borderColor: colors.primary,
+    borderWidth: 2,
+    borderColor: colors.ink,
+    backgroundColor: colors.paper,
   },
-  spineDotEnd: { backgroundColor: colors.primary },
-  spineLine: { flex: 1, width: 2, minHeight: 26, backgroundColor: colors.line },
+  spineDotEnd: { backgroundColor: colors.ink },
+  spineLine: { flex: 1, width: 2, minHeight: 26, backgroundColor: colors.ink },
   spineStops: { flex: 1, justifyContent: 'space-between', gap: space.lg },
-  spineStop: { ...type.body, color: colors.ink },
+  spineStop: { ...type.label, fontSize: 16, color: colors.ink },
   spineNote: { ...type.caption, color: colors.muted, marginTop: 2 },
 
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: space.md,
+    minHeight: 52,
+    paddingVertical: space.sm,
     gap: space.md,
   },
   rowLabel: { ...type.body, color: colors.ink, flexShrink: 1 },
-  rowValue: { ...type.label, color: colors.primary },
+  rowValue: { ...type.label, color: colors.ink },
 
   field: {
-    backgroundColor: colors.sunken,
-    borderRadius: radius.inner,
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    backgroundColor: colors.paper,
+    borderRadius: radius.control,
+    borderWidth: border.rest,
+    borderColor: colors.line,
+    minHeight: sizes.cta,
+    paddingHorizontal: space.lg - border.rest,
+    paddingVertical: 7,
+    justifyContent: 'center',
   },
   fieldCompact: { flex: 1 },
-  fieldValid: { borderBottomColor: colors.primary },
-  fieldMultiline: { minHeight: 88 },
-  fieldLabel: { ...type.caption, fontSize: 12, color: colors.muted },
-  fieldInput: { ...type.body, color: colors.ink, paddingVertical: 4, minHeight: 30 },
-
-  stepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.sunken,
-    borderRadius: radius.pill,
-    padding: 4,
-    gap: space.sm,
+  fieldValid: { borderColor: colors.ink },
+  fieldFocused: {
+    borderWidth: border.selected,
+    borderColor: colors.ink,
+    paddingHorizontal: space.lg - border.selected,
+    paddingVertical: 7 - (border.selected - border.rest),
   },
+  fieldMultiline: { minHeight: 88 },
+  fieldLabel: { ...type.caption, fontSize: 12, lineHeight: 16, color: colors.muted },
+  fieldInput: { ...type.body, color: colors.ink, paddingVertical: 2, minHeight: 26 },
+
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   stepperButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: colors.surface,
+    width: sizes.tap,
+    height: sizes.tap,
+    borderRadius: sizes.tap / 2,
+    borderWidth: border.rest,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stepperGlyph: { ...type.title, color: colors.ink, lineHeight: 24 },
-  stepperValue: { ...type.label, fontSize: 16, color: colors.ink, minWidth: 18, textAlign: 'center' },
+  stepperValue: { ...type.time, fontSize: 22, color: colors.ink, minWidth: 22, textAlign: 'center' },
 
   chip: {
     flex: 1,
+    flexDirection: 'row',
+    gap: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: space.md,
+    minHeight: sizes.tap,
+    paddingVertical: space.sm,
     // A long Greek word wraps inside the chip instead of touching its edges;
     // «Σαββατοκύριακο» did at the width of an ordinary phone.
-    paddingHorizontal: space.xs,
-    borderRadius: radius.inner,
-    backgroundColor: colors.sunken,
+    paddingHorizontal: space.xs + 1.5,
+    borderRadius: radius.chip,
+    borderWidth: border.rest,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
   },
+  // An icon goes above its word: side by side, four of them left no room for
+  // «Κανονική βαλίτσα».
+  chipStacked: { flexDirection: 'column', gap: 2 },
   chipFit: { flexGrow: 1, flexBasis: 'auto', paddingHorizontal: space.md },
-  chipGlyph: { fontSize: 20, lineHeight: 24 },
-  chipSelected: { backgroundColor: colors.primary },
-  chipLabel: { ...type.label, color: colors.muted, textAlign: 'center' },
-  chipLabelSelected: { color: colors.primaryInk },
+  chipSelected: {
+    borderWidth: border.selected,
+    borderColor: colors.ink,
+    paddingVertical: space.sm - 1.5,
+    paddingHorizontal: space.xs,
+  },
+  chipLabel: { ...type.label, color: colors.muted, textAlign: 'center', flexShrink: 1 },
+  chipLabelSelected: { color: colors.ink },
+
+  skeleton: { gap: space.md, paddingVertical: space.sm },
+  skeletonBlock: { height: 96, borderRadius: radius.card, backgroundColor: colors.surface },
+
+  segTrack: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderRadius: radius.control,
+    padding: 4,
+    gap: 4,
+  },
+  seg: {
+    flex: 1,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.control - 3,
+    borderWidth: border.rest,
+    borderColor: 'transparent',
+    paddingHorizontal: space.sm,
+  },
+  segOn: { backgroundColor: colors.paper, borderColor: colors.ink },
+  segLabel: { ...type.label, color: colors.muted },
+  segLabelOn: { color: colors.ink },
+
+  bottomBar: {
+    backgroundColor: colors.paper,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    paddingHorizontal: space.gutter,
+    paddingTop: space.md,
+    gap: space.sm,
+  },
+
+  iconButton: {
+    width: sizes.tap,
+    height: sizes.tap,
+    borderRadius: sizes.tap / 2,
+    borderWidth: border.rest,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.paper,
+  },
 });

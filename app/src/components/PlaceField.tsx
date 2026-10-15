@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next';
 
 import { api, type Place } from '../api/endpoints';
 import { Field } from './ui';
+import { Icon } from './Icon';
 import { parsePin, type Pin } from '../design/pin';
 import { colors, radius, space, type as typography } from '../design/tokens';
 
@@ -221,6 +222,7 @@ export function PlaceField({
           disabled={locating}
           style={styles.here}
         >
+          <Icon name="locate-outline" size={18} color={colors.ink} />
           <Text style={styles.hereLabel}>{t('places.here')}</Text>
         </Pressable>
       ) : null}
@@ -277,8 +279,8 @@ async function position(): Promise<Location.LocationObject> {
 const styles = StyleSheet.create({
   list: {
     marginTop: space.xs,
-    backgroundColor: colors.surface,
-    borderRadius: radius.inner,
+    backgroundColor: colors.paper,
+    borderRadius: radius.control,
     overflow: 'hidden',
   },
   row: {
@@ -292,7 +294,14 @@ const styles = StyleSheet.create({
   },
   name: { ...typography.body, color: colors.ink },
   kind: { ...typography.caption, color: colors.muted },
-  here: { alignSelf: 'flex-start', paddingVertical: space.xs, marginTop: space.xs },
-  hereLabel: { ...typography.label, color: colors.primary },
+  here: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 44,
+    paddingVertical: space.xs,
+  },
+  hereLabel: { ...typography.label, color: colors.ink },
   empty: { ...typography.caption, color: colors.muted, marginTop: space.xs, paddingHorizontal: space.md },
 });

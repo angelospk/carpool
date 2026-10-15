@@ -148,6 +148,7 @@ export default function OtpScreen() {
 
       <Button
         testID="otp-submit"
+        dot
         label={t('common.next')}
         onPress={submit}
         disabled={code.length !== 6 || busy || resending}
@@ -159,7 +160,7 @@ export default function OtpScreen() {
 const styles = StyleSheet.create({
   top: { gap: space.sm },
   actions: { flexDirection: 'row', justifyContent: 'space-between', gap: space.md },
-  link: { ...type.label, color: colors.primary },
+  link: { ...type.label, color: colors.ink, textDecorationLine: 'underline' },
   linkDisabled: { opacity: 0.5 },
   error: { ...type.body, color: colors.danger },
   input: {
@@ -168,8 +169,8 @@ const styles = StyleSheet.create({
     letterSpacing: 12,
     textAlign: 'center',
     color: colors.ink,
-    backgroundColor: colors.sunken,
-    borderRadius: radius.inner,
+    backgroundColor: colors.surface,
+    borderRadius: radius.control,
     paddingVertical: space.lg,
   },
 });

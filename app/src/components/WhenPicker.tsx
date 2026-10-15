@@ -14,19 +14,20 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
-import { Chip } from './ui';
+import { Chip, SegmentedControl } from './ui';
+import type { IconName } from './Icon';
 import { colors, space, type } from '../design/tokens';
 import { athensDate, bandIsOpen, departureWindow, type Band, type Day } from '../design/when';
 
 const DAYS: Day[] = ['today', 'tomorrow'];
 const BANDS: Band[] = ['now', 'morning', 'midday', 'afternoon', 'evening'];
 
-const BAND_GLYPH: Record<Band, string> = {
-  now: '⚡',
-  morning: '🌅',
-  midday: '☀️',
-  afternoon: '🌤️',
-  evening: '🌙',
+const BAND_ICON: Record<Band, IconName> = {
+  now: 'flash-outline',
+  morning: 'cafe-outline',
+  midday: 'sunny-outline',
+  afternoon: 'partly-sunny-outline',
+  evening: 'moon-outline',
 };
 
 export function WhenPicker({
@@ -68,17 +69,12 @@ export function WhenPicker({
     <View testID={testID} style={styles.box}>
       <Text style={styles.label}>{t('search.when')}</Text>
 
-      <View style={styles.row}>
-        {DAYS.map((d) => (
-          <Chip
-            key={d}
-            testID={testID ? `${testID}-day-${d}` : undefined}
-            label={t(`when.${d}`)}
-            selected={day === d}
-            onPress={() => pickDay(d)}
-          />
-        ))}
-      </View>
+      <SegmentedControl
+        testID={testID ? `${testID}-day` : undefined}
+        options={DAYS.map((d) => ({ value: d, label: t(`when.${d}`) }))}
+        value={day}
+        onChange={pickDay}
+      />
 
       <View style={styles.row}>
         {bands.map((b) => {
@@ -86,7 +82,7 @@ export function WhenPicker({
             <Chip
               key={b}
               testID={testID ? `${testID}-band-${b}` : undefined}
-              glyph={BAND_GLYPH[b]}
+              icon={BAND_ICON[b]}
               // Five do not fit one row at phone width («Μεσημέρι» ran into
               // «Απόγευμα»), so they wrap into an even grid: three and two,
               // or two and two.

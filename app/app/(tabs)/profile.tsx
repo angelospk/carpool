@@ -270,13 +270,13 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  body: { gap: space.md, paddingBottom: 140 },
+  body: { gap: space.md, paddingBottom: space.xl },
   identity: { flexDirection: 'row', alignItems: 'center', gap: space.lg },
   who: { gap: 2, flex: 1 },
   name: { ...type.title, color: colors.ink },
   phone: { ...type.caption, color: colors.muted },
   photoActions: { flexDirection: 'row', gap: space.md, marginTop: space.xs },
-  link: { ...type.caption, color: colors.primary },
+  link: { ...type.caption, color: colors.ink, textDecorationLine: 'underline' },
   divider: { height: 1, backgroundColor: colors.line },
   hint: { ...type.caption, color: colors.muted, marginTop: space.sm },
   error: { ...type.caption, color: colors.danger },

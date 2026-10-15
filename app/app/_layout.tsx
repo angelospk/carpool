@@ -1,4 +1,11 @@
 import { useEffect } from 'react';
+import {
+  useFonts,
+  Commissioner_400Regular,
+  Commissioner_600SemiBold,
+  Commissioner_800ExtraBold,
+  Commissioner_900Black,
+} from '@expo-google-fonts/commissioner';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Platform } from 'react-native';
@@ -19,6 +26,8 @@ import '../src/drive/tracking';
 import { forgetOtherAccounts } from '../src/drive/detection';
 import { restoreLanguage } from '../src/i18n/language';
 import '../src/i18n';
+import { AppHeader } from '../src/components/AppHeader';
+import { colors } from '../src/design/tokens';
 
 // See src/api/baseUrl.ts. On a device this is configuration; on web the API is
 // taken from the host that served the page, because a host baked in at export
@@ -48,6 +57,17 @@ const queryClient = new QueryClient({
 });
 
 export default function RootLayout() {
+  // Commissioner, one file per weight (see src/design/tokens.ts). Rendering is
+  // held only until the files load or fail: a font that will not load leaves
+  // the system face, never a blank app.
+  const [fontsLoaded, fontError] = useFonts({
+    Commissioner_400Regular,
+    Commissioner_600SemiBold,
+    Commissioner_800ExtraBold,
+    Commissioner_900Black,
+  });
+  if (!fontsLoaded && !fontError) return null;
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthGate />
@@ -106,7 +126,13 @@ function AuthGate() {
   }, [status, segments, router]);
 
   return (
-    <Stack screenOptions={{ headerBackTitle: t('common.back') }}>
+    <Stack
+      screenOptions={{
+        headerBackTitle: t('common.back'),
+        header: (props) => <AppHeader {...props} />,
+        contentStyle: { backgroundColor: colors.paper },
+      }}
+    >
       <Stack.Screen name="(auth)" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       {/* Without these, expo-router titles a screen after its own file, so the
@@ -121,6 +147,7 @@ function AuthGate() {
       <Stack.Screen name="profile/groups" options={{ title: t('groups.title') }} />
       <Stack.Screen name="profile/blocked" options={{ title: t('user.blockedTitle') }} />
       <Stack.Screen name="r/[token]" options={{ title: t('sharedRoute.title') }} />
+      <Stack.Screen name="driving" options={{ title: t('drive.driving') }} />
     </Stack>
   );
 }

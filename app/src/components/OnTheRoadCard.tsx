@@ -83,7 +83,7 @@ export function OnTheRoadCard({
           value={offering}
           disabled={busy}
           onValueChange={(on) => adjust.mutate({ offering: on })}
-          trackColor={{ true: colors.primary, false: colors.line }}
+          trackColor={{ true: colors.ink, false: colors.line }}
         />
       </View>
 
