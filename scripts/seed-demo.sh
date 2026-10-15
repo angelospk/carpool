@@ -93,7 +93,8 @@ step "publishing routes for $DAY (weekday $DOW)"
 # and skipped with a warning when the database is not reachable, because a
 # script that silently duplicates is worse than one that says it cannot help.
 DSN=${DATABASE_URL:-postgres://carpool:carpool@localhost:5433/${DB:-lan}?sslmode=disable}
-echo "   database: ${DSN%%\?*}" | sed 's#//[^@]*@#//#'
+# Named, never printed whole: a DSN can carry a password.
+if [[ -n ${DATABASE_URL:-} ]]; then echo "   database: from DATABASE_URL"; else echo "   database: ${DB:-lan}"; fi
 if psql "$DSN" -tAc 'SELECT 1' >/dev/null 2>&1; then
   psql "$DSN" -qtAc "
     UPDATE route_templates SET active = false

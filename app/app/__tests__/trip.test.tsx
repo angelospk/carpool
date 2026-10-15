@@ -427,3 +427,15 @@ test('a driver on the road is not asked whether the trip happened', async () => 
   await screen.findByTestId('route-glyph');
   expect(screen.queryByTestId('trip-confirm')).toBeNull();
 });
+
+// A booking can hold more than one seat. Counting passengers instead of seats
+// drew a car with a seat missing.
+test('the seat pips count booked seats, not passengers', async () => {
+  (api.trip as jest.Mock).mockResolvedValue(
+    tripOf({ seats_free: 1, passengers: [person('me', 'Εγώ', { seats: 2 })] }),
+  );
+  render(<TripScreen />);
+
+  const pips = await screen.findByTestId('seat-pips');
+  expect(pips.props.accessibilityLabel).toBe('1/3');
+});
