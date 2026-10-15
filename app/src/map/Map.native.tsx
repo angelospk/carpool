@@ -33,6 +33,7 @@ import polyline from '@mapbox/polyline';
 import { attribution, haveTiles, rasterStyle } from './tiles';
 import { MapFallback } from './Fallback';
 import type { MapPin } from './Map';
+import { border, colors, radius } from '../design/tokens';
 
 export function Map({
   centre,
@@ -99,7 +100,7 @@ export function Map({
             <Layer
               id="route-line"
               type="line"
-              paint={{ 'line-width': 4, 'line-color': '#1f6f4a' }}
+              paint={{ 'line-width': 4, 'line-color': colors.ink }}
             />
           </GeoJSONSource>
         ) : null}
@@ -114,22 +115,28 @@ export function Map({
 }
 
 const styles = StyleSheet.create({
-  box: { height: 260, borderRadius: 12, overflow: 'hidden' },
+  box: {
+    height: 260,
+    borderRadius: radius.card,
+    borderWidth: border.rest,
+    borderColor: colors.line,
+    overflow: 'hidden',
+  },
   canvas: { flex: 1 },
   pin: {
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: '#1f6f4a',
+    backgroundColor: colors.ink,
     borderWidth: 2,
-    borderColor: '#fff',
+    borderColor: colors.paper,
   },
   attribution: {
     position: 'absolute',
     right: 4,
     bottom: 2,
     fontSize: 10,
-    color: '#333',
+    color: colors.ink,
     backgroundColor: 'rgba(255,255,255,0.7)',
     paddingHorizontal: 4,
   },

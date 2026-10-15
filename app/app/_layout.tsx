@@ -147,6 +147,7 @@ function AuthGate() {
       <Stack.Screen name="profile/groups" options={{ title: t('groups.title') }} />
       <Stack.Screen name="profile/blocked" options={{ title: t('user.blockedTitle') }} />
       <Stack.Screen name="r/[token]" options={{ title: t('sharedRoute.title') }} />
+      <Stack.Screen name="driving" options={{ title: t('drive.driving') }} />
     </Stack>
   );
 }

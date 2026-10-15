@@ -617,6 +617,7 @@ export function Chip({
       onPress={onPress}
       style={[
         styles.chip,
+        icon && styles.chipStacked,
         fit && styles.chipFit,
         minWidth !== undefined && { minWidth, flexGrow: 1, flexBasis: 'auto' },
         selected && styles.chipSelected,
@@ -742,10 +743,27 @@ export function SegmentedControl<T extends string>({
  * the one black button. It sits in the layout under a scrolling body rather
  * than floating over it, so it never covers the last field.
  */
-export function BottomBar({ children }: { children: ReactNode }) {
+export function BottomBar({
+  children,
+  bleed = false,
+  inset = true,
+}: {
+  children: ReactNode;
+  /** Inside a padded Screen: reach out over its side padding to the edges. */
+  bleed?: boolean;
+  /** Off above the tab bar, which already keeps clear of the home indicator. */
+  inset?: boolean;
+}) {
   const insets = useSafeAreaInsets();
+  const roomy = useBreakpoint() !== 'compact';
   return (
-    <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, space.md) }]}>
+    <View
+      style={[
+        styles.bottomBar,
+        bleed && { marginHorizontal: -(roomy ? space.xl : space.gutter), paddingHorizontal: roomy ? space.xl : space.gutter },
+        { paddingBottom: inset ? Math.max(insets.bottom, space.md) : space.md },
+      ]}
+    >
       {children}
     </View>
   );
@@ -965,6 +983,9 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     backgroundColor: colors.paper,
   },
+  // An icon goes above its word: side by side, four of them left no room for
+  // «Κανονική βαλίτσα».
+  chipStacked: { flexDirection: 'column', gap: 2 },
   chipFit: { flexGrow: 1, flexBasis: 'auto', paddingHorizontal: space.md },
   chipSelected: {
     borderWidth: border.selected,

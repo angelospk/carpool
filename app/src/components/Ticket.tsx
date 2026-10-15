@@ -46,7 +46,14 @@ export function Ticket({
   /** Something small beside the note, such as the route glyph. */
   aside?: ReactNode;
   /** The lower half: the driver, with one muted line under the name. */
-  person?: { name: string; photoUrl?: string | null; line?: string; testID?: string };
+  person?: {
+    name: string;
+    /** What is written, when it is more than the name: «Οδηγός: Μαρία». */
+    label?: string;
+    photoUrl?: string | null;
+    line?: string;
+    testID?: string;
+  };
   /** In place of the person, when there is nobody to show: a driver's own seats. */
   lowerLeft?: ReactNode;
   /** «2,37 €». */
@@ -67,8 +74,8 @@ export function Ticket({
         <View testID={person.testID} style={styles.person}>
           <Avatar name={person.name} photoUrl={person.photoUrl} size={40} />
           <View style={styles.personText}>
-            <Text style={styles.personName} numberOfLines={1}>
-              {person.name}
+            <Text style={styles.personName} numberOfLines={2}>
+              {person.label ?? person.name}
             </Text>
             {person.line ? (
               <Text style={styles.personLine} numberOfLines={2}>
@@ -118,11 +125,13 @@ export function Ticket({
           <Text style={styles.place} numberOfLines={2}>
             {depart.place}
           </Text>
+          {/* With no note to sit beside, the aside goes between the places. */}
+          {aside && !note ? aside : null}
           <Text style={[styles.place, styles.placeRight]} numberOfLines={2}>
             {arrive.place}
           </Text>
         </View>
-        {note || aside ? (
+        {note ? (
           <View style={styles.noteRow}>
             <View style={styles.noteText}>
               {typeof note === 'string' ? <Text style={styles.note}>{note}</Text> : note}
@@ -212,7 +221,7 @@ const styles = StyleSheet.create({
   middle: { flex: 1, alignItems: 'center', gap: 2, minWidth: 40 },
   distance: { ...type.label, fontSize: 13, lineHeight: 17, color: colors.muted },
   dashes: { alignSelf: 'stretch', height: 2 },
-  places: { flexDirection: 'row', justifyContent: 'space-between', gap: space.md },
+  places: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: space.md },
   place: { ...type.label, color: colors.muted, flexShrink: 1 },
   placeRight: { textAlign: 'right' },
   noteRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: 4 },
@@ -243,8 +252,8 @@ const styles = StyleSheet.create({
   personText: { flex: 1, gap: 2 },
   personName: { ...type.heading, color: colors.ink },
   personLine: { ...type.caption, color: colors.muted },
-  fareBox: { alignItems: 'flex-end', gap: 2 },
-  fareLabel: { ...type.caption, fontSize: 12, lineHeight: 15, color: colors.muted },
+  fareBox: { alignItems: 'flex-end', gap: 2, maxWidth: '38%' },
+  fareLabel: { ...type.caption, fontSize: 12, lineHeight: 15, color: colors.muted, textAlign: 'right' },
   fare: { paddingHorizontal: 0, paddingVertical: 2, borderRadius: radius.chip },
   fareSelected: { backgroundColor: colors.accent, paddingHorizontal: 10, paddingVertical: 6 },
   fareText: { ...type.time, fontSize: 20, lineHeight: 24, color: colors.onAccent },

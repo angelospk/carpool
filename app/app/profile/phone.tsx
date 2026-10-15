@@ -121,6 +121,7 @@ export default function ChangePhoneScreen() {
       {challenge ? (
         <Button
           testID="phone-confirm"
+          dot
           label={t('common.save')}
           disabled={code.length !== 6 || confirm.isPending}
           onPress={() => confirm.mutate()}
@@ -128,6 +129,7 @@ export default function ChangePhoneScreen() {
       ) : (
         <Button
           testID="phone-request"
+          dot
           label={t('common.next')}
           disabled={!valid || request.isPending}
           onPress={() => request.mutate()}

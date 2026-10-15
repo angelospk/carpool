@@ -193,7 +193,7 @@
     "hamlet": "settlement",
     "noMeetingPoints": "No meeting point is listed here. Agree one between yourselves.",
     "none": "No such place",
-    "here": "📍 From here",
+    "here": "From here",
     "hereFailed": "Could not tell where you are. Type the town.",
     "point": {
       "bus_station": "bus station",

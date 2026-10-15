@@ -13,7 +13,6 @@ import {
   Badge,
   Button,
   Card,
-  RouteSpine,
   Screen,
   SeatPips,
   useBreakpoint,
@@ -35,8 +34,10 @@ import { shareText } from '../../src/components/shareText';
 import { Map } from '../../src/map/Map';
 import polyline from '@mapbox/polyline';
 import { haveTiles } from '../../src/map/tiles';
-import { colors, radius, space, type } from '../../src/design/tokens';
+import { border, colors, radius, size, space, type } from '../../src/design/tokens';
 import { athensDay, athensTime, eur, km } from '../../src/design/format';
+import { approxArrival } from '../../src/design/ticket';
+import { Ticket } from '../../src/components/Ticket';
 
 export default function TripScreen() {
   const { t } = useTranslation();
@@ -228,38 +229,56 @@ export default function TripScreen() {
               <View style={styles.head}>
                 {/* The route's own shape, drawn from the geometry the server
                     routed — the pilot ships without map tiles. */}
-                <Card>
-                  {/* Laid out as the card on the home screen that opened it:
-                      when, then who and where, so the trip does not change
-                      shape between the list and its own page. */}
-                  <View style={styles.hero}>
-                    <View style={styles.heroWhen}>
-                      <Text style={styles.time}>{athensTime(trip.data.depart_earliest)}</Text>
+                {/* Laid out as the ticket on the home screen that opened it,
+                    so the trip does not change shape between the list and
+                    its own page. */}
+                <Ticket
+                  header={
+                    <>
                       <Text style={styles.date}>{athensDay(trip.data.depart_earliest)}</Text>
-                    </View>
-                    <View style={styles.badges}>
-                      <Badge
-                        label={
-                          trip.data.role === 'driver' ? t('home.asDriver') : t('home.asPassenger')
-                        }
-                        tone={trip.data.role === 'driver' ? 'primary' : 'quiet'}
-                      />
-                      <TripStatus phase={phase} confirmed={!!trip.data.confirmed_by_me} />
-                    </View>
-                  </View>
-
-                  <View style={styles.heroBody}>
-                    <View style={styles.heroRoute}>
-                      <RouteSpine from={trip.data.origin_label} to={trip.data.destination_label} />
-                    </View>
+                      <View style={styles.badges}>
+                        <Badge
+                          label={
+                            trip.data.role === 'driver' ? t('home.asDriver') : t('home.asPassenger')
+                          }
+                          tone={trip.data.role === 'driver' ? 'primary' : 'quiet'}
+                        />
+                        <TripStatus phase={phase} confirmed={!!trip.data.confirmed_by_me} />
+                      </View>
+                    </>
+                  }
+                  depart={{ time: athensTime(trip.data.depart_earliest), place: trip.data.origin_label }}
+                  // No driving time comes with a trip, so the arrival is worked
+                  // out from the distance and marked «≈».
+                  arrive={{
+                    time: athensTime(approxArrival(trip.data.depart_earliest, trip.data.route_km)),
+                    place: trip.data.destination_label,
+                    approx: true,
+                  }}
+                  distance={km(trip.data.route_km)}
+                  aside={
                     <RouteGlyph
                       points={decodeRoute(trip.data.route_polyline)}
                       seed={`${trip.data.origin_label}${trip.data.destination_label}`}
                       width={72}
-                      height={64}
+                      height={44}
                       testID="route-glyph"
                     />
-                  </View>
+                  }
+                  // The lower half only when it has something to say: the seats
+                  // left in the driver's car, or the contribution.
+                  lowerLeft={
+                    Number.isFinite(trip.data.seats_free) ? (
+                      <SeatPips
+                        free={trip.data.seats_free}
+                        total={trip.data.seats_free + trip.data.passengers.length}
+                        testID="seat-pips"
+                      />
+                    ) : undefined
+                  }
+                  fare={trip.data.price_eur > 0 ? eur(trip.data.price_eur) : undefined}
+                  fareLabel={trip.data.price_eur > 0 ? t('ask.suggested') : undefined}
+                />
 
                   {trip.data.pickup_at ? (
                     <Text testID="pickup-at" style={styles.pickupAt}>
@@ -268,21 +287,6 @@ export default function TripScreen() {
                   ) : null}
 
                   <PortNotice endsAtPort={trip.data.ends_at_port} />
-
-                  <View style={styles.stats}>
-                    <SeatPips
-                      free={trip.data.seats_free}
-                      total={trip.data.seats_free + trip.data.passengers.length}
-                      testID="seat-pips"
-                    />
-                    <Text style={styles.meta}>{km(trip.data.route_km)}</Text>
-                    {trip.data.price_eur > 0 ? (
-                      <Text style={styles.price}>
-                        {eur(trip.data.price_eur)}{' '}
-                        <Text style={styles.meta}>{t('ask.suggested')}</Text>
-                      </Text>
-                    ) : null}
-                  </View>
 
                   {trip.data.price_breakdown ? (
                     <PriceBreakdown testID="trip-price" breakdown={trip.data.price_breakdown} />
@@ -298,7 +302,6 @@ export default function TripScreen() {
                       polyline={trip.data.route_polyline}
                     />
                   ) : null}
-                </Card>
 
                 <Card>
                   <PersonLink
@@ -612,23 +615,16 @@ const styles = StyleSheet.create({
   chatList: { gap: space.sm, flexGrow: 1, justifyContent: 'flex-end' },
   head: { gap: space.md, paddingBottom: space.sm },
 
-  hero: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: space.md },
-  heroWhen: { gap: 2 },
-  heroBody: { flexDirection: 'row', gap: space.lg, alignItems: 'center' },
-  heroRoute: { flex: 1 },
-  time: { ...type.display, fontSize: 34, color: colors.ink },
-  date: { ...type.caption, color: colors.muted },
-
-  stats: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  date: { ...type.label, color: colors.ink, flexShrink: 1 },
   meta: { ...type.caption, color: colors.muted },
-  price: { ...type.label, color: colors.ink, marginLeft: 'auto' },
 
   person: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   personText: { flex: 1, gap: 2 },
-  personName: { ...type.body, color: colors.ink },
+  personName: { ...type.heading, color: colors.ink },
   plate: {
-    borderRadius: radius.control,
-    backgroundColor: colors.surface,
+    borderRadius: radius.chip,
+    borderWidth: border.selected,
+    borderColor: colors.ink,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
   },
@@ -645,6 +641,8 @@ const styles = StyleSheet.create({
   bubble: {
     maxWidth: '82%',
     backgroundColor: colors.paper,
+    borderWidth: border.rest,
+    borderColor: colors.line,
     borderRadius: radius.control,
     borderBottomLeftRadius: 4,
     paddingHorizontal: space.md,
@@ -660,7 +658,7 @@ const styles = StyleSheet.create({
   bubbleText: { ...type.body, color: colors.ink },
   bubbleTextMine: { color: colors.paper },
   bubbleTime: { ...type.caption, fontSize: 11, color: colors.muted, alignSelf: 'flex-end' },
-  bubbleTimeMine: { color: 'rgba(246,245,241,0.7)' },
+  bubbleTimeMine: { color: 'rgba(255,255,255,0.7)' },
 
   composer: {
     flexDirection: 'row',
@@ -673,7 +671,10 @@ const styles = StyleSheet.create({
     ...type.body,
     color: colors.ink,
     backgroundColor: colors.paper,
-    borderRadius: radius.full,
+    borderWidth: border.rest,
+    borderColor: colors.line,
+    borderRadius: radius.control,
+    minHeight: size.cta,
     paddingHorizontal: space.lg,
     paddingVertical: space.md,
   },

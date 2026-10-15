@@ -6,7 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { api, type LuggageSize } from '../../src/api/endpoints';
 import { refusalText } from '../../src/api/errorText';
-import { Button, Card, Hint, Screen, Stepper, Title } from '../../src/components/ui';
+import { BottomBar, Button, Card, Hint, Screen, Stepper, Title } from '../../src/components/ui';
 import { PlaceField } from '../../src/components/PlaceField';
 import { LuggagePicker } from '../../src/components/LuggagePicker';
 import { WhenPicker } from '../../src/components/WhenPicker';
@@ -154,27 +154,28 @@ export default function SearchScreen() {
           </View>
         </Card>
 
-        {outcome ? <Hint>{outcome}</Hint> : null}
-
         <Hint>{t(on ? 'search.whatHappens' : 'search.whatHappensNoPush')}</Hint>
-
+      </ScrollView>
+      <BottomBar bleed inset={false}>
+        {outcome ? <Hint>{outcome}</Hint> : null}
         <Button
           testID="search-submit"
           label={t('search.post')}
+          dot
           onPress={() => create.mutate()}
           disabled={!from || !to || create.isPending}
         />
-      </ScrollView>
+      </BottomBar>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  body: { gap: space.lg, paddingBottom: 140 },
+  body: { gap: space.lg, paddingBottom: space.xl },
   pins: { flexDirection: 'row', gap: space.md },
   rail: { alignItems: 'center', paddingVertical: 26 },
   dot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2.5, borderColor: colors.line },
-  dotSet: { borderColor: colors.ink },
+  dotSet: { borderColor: colors.ink, backgroundColor: colors.ink },
   line: { flex: 1, width: 2, backgroundColor: colors.line, minHeight: 20 },
   fields: { flex: 1, gap: space.sm },
   seats: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

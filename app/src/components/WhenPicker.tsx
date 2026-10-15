@@ -14,7 +14,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
-import { Chip } from './ui';
+import { Chip, SegmentedControl } from './ui';
 import type { IconName } from './Icon';
 import { colors, space, type } from '../design/tokens';
 import { athensDate, bandIsOpen, departureWindow, type Band, type Day } from '../design/when';
@@ -69,17 +69,12 @@ export function WhenPicker({
     <View testID={testID} style={styles.box}>
       <Text style={styles.label}>{t('search.when')}</Text>
 
-      <View style={styles.row}>
-        {DAYS.map((d) => (
-          <Chip
-            key={d}
-            testID={testID ? `${testID}-day-${d}` : undefined}
-            label={t(`when.${d}`)}
-            selected={day === d}
-            onPress={() => pickDay(d)}
-          />
-        ))}
-      </View>
+      <SegmentedControl
+        testID={testID ? `${testID}-day` : undefined}
+        options={DAYS.map((d) => ({ value: d, label: t(`when.${d}`) }))}
+        value={day}
+        onChange={pickDay}
+      />
 
       <View style={styles.row}>
         {bands.map((b) => {

@@ -190,6 +190,7 @@ export default function AskScreen() {
         <View style={styles.actions}>
           <Button
             testID="ask-accept"
+            dot
             label={t('ask.accept')}
             onPress={() => accept.mutate()}
             disabled={busy}

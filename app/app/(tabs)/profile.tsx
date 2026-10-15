@@ -270,7 +270,7 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  body: { gap: space.md, paddingBottom: 140 },
+  body: { gap: space.md, paddingBottom: space.xl },
   identity: { flexDirection: 'row', alignItems: 'center', gap: space.lg },
   who: { gap: 2, flex: 1 },
   name: { ...type.title, color: colors.ink },

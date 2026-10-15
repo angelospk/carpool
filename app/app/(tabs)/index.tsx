@@ -340,8 +340,9 @@ function NextTrip({ trip, onPress }: { trip: TripSummary; onPress: () => void })
         trip.role === 'passenger' && detail.data
           ? {
               name: detail.data.driver.name,
+              label: t('home.withDriver', { name: detail.data.driver.name }),
               photoUrl: detail.data.driver.photo_url,
-              line: t('home.withDriver', { name: detail.data.driver.name }),
+              line: [detail.data.driver.car_model, detail.data.driver.car_color].filter(Boolean).join(' · '),
             }
           : undefined
       }
@@ -452,7 +453,7 @@ const styles = StyleSheet.create({
   columns: { flex: 1, flexDirection: 'row', gap: space.xl },
   main: { flex: 3, minWidth: 0 },
   side: { flex: 2 },
-  sideBody: { gap: space.md, paddingTop: space.sm, paddingBottom: 120 },
+  sideBody: { gap: space.md, paddingTop: space.sm, paddingBottom: space.xl },
   glanceTitle: { ...type.caption, color: colors.muted, marginBottom: space.sm },
   glanceRow: { flexDirection: 'row', justifyContent: 'space-between', gap: space.md },
   stat: { flex: 1, gap: 2 },

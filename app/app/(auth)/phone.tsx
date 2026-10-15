@@ -84,6 +84,7 @@ export default function PhoneScreen() {
 
       <Button
         testID="phone-submit"
+        dot
         label={t('common.next')}
         onPress={submit}
         disabled={!valid || busy}

@@ -148,6 +148,7 @@ export default function OtpScreen() {
 
       <Button
         testID="otp-submit"
+        dot
         label={t('common.next')}
         onPress={submit}
         disabled={code.length !== 6 || busy || resending}
