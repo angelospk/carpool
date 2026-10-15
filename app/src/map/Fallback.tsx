@@ -21,8 +21,8 @@ export function MapFallback({ testID }: { testID?: string }) {
 
 const styles = StyleSheet.create({
   box: {
-    backgroundColor: colors.sunken,
-    borderRadius: radius.inner,
+    backgroundColor: colors.surface,
+    borderRadius: radius.control,
     padding: space.lg,
     alignItems: 'center',
   },

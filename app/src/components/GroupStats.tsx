@@ -48,8 +48,8 @@ const styles = StyleSheet.create({
   cell: {
     flexGrow: 1,
     flexBasis: '45%',
-    backgroundColor: colors.sunken,
-    borderRadius: radius.inner,
+    backgroundColor: colors.surface,
+    borderRadius: radius.control,
     padding: space.md,
   },
   value: { ...type.display, color: colors.ink },

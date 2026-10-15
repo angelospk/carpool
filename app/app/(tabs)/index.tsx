@@ -1,4 +1,4 @@
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
@@ -15,14 +15,17 @@ import {
   Avatar,
   Badge,
   Card,
-  RouteSpine,
   Button,
+  usePressScale,
   Screen,
   SectionHeader,
   useBreakpoint,
 } from '../../src/components/ui';
 import { RouteGlyph, decodeRoute } from '../../src/components/RouteGlyph';
-import { colors, lift, radius, space, type } from '../../src/design/tokens';
+import { Ticket } from '../../src/components/Ticket';
+import { Icon, type IconName } from '../../src/components/Icon';
+import { border, colors, radius, size, space, type } from '../../src/design/tokens';
+import { approxArrival } from '../../src/design/ticket';
 import { athensDay, athensTime, eur, greetingKey, km, startsNewDay } from '../../src/design/format';
 import { thisWeek } from '../../src/design/upcoming';
 
@@ -205,10 +208,10 @@ function Hero({
       </View>
       {quick ? (
         <View style={styles.quick}>
-          <QuickAction testID="quick-ask" glyph="⌕" label={t('home.quickAsk')} onPress={onAsk} />
+          <QuickAction testID="quick-ask" icon="search" label={t('home.quickAsk')} onPress={onAsk} />
           <QuickAction
             testID="quick-offer"
-            glyph="＋"
+            icon="add"
             label={t('home.quickOffer')}
             onPress={onOffer}
             tone="accent"
@@ -253,32 +256,35 @@ function Stat({ value, label, tone }: { value: string; label: string; tone?: 'ac
 }
 
 function QuickAction({
-  glyph,
+  icon,
   label,
   onPress,
   tone = 'primary',
   testID,
 }: {
-  glyph: string;
+  icon: IconName;
   label: string;
   onPress: () => void;
   tone?: 'primary' | 'accent';
   testID?: string;
 }) {
+  const press = usePressScale();
   return (
     <Pressable
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.quickAction,
-        tone === 'accent' && styles.quickActionAccent,
-        pressed && styles.quickPressed,
-      ]}
+      onPressIn={press.onPressIn}
+      onPressOut={press.onPressOut}
+      style={styles.quickPress}
     >
-      <Text style={[styles.quickGlyph, tone === 'accent' && styles.quickGlyphAccent]}>{glyph}</Text>
-      <Text style={[styles.quickLabel, tone === 'accent' && styles.quickLabelAccent]}>{label}</Text>
+      <Animated.View style={[styles.quickAction, tone === 'accent' && styles.quickActionAccent, press.style]}>
+        <Icon name={icon} size={20} color={tone === 'accent' ? colors.ink : colors.paper} />
+        <Text numberOfLines={2} style={[styles.quickLabel, tone === 'accent' && styles.quickLabelAccent]}>
+          {label}
+        </Text>
+      </Animated.View>
     </Pressable>
   );
 }
@@ -296,58 +302,63 @@ function NextTrip({ trip, onPress }: { trip: TripSummary; onPress: () => void })
   const detail = useQuery({ queryKey: ['trips', trip.id], queryFn: () => api.trip(trip.id) });
 
   return (
-    <Card testID={`trip-${trip.id}`} onPress={onPress}>
-      <View style={styles.nextTop}>
-        <View style={styles.nextWhen}>
-          <Text style={styles.time}>{athensTime(trip.depart_earliest)}</Text>
+    <Ticket
+      testID={`trip-${trip.id}`}
+      onPress={onPress}
+      header={
+        <>
           <Text style={styles.date}>{athensDay(trip.depart_earliest)}</Text>
-        </View>
-        <Badge
-          label={trip.role === 'driver' ? t('home.asDriver') : t('home.asPassenger')}
-          tone={trip.role === 'driver' ? 'primary' : 'quiet'}
-        />
-      </View>
-
-      {/* The names first and the drawing second. A long Greek place name is
-          what somebody recognises the journey by; the glyph is texture. */}
-      <View style={styles.nextBody}>
-        <View style={styles.nextRoute}>
-          <RouteSpine from={trip.origin_label} to={trip.destination_label} />
-        </View>
+          <Badge
+            label={trip.role === 'driver' ? t('home.asDriver') : t('home.asPassenger')}
+            tone={trip.role === 'driver' ? 'primary' : 'quiet'}
+          />
+        </>
+      }
+      depart={{ time: athensTime(trip.depart_earliest), place: trip.origin_label }}
+      // The summary has no driving time, so the arrival is worked out from the
+      // distance and says so with «≈».
+      arrive={{
+        time: athensTime(approxArrival(trip.depart_earliest, trip.route_km)),
+        place: trip.destination_label,
+        approx: true,
+      }}
+      distance={km(trip.route_km)}
+      // The drawing is texture; the place names are what somebody recognises
+      // the journey by, so it sits small beside them.
+      aside={
         <RouteGlyph
           points={decodeRoute(detail.data?.route_polyline)}
           seed={`${trip.origin_label}${trip.destination_label}`}
           width={72}
-          height={64}
+          height={44}
           testID="route-glyph"
         />
-      </View>
-
-      <View style={styles.footer}>
-        {/* Said in words rather than in pips. The pips drew a total of
-            `seats_free + 1`, which is not the car's capacity and never was —
-            it made a five-seater with one seat left look like a two-seater. */}
-        {trip.role === 'driver' ? (
-          <Text testID="seats-free" style={styles.meta}>
-            {trip.seats_free > 0
-              ? t('home.seatsFree', { count: trip.seats_free })
-              : t('home.seatsFull')}
+      }
+      // A passenger's trip is somebody else's car: who is driving is what
+      // they check, not how many seats the driver has left.
+      person={
+        trip.role === 'passenger' && detail.data
+          ? {
+              name: detail.data.driver.name,
+              photoUrl: detail.data.driver.photo_url,
+              line: t('home.withDriver', { name: detail.data.driver.name }),
+            }
+          : undefined
+      }
+      lowerLeft={
+        // Said in words rather than in pips. The pips drew a total of
+        // `seats_free + 1`, which is not the car's capacity and never was —
+        // it made a five-seater with one seat left look like a two-seater.
+        trip.role === 'driver' ? (
+          <Text testID="seats-free" style={styles.seats}>
+            {trip.seats_free > 0 ? t('home.seatsFree', { count: trip.seats_free }) : t('home.seatsFull')}
           </Text>
-        ) : detail.data ? (
-          // A passenger's trip is somebody else's car: who is driving is what
-          // they check, not how many seats the driver has left.
-          <Text style={styles.meta}>{t('home.withDriver', { name: detail.data.driver.name })}</Text>
-        ) : null}
-        <Text style={styles.meta}>{km(trip.route_km)}</Text>
-        {trip.price_eur > 0 ? (
-          <View style={styles.priceBox}>
-            {/* Bare euros beside a journey reads as a fare. It is not one. */}
-            <Text style={styles.priceLabel}>{t('home.contribution')}</Text>
-            <Text style={styles.price}>{eur(trip.price_eur)}</Text>
-          </View>
-        ) : null}
-      </View>
-    </Card>
+        ) : undefined
+      }
+      // Bare euros beside a journey reads as a fare. It is not one.
+      fare={trip.price_eur > 0 ? eur(trip.price_eur) : undefined}
+      fareLabel={trip.price_eur > 0 ? t('home.contribution') : undefined}
+    />
   );
 }
 
@@ -384,27 +395,26 @@ function TripCard({ trip, onPress }: { trip: TripSummary; onPress: () => void })
   const { t } = useTranslation();
 
   return (
-    <Card testID={`trip-${trip.id}`} onPress={onPress}>
-      <View style={styles.rowCard}>
-        <View style={styles.rowWhen}>
-          <Text style={styles.rowTime}>{athensTime(trip.depart_earliest)}</Text>
-          <View style={styles.rowRail} />
+    <Ticket
+      testID={`trip-${trip.id}`}
+      onPress={onPress}
+      depart={{ time: athensTime(trip.depart_earliest), place: trip.origin_label }}
+      arrive={{
+        time: athensTime(approxArrival(trip.depart_earliest, trip.route_km)),
+        place: trip.destination_label,
+        approx: true,
+      }}
+      distance={km(trip.route_km)}
+      note={
+        <View style={styles.rowNote}>
+          <Badge
+            label={trip.role === 'driver' ? t('home.asDriver') : t('home.asPassenger')}
+            tone={trip.role === 'driver' ? 'primary' : 'quiet'}
+          />
+          {trip.price_eur > 0 ? <Text style={styles.meta}>{eur(trip.price_eur)}</Text> : null}
         </View>
-        <View style={styles.rowMain}>
-          <Text style={styles.route} numberOfLines={2}>
-            {trip.origin_label} → {trip.destination_label}
-          </Text>
-          <Text style={styles.meta}>
-            {km(trip.route_km)}
-            {trip.price_eur > 0 ? ` · ${eur(trip.price_eur)}` : ''}
-          </Text>
-        </View>
-        <Badge
-          label={trip.role === 'driver' ? t('home.asDriver') : t('home.asPassenger')}
-          tone={trip.role === 'driver' ? 'primary' : 'quiet'}
-        />
-      </View>
-    </Card>
+      }
+    />
   );
 }
 
@@ -419,24 +429,25 @@ const styles = StyleSheet.create({
   greeting: { flexDirection: 'row', alignItems: 'center', gap: space.md, flexShrink: 1 },
   greetingText: { flexShrink: 1 },
   hello: { ...type.caption, color: colors.muted },
-  name: { ...type.display, fontSize: 24, color: colors.ink },
-  quick: { flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' },
+  name: { ...type.display, fontSize: 28, lineHeight: 31, color: colors.ink },
+  quick: { flexDirection: 'row', gap: space.sm, width: '100%' },
+  quickPress: { flex: 1 },
   quickAction: {
+    minHeight: size.tap + 4,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: space.sm,
-    paddingHorizontal: space.lg,
-    paddingVertical: space.sm + 2,
-    borderRadius: radius.pill,
-    backgroundColor: colors.primary,
-    ...lift,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.button,
+    borderWidth: border.rest,
+    borderColor: colors.ink,
+    backgroundColor: colors.ink,
   },
-  quickActionAccent: { backgroundColor: colors.accentSoft },
-  quickPressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },
-  quickGlyph: { fontSize: 16, color: colors.primaryInk },
-  quickGlyphAccent: { color: colors.accent },
-  quickLabel: { ...type.label, color: colors.primaryInk },
-  quickLabelAccent: { color: colors.accentInk },
+  quickActionAccent: { backgroundColor: colors.paper },
+  quickLabel: { ...type.button, fontSize: 15, color: colors.paper, flexShrink: 1 },
+  quickLabelAccent: { color: colors.ink },
 
   columns: { flex: 1, flexDirection: 'row', gap: space.xl },
   main: { flex: 3, minWidth: 0 },
@@ -445,36 +456,22 @@ const styles = StyleSheet.create({
   glanceTitle: { ...type.caption, color: colors.muted, marginBottom: space.sm },
   glanceRow: { flexDirection: 'row', justifyContent: 'space-between', gap: space.md },
   stat: { flex: 1, gap: 2 },
-  statValue: { ...type.display, fontSize: 30, color: colors.primary },
-  statValueAccent: { color: colors.accent },
+  statValue: { ...type.time, fontSize: 30, lineHeight: 32, color: colors.ink },
+  statValueAccent: { color: colors.ink },
   statLabel: { ...type.caption, color: colors.muted },
 
   list: { gap: space.md, paddingBottom: 120, paddingTop: space.sm },
   listHeader: { gap: space.md },
-  day: { ...type.caption, color: colors.muted, marginTop: space.sm, marginLeft: space.xs },
+  day: { ...type.label, fontSize: 13, color: colors.muted, marginTop: space.sm },
 
-  nextTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
-  nextWhen: { gap: 2 },
-  time: { ...type.display, fontSize: 34, color: colors.ink },
-  date: { ...type.caption, color: colors.muted },
-  nextBody: { flexDirection: 'row', gap: space.lg, alignItems: 'center' },
-  nextRoute: { flex: 1 },
-
-  footer: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  date: { ...type.label, color: colors.ink },
+  seats: { ...type.label, color: colors.ink },
   meta: { ...type.caption, color: colors.muted },
-  priceBox: { marginLeft: 'auto', alignItems: 'flex-end' },
-  priceLabel: { ...type.caption, color: colors.muted, fontSize: 11 },
-  price: { ...type.label, color: colors.primary },
 
   firstRun: { flex: 1, justifyContent: 'center', gap: space.md, paddingBottom: 80 },
-  firstRunTitle: { ...type.display, fontSize: 26, color: colors.ink },
+  firstRunTitle: { ...type.display, color: colors.ink },
   firstRunBody: { ...type.body, color: colors.muted },
   firstRunActions: { gap: space.sm, marginTop: space.sm },
 
-  rowCard: { flexDirection: 'row', alignItems: 'center', gap: space.md },
-  rowWhen: { alignItems: 'center', gap: 6 },
-  rowTime: { ...type.label, fontSize: 15, color: colors.ink },
-  rowRail: { width: 2, height: 18, borderRadius: 1, backgroundColor: colors.line },
-  rowMain: { flex: 1, gap: 2 },
-  route: { ...type.body, color: colors.ink },
+  rowNote: { flexDirection: 'row', alignItems: 'center', gap: space.md },
 });

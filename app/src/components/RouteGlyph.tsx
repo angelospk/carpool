@@ -7,7 +7,7 @@ import { View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import polyline from '@mapbox/polyline';
 
-import { colors, radius, tileColor } from '../design/tokens';
+import { border, colors, radius } from '../design/tokens';
 import { glyphPath, type LatLon } from '../design/routeGlyph';
 
 export function RouteGlyph({
@@ -37,8 +37,10 @@ export function RouteGlyph({
       style={{
         width,
         height,
-        borderRadius: radius.inner,
-        backgroundColor: tileColor(seed),
+        borderRadius: radius.control,
+        backgroundColor: colors.paper,
+        borderWidth: border.rest,
+        borderColor: colors.line,
         overflow: 'hidden',
       }}
     >
@@ -47,14 +49,14 @@ export function RouteGlyph({
           <>
             <Path
               d={d}
-              stroke={colors.primary}
+              stroke={colors.ink}
               strokeWidth={2.5}
               strokeLinecap="round"
               strokeLinejoin="round"
               fill="none"
             />
-            <Circle cx={+first[1]} cy={+first[2]} r={3.5} fill={colors.surface} stroke={colors.primary} strokeWidth={2} />
-            <Circle cx={+last[1]} cy={+last[2]} r={4} fill={colors.accent} />
+            <Circle cx={+first[1]} cy={+first[2]} r={3.5} fill={colors.paper} stroke={colors.ink} strokeWidth={2} />
+            <Circle cx={+last[1]} cy={+last[2]} r={4} fill={colors.ink} />
           </>
         ) : null}
       </Svg>

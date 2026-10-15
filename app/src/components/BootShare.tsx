@@ -112,6 +112,6 @@ const styles = StyleSheet.create({
   box: { gap: space.xs },
   label: { ...type.caption, color: colors.ink },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
-  result: { ...type.label, color: colors.primary },
+  result: { ...type.label, color: colors.ink },
   warning: { ...type.caption, color: colors.danger },
 });

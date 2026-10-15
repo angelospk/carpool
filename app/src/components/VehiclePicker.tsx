@@ -138,9 +138,9 @@ export function VehiclePicker({
 const styles = StyleSheet.create({
   box: { gap: space.xs },
   label: { ...type.body, color: colors.ink },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, borderRadius: radius.pill },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, borderRadius: radius.full },
   single: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   carName: { ...type.label, color: colors.ink },
   hint: { ...type.caption, color: colors.muted },
-  link: { ...type.caption, color: colors.primary },
+  link: { ...type.caption, color: colors.ink },
 });

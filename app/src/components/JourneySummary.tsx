@@ -79,7 +79,7 @@ export function whenLine(start?: string, end?: string): string {
 const styles = StyleSheet.create({
   wrap: { gap: space.sm },
   when: { ...type.label, color: colors.ink },
-  status: { ...type.caption, color: colors.accent, fontWeight: '700' },
+  status: { ...type.label, fontSize: 13, color: colors.ink },
   statusMuted: { color: colors.muted },
   statusDanger: { color: colors.danger },
 });

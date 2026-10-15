@@ -12,30 +12,31 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
 import { CONTRADICTIONS, PREFERENCE_TAGS, type PreferenceTag } from '../api/endpoints';
-import { colors, radius, space, type } from '../design/tokens';
+import { border, colors, fonts, radius, space, type } from '../design/tokens';
+import { Icon, type IconName } from './Icon';
 
 /**
  * One picture per tag.
  *
  * Nine tags in a wrapped row of pills came out as three cramped columns of
- * half-read words, and the reading was the whole point. A glyph is read before
+ * half-read words, and the reading was the whole point. An icon is read before
  * the sentence beside it, which is what lets these be a list of switches rather
  * than a wall.
  *
  * It lives here rather than in the translations because it is not language: a
- * cigarette is a cigarette in both files, and duplicating it into each one is
- * how the two drift apart.
+ * paw is a paw in both files, and duplicating it into each one is how the two
+ * drift apart. Ionicons, never emoji: see components/Icon.
  */
-export const PREFERENCE_EMOJI: Record<PreferenceTag, string> = {
-  no_smoking: '🚭',
-  smoking_ok: '🚬',
-  no_pets: '🐾',
-  pets_ok: '🐕',
-  quiet_ride: '🤫',
-  music_on: '🎵',
-  chatty: '💬',
-  keep_to_myself: '🎧',
-  air_conditioning: '❄️',
+export const PREFERENCE_ICON: Record<PreferenceTag, IconName> = {
+  no_smoking: 'ban-outline',
+  smoking_ok: 'flame-outline',
+  no_pets: 'close-circle-outline',
+  pets_ok: 'paw-outline',
+  quiet_ride: 'volume-mute-outline',
+  music_on: 'musical-notes-outline',
+  chatty: 'chatbubbles-outline',
+  keep_to_myself: 'headset-outline',
+  air_conditioning: 'snow-outline',
 };
 
 /** What somebody says about themselves, shown to somebody else. */
@@ -52,7 +53,7 @@ export function PreferenceChips({
   // A tag this build has never heard of is dropped rather than rendered as a
   // raw key: the vocabulary is the server's, and it may grow before the app on
   // somebody's phone does.
-  const shown = (tags ?? []).filter((tag) => tag in PREFERENCE_EMOJI);
+  const shown = (tags ?? []).filter((tag) => tag in PREFERENCE_ICON);
   if (shown.length === 0 && !bio) return null;
 
   return (
@@ -67,13 +68,12 @@ export function PreferenceChips({
       {shown.length > 0 ? (
         <View style={styles.row}>
           {shown.map((tag) => (
-            <Text
-              key={tag}
-              testID={testID ? `${testID}-${tag}` : undefined}
-              style={styles.tag}
-            >
-              {PREFERENCE_EMOJI[tag]} {t(`preferences.${tag}`)}
-            </Text>
+            <View key={tag} style={styles.tag}>
+              <Icon name={PREFERENCE_ICON[tag]} size={16} color={colors.ink} />
+              <Text testID={testID ? `${testID}-${tag}` : undefined} style={styles.tagLabel}>
+                {t(`preferences.${tag}`)}
+              </Text>
+            </View>
           ))}
         </View>
       ) : null}
@@ -84,7 +84,7 @@ export function PreferenceChips({
 /**
  * Choosing your own.
  *
- * One switch per line: the glyph, the sentence, and a state you can see from
+ * One switch per line: the icon, the sentence, and a state you can see from
  * across the room. The list is long enough that it only belongs inside
  * something that scrolls, which is where both of its callers put it.
  */
@@ -128,7 +128,12 @@ export function PreferencePicker({
             onPress={() => toggle(tag)}
             style={[styles.item, on && styles.itemOn]}
           >
-            <Text style={styles.emoji}>{PREFERENCE_EMOJI[tag]}</Text>
+            <Icon
+              testID={testID ? `${testID}-${tag}-icon` : undefined}
+              name={PREFERENCE_ICON[tag]}
+              size={20}
+              color={on ? colors.ink : colors.muted}
+            />
             <Text style={[styles.itemLabel, on && styles.itemLabelOn]}>
               {t(`preferences.${tag}`)}
             </Text>
@@ -146,33 +151,37 @@ export function PreferencePicker({
 }
 
 const styles = StyleSheet.create({
-  box: { gap: space.xs, marginTop: space.xs },
+  box: { gap: space.sm, marginTop: space.xs },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
   bio: { ...type.body, color: colors.ink },
   tag: {
-    ...type.caption,
-    color: colors.muted,
-    backgroundColor: colors.sunken,
-    paddingVertical: space.xs,
-    paddingHorizontal: space.sm,
-    borderRadius: radius.pill,
-    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: radius.chip,
+    borderWidth: border.rest,
+    borderColor: colors.line,
   },
+  tagLabel: { ...type.caption, color: colors.ink },
 
-  list: { gap: space.xs },
+  list: { gap: space.sm },
   item: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
+    minHeight: 52,
     paddingVertical: space.sm,
-    paddingHorizontal: space.md,
-    borderRadius: radius.inner,
-    backgroundColor: colors.sunken,
+    paddingHorizontal: space.md + border.selected - border.rest,
+    borderRadius: radius.control,
+    borderWidth: border.rest,
+    borderColor: colors.line,
   },
-  itemOn: { backgroundColor: colors.accentSoft },
-  emoji: { fontSize: 20 },
+  // The 3px border takes its width out of the padding, so the row does not move.
+  itemOn: { borderWidth: border.selected, borderColor: colors.ink, paddingHorizontal: space.md },
   itemLabel: { ...type.body, color: colors.muted, flex: 1 },
   itemLabelOn: { color: colors.ink },
   state: { ...type.caption, color: colors.muted },
-  stateOn: { color: colors.primary, fontWeight: '700' },
+  stateOn: { color: colors.ink, fontFamily: fonts.extraBold },
 });

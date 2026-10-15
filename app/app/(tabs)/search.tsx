@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
   pins: { flexDirection: 'row', gap: space.md },
   rail: { alignItems: 'center', paddingVertical: 26 },
   dot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2.5, borderColor: colors.line },
-  dotSet: { borderColor: colors.primary },
+  dotSet: { borderColor: colors.ink },
   line: { flex: 1, width: 2, backgroundColor: colors.line, minHeight: 20 },
   fields: { flex: 1, gap: space.sm },
   seats: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

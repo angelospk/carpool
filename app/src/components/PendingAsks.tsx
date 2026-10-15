@@ -68,5 +68,5 @@ const styles = StyleSheet.create({
   wrap: { gap: space.sm },
   heading: { ...type.caption, color: colors.muted, marginLeft: space.xs },
   top: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginBottom: space.sm },
-  who: { ...type.body, color: colors.ink, flex: 1, fontWeight: '700' },
+  who: { ...type.heading, color: colors.ink, flex: 1 },
 });

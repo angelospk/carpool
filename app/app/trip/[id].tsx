@@ -596,7 +596,7 @@ export default function TripScreen() {
 
 const styles = StyleSheet.create({
   label: { ...type.caption, color: colors.muted, marginBottom: space.xs },
-  pickupAt: { ...type.body, color: colors.ink, fontWeight: '600', marginTop: space.sm },
+  pickupAt: { ...type.label, fontSize: 16, color: colors.ink, marginTop: space.sm },
   here: { marginTop: space.sm },
   list: { gap: space.sm, paddingBottom: space.lg },
   columns: { flex: 1, flexDirection: 'row', gap: space.xl },
@@ -604,7 +604,7 @@ const styles = StyleSheet.create({
   chatColumn: {
     flex: 1,
     gap: space.sm,
-    backgroundColor: colors.sunken,
+    backgroundColor: colors.surface,
     borderRadius: radius.card,
     padding: space.lg,
     marginBottom: space.lg,
@@ -621,18 +621,18 @@ const styles = StyleSheet.create({
 
   stats: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   meta: { ...type.caption, color: colors.muted },
-  price: { ...type.label, color: colors.primary, marginLeft: 'auto' },
+  price: { ...type.label, color: colors.ink, marginLeft: 'auto' },
 
   person: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   personText: { flex: 1, gap: 2 },
   personName: { ...type.body, color: colors.ink },
   plate: {
-    borderRadius: radius.inner,
-    backgroundColor: colors.sunken,
+    borderRadius: radius.control,
+    backgroundColor: colors.surface,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
   },
-  plateText: { ...type.mono, color: colors.ink },
+  plateText: { ...type.label, color: colors.ink },
 
   notice: { ...type.body, color: colors.danger },
   sendFailed: { ...type.caption, color: colors.danger, marginBottom: space.xs },
@@ -644,21 +644,21 @@ const styles = StyleSheet.create({
   bubbleRowMine: { alignItems: 'flex-end' },
   bubble: {
     maxWidth: '82%',
-    backgroundColor: colors.surface,
-    borderRadius: radius.inner,
+    backgroundColor: colors.paper,
+    borderRadius: radius.control,
     borderBottomLeftRadius: 4,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
     gap: 2,
   },
   bubbleMine: {
-    backgroundColor: colors.primary,
-    borderBottomLeftRadius: radius.inner,
+    backgroundColor: colors.ink,
+    borderBottomLeftRadius: radius.control,
     borderBottomRightRadius: 4,
   },
   sender: { ...type.caption, fontSize: 12, color: colors.muted },
   bubbleText: { ...type.body, color: colors.ink },
-  bubbleTextMine: { color: colors.primaryInk },
+  bubbleTextMine: { color: colors.paper },
   bubbleTime: { ...type.caption, fontSize: 11, color: colors.muted, alignSelf: 'flex-end' },
   bubbleTimeMine: { color: 'rgba(246,245,241,0.7)' },
 
@@ -672,8 +672,8 @@ const styles = StyleSheet.create({
     flex: 1,
     ...type.body,
     color: colors.ink,
-    backgroundColor: colors.surface,
-    borderRadius: radius.pill,
+    backgroundColor: colors.paper,
+    borderRadius: radius.full,
     paddingHorizontal: space.lg,
     paddingVertical: space.md,
   },

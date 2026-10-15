@@ -108,7 +108,7 @@ export function RepeatCard({ trip }: { trip: TripDetail }) {
             disabled={busy}
             value={Boolean(mine)}
             onValueChange={(on) => (on ? ask.mutate() : end.mutate())}
-            trackColor={{ true: colors.primary, false: colors.line }}
+            trackColor={{ true: colors.ink, false: colors.line }}
           />
         ) : null}
       </View>
@@ -144,14 +144,14 @@ export function RepeatCard({ trip }: { trip: TripDetail }) {
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   text: { flex: 1 },
-  title: { ...type.body, color: colors.ink, fontWeight: '600' },
+  title: { ...type.label, fontSize: 16, color: colors.ink },
   hint: { ...type.caption, color: colors.muted, marginTop: 2 },
   actions: { flexDirection: 'row', gap: space.sm, marginTop: space.md },
   notice: {
     ...type.caption,
     color: colors.ink,
-    backgroundColor: colors.sunken,
-    borderRadius: radius.inner,
+    backgroundColor: colors.surface,
+    borderRadius: radius.control,
     padding: space.sm,
     marginTop: space.sm,
   },

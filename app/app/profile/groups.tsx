@@ -244,10 +244,10 @@ const styles = StyleSheet.create({
   error: { ...type.body, color: colors.danger },
   codeRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.sm },
   code: {
-    ...type.mono,
+    ...type.label,
     color: colors.ink,
-    backgroundColor: colors.sunken,
-    borderRadius: radius.inner,
+    backgroundColor: colors.surface,
+    borderRadius: radius.control,
     paddingHorizontal: space.md,
     paddingVertical: space.xs,
     letterSpacing: 2,

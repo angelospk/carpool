@@ -15,18 +15,19 @@ import { StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
 import { Chip } from './ui';
+import type { IconName } from './Icon';
 import { colors, space, type } from '../design/tokens';
 import { athensDate, bandIsOpen, departureWindow, type Band, type Day } from '../design/when';
 
 const DAYS: Day[] = ['today', 'tomorrow'];
 const BANDS: Band[] = ['now', 'morning', 'midday', 'afternoon', 'evening'];
 
-const BAND_GLYPH: Record<Band, string> = {
-  now: '⚡',
-  morning: '🌅',
-  midday: '☀️',
-  afternoon: '🌤️',
-  evening: '🌙',
+const BAND_ICON: Record<Band, IconName> = {
+  now: 'flash-outline',
+  morning: 'cafe-outline',
+  midday: 'sunny-outline',
+  afternoon: 'partly-sunny-outline',
+  evening: 'moon-outline',
 };
 
 export function WhenPicker({
@@ -86,7 +87,7 @@ export function WhenPicker({
             <Chip
               key={b}
               testID={testID ? `${testID}-band-${b}` : undefined}
-              glyph={BAND_GLYPH[b]}
+              icon={BAND_ICON[b]}
               // Five do not fit one row at phone width («Μεσημέρι» ran into
               // «Απόγευμα»), so they wrap into an even grid: three and two,
               // or two and two.

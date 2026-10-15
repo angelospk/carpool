@@ -79,8 +79,8 @@ const styles = StyleSheet.create({
   box: {
     gap: space.xs,
     padding: space.md,
-    backgroundColor: colors.sunken,
-    borderRadius: radius.inner,
+    backgroundColor: colors.surface,
+    borderRadius: radius.control,
   },
   headline: { ...type.label, color: colors.ink },
   detail: { ...type.caption, color: colors.muted },

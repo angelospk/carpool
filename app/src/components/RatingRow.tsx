@@ -105,8 +105,8 @@ export function RatingRow({
 const styles = StyleSheet.create({
   row: {
     gap: space.sm,
-    backgroundColor: colors.sunken,
-    borderRadius: radius.inner,
+    backgroundColor: colors.surface,
+    borderRadius: radius.control,
     padding: space.md,
   },
   who: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
   stars: { flexDirection: 'row', gap: space.xs, justifyContent: 'center' },
   star: { paddingHorizontal: space.xs, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   starGlyph: { fontSize: 32, color: colors.line },
-  starOn: { color: colors.accent },
+  starOn: { color: colors.ink },
   pressed: { opacity: 0.6 },
   error: { ...type.caption, color: colors.danger, textAlign: 'center' },
 });

@@ -148,7 +148,7 @@ export function ProposePoint({ place, testID }: { place: Pin; testID?: string })
 
 const styles = StyleSheet.create({
   box: { gap: space.sm, marginTop: space.sm },
-  link: { ...type.caption, color: colors.primary, marginTop: space.sm },
+  link: { ...type.caption, color: colors.ink, marginTop: space.sm },
   sent: { ...type.caption, color: colors.muted, marginTop: space.sm },
   kinds: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
   kind: {
@@ -156,10 +156,10 @@ const styles = StyleSheet.create({
     color: colors.muted,
     paddingVertical: space.xs,
     paddingHorizontal: space.sm,
-    borderRadius: radius.pill,
-    backgroundColor: colors.sunken,
+    borderRadius: radius.full,
+    backgroundColor: colors.surface,
   },
-  kindChosen: { color: colors.surface, backgroundColor: colors.primary },
+  kindChosen: { color: colors.paper, backgroundColor: colors.ink },
   hint: { ...type.caption, color: colors.muted },
   error: { ...type.caption, color: colors.danger },
 });

@@ -239,11 +239,11 @@ export default function RequestScreen() {
 }
 
 const styles = StyleSheet.create({
-  strandedTitle: { ...type.body, color: colors.ink, fontWeight: '700' },
+  strandedTitle: { ...type.heading, color: colors.ink },
   alternative: { ...type.body, color: colors.ink },
   status: { flexDirection: 'row', alignItems: 'center', gap: space.xs, marginTop: space.md },
-  core: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },
-  progress: { ...type.caption, color: colors.accent, fontWeight: '700', flex: 1 },
+  core: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.ink },
+  progress: { ...type.label, fontSize: 13, color: colors.ink, flex: 1 },
   outcome: { ...type.body, color: colors.danger },
   actions: { gap: space.sm },
 });

@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react-native';
 
-import { PREFERENCE_EMOJI, PreferenceChips, PreferencePicker } from '../Preferences';
+import { PREFERENCE_ICON, PreferenceChips, PreferencePicker } from '../Preferences';
 import { type PreferenceTag } from '../../api/endpoints';
 
 describe('showing what a ride is like', () => {
@@ -76,13 +76,15 @@ describe('choosing your own', () => {
   });
 
   // Nine pills in a wrapped row came out as three cramped columns of half-read
-  // words. One switch per line, with a glyph you read before the sentence.
+  // words. One switch per line, with an icon you read before the sentence.
   test('every tag has a picture of its own', () => {
     render(<Picker initial={[]} />);
 
-    const seen = Object.values(PREFERENCE_EMOJI);
+    const seen = Object.values(PREFERENCE_ICON);
     expect(new Set(seen).size).toBe(seen.length);
-    expect(screen.getByText(PREFERENCE_EMOJI.no_smoking)).toBeTruthy();
+    expect(
+      screen.getByTestId('pp-no_smoking-icon', { includeHiddenElements: true }).props.name,
+    ).toBe(PREFERENCE_ICON.no_smoking);
   });
 
   // Colour alone is not a state somebody with any of the common kinds of

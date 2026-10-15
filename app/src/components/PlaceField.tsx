@@ -277,8 +277,8 @@ async function position(): Promise<Location.LocationObject> {
 const styles = StyleSheet.create({
   list: {
     marginTop: space.xs,
-    backgroundColor: colors.surface,
-    borderRadius: radius.inner,
+    backgroundColor: colors.paper,
+    borderRadius: radius.control,
     overflow: 'hidden',
   },
   row: {
@@ -293,6 +293,6 @@ const styles = StyleSheet.create({
   name: { ...typography.body, color: colors.ink },
   kind: { ...typography.caption, color: colors.muted },
   here: { alignSelf: 'flex-start', paddingVertical: space.xs, marginTop: space.xs },
-  hereLabel: { ...typography.label, color: colors.primary },
+  hereLabel: { ...typography.label, color: colors.ink },
   empty: { ...typography.caption, color: colors.muted, marginTop: space.xs, paddingHorizontal: space.md },
 });

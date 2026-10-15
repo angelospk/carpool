@@ -644,7 +644,7 @@ const styles = StyleSheet.create({
   times: { flexDirection: 'row', gap: space.sm },
   seats: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   seatsLabel: { ...type.body, color: colors.ink },
-  toggle: { ...type.label, color: colors.primary },
+  toggle: { ...type.label, color: colors.ink },
   hint: { ...type.caption, color: colors.muted, marginTop: space.xs },
   divider: { height: 1, backgroundColor: colors.line, marginVertical: space.sm },
 });

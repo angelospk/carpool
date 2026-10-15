@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next';
 
 import { LUGGAGE_SIZES, type LuggageSize } from '../api/endpoints';
 import { Chip } from './ui';
+import type { IconName } from './Icon';
 import { colors, space, type } from '../design/tokens';
 
 export function LuggagePicker({
@@ -56,7 +57,7 @@ export function LuggagePicker({
           <Chip
             key={size}
             testID={testID ? `${testID}-${size}` : undefined}
-            glyph={LUGGAGE_GLYPHS[size]}
+            icon={LUGGAGE_ICONS[size]}
             label={t(`luggage.${size}`)}
             selected={value === size}
             onPress={() => pick(size)}
@@ -97,11 +98,11 @@ export function LuggagePicker({
 // The words stay under them. A picture of a rucksack is quicker to find than
 // "μικρή βαλίτσα", but it is also ambiguous in a way the sentence is not — this
 // choice decides who is even offered the trip, so the reader gets both.
-const LUGGAGE_GLYPHS: Record<LuggageSize, string> = {
-  none: '👜',
-  cabin: '🎒',
-  suitcase: '🧳',
-  bulky: '🚲',
+const LUGGAGE_ICONS: Record<LuggageSize, IconName> = {
+  none: 'bag-handle-outline',
+  cabin: 'bag-outline',
+  suitcase: 'briefcase-outline',
+  bulky: 'bicycle-outline',
 };
 
 // What a passenger can declare, and what a boot can be said to hold. Both match
