@@ -1,4 +1,4 @@
-import { render, screen, waitFor, act } from '@testing-library/react-native';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
@@ -45,18 +45,36 @@ test('it shows a figure once both ends are chosen', async () => {
 });
 
 // The sentence that keeps this from being a price. Without it the screen is
-// quoting a figure for a service nobody has offered.
+// quoting a figure for a service nobody has offered, so it is never folded away.
 test('it says plainly that no driver has agreed to anything', async () => {
   render(wrap(<Estimate from={alex} to={feres} testID="est" />));
 
-  const caveat = await screen.findByTestId('est-caveat');
-  expect(caveat.props.children).toMatch(/δεν έχει βρεθεί/i);
+  const headline = await screen.findByTestId('est-headline');
+  expect(headline.props.children).toMatch(/όχι προσφορά οδηγού/i);
+});
+
+// Four paragraphs under the search form was a wall nobody read. One sentence
+// shows; how it is worked out is one tap away.
+test('the working is folded until asked for', async () => {
+  (api.estimate as jest.Mock).mockResolvedValue({ ...estimate, ceiling_cents: 500 });
+  render(wrap(<Estimate from={alex} to={feres} testID="est" />));
+
+  const how = await screen.findByTestId('est-how');
+  expect(screen.queryByTestId('est-caveat')).toBeNull();
+  expect(screen.queryByTestId('est-ceiling')).toBeNull();
+  expect(screen.queryByText(/προσφερόμενες/)).toBeNull();
+
+  fireEvent.press(how);
+  expect(screen.getByTestId('est-caveat').props.children).toMatch(/δεν έχει βρεθεί/i);
+
+  fireEvent.press(how);
+  expect(screen.queryByTestId('est-caveat')).toBeNull();
 });
 
 test('it names what it assumed', async () => {
   render(wrap(<Estimate from={alex} to={feres} testID="est" />));
 
-  await screen.findByTestId('est-headline');
+  fireEvent.press(await screen.findByTestId('est-how'));
   // Three seats, from a divisor of four.
   expect(screen.getByText(/29 χλμ.*3 προσφερόμενες/)).toBeTruthy();
 });
@@ -99,7 +117,8 @@ test('it says how far up the figure could go', async () => {
 
   render(wrap(<Estimate from={alex} to={feres} testID="est" />));
 
-  const ceiling = await screen.findByTestId('est-ceiling');
+  fireEvent.press(await screen.findByTestId('est-how'));
+  const ceiling = screen.getByTestId('est-ceiling');
   // \s rather than a literal space: Intl separates the amount from the symbol
   // with a non-breaking one, which reads identically and compares differently.
   expect(ceiling.props.children).toMatch(/5,00\s€/);
@@ -110,6 +129,6 @@ test('no upper bound is shown when there is nothing above the estimate', async (
 
   render(wrap(<Estimate from={alex} to={feres} testID="est" />));
 
-  await screen.findByTestId('est-headline');
+  fireEvent.press(await screen.findByTestId('est-how'));
   expect(screen.queryByTestId('est-ceiling')).toBeNull();
 });

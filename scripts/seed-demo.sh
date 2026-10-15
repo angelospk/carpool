@@ -8,6 +8,9 @@
 #   DATABASE_URL=... JWT_SECRET=... DEV_MODE=true ./bin/api &
 #   API=http://192.168.0.154:8080/v1 scripts/seed-demo.sh
 #
+# Seeding an API started with `DB=qa scripts/dev-lan.sh`? Pass the same DB=qa
+# here (or DATABASE_URL), or the retiring below touches the lan database.
+#
 # DEV_MODE is required: it is what returns the OTP in the response instead of
 # sending an SMS, so this script can sign the cast in without a phone.
 set -euo pipefail
@@ -89,7 +92,9 @@ step "publishing routes for $DAY (weekday $DOW)"
 # existing ones are retired directly. Scoped to the three seeded phone numbers,
 # and skipped with a warning when the database is not reachable, because a
 # script that silently duplicates is worse than one that says it cannot help.
-DSN=${DATABASE_URL:-postgres://carpool:carpool@localhost:5433/lan?sslmode=disable}
+DSN=${DATABASE_URL:-postgres://carpool:carpool@localhost:5433/${DB:-lan}?sslmode=disable}
+# Named, never printed whole: a DSN can carry a password.
+if [[ -n ${DATABASE_URL:-} ]]; then echo "   database: from DATABASE_URL"; else echo "   database: ${DB:-lan}"; fi
 if psql "$DSN" -tAc 'SELECT 1' >/dev/null 2>&1; then
   psql "$DSN" -qtAc "
     UPDATE route_templates SET active = false

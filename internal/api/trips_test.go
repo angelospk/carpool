@@ -155,6 +155,36 @@ func TestTripDetailRevealsThePlateToTheMatchedPassenger(t *testing.T) {
 	}
 }
 
+// The detail is the summary and more: the app draws the free seats and the
+// caller's own price on the trip's ticket from it.
+func TestTripDetailCarriesSeatsAndThePassengersPrice(t *testing.T) {
+	h := newHarness(t)
+	driver, passenger, occurrenceID := h.bookedTrip(t)
+
+	for name, c := range map[string]struct {
+		token string
+		price float64
+	}{"driver": {driver, 0}, "passenger": {passenger, 2.50}} {
+		t.Run(name, func(t *testing.T) {
+			rec := h.do(http.MethodGet, "/v1/trips/"+occurrenceID.String(), nil, c.token)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+			}
+			var body struct {
+				SeatsFree *int     `json:"seats_free"`
+				PriceEUR  *float64 `json:"price_eur"`
+			}
+			h.decode(rec, &body)
+			if body.SeatsFree == nil || *body.SeatsFree != 2 {
+				t.Errorf("seats_free = %v, want 2", body.SeatsFree)
+			}
+			if body.PriceEUR == nil || *body.PriceEUR != c.price {
+				t.Errorf("price_eur = %v, want %v", body.PriceEUR, c.price)
+			}
+		})
+	}
+}
+
 func TestConfirmMarksOnlyTheCallersSide(t *testing.T) {
 	h := newHarness(t)
 	driver, _, occurrenceID := h.bookedTrip(t)

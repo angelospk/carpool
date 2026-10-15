@@ -137,6 +137,8 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		"status":             trip.Status,
 		"route_km":           trip.RouteKm,
 		"ends_at_port":       trip.EndsAtPort,
+		"price_eur":          trip.PriceEUR,
+		"seats_free":         trip.SeatsFree,
 		"origin_label":       trip.OriginLabel,
 		"destination_label":  trip.DestLabel,
 		"route_polyline":     trip.RoutePolyline,

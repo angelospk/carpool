@@ -103,7 +103,6 @@ export default function ProfileSetupScreen() {
         </Card>
         <Hint>{t('auth.birthDateHint')}</Hint>
 
-        <Hint>{t('auth.homeTownHint')}</Hint>
         <Card>
           <PlaceField
             testID="home-place"
@@ -113,6 +112,7 @@ export default function ProfileSetupScreen() {
             placeholder={t('auth.homeTownPlaceholder')}
           />
         </Card>
+        <Hint>{t('auth.homeTownHint')}</Hint>
 
         {error ? (
           <Text testID="profile-error" style={styles.error}>

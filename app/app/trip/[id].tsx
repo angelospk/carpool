@@ -271,7 +271,7 @@ export default function TripScreen() {
                     Number.isFinite(trip.data.seats_free) ? (
                       <SeatPips
                         free={trip.data.seats_free}
-                        total={trip.data.seats_free + trip.data.passengers.length}
+                        total={trip.data.seats_free + trip.data.passengers.reduce((n, p) => n + (p.seats ?? 1), 0)}
                         testID="seat-pips"
                       />
                     ) : undefined

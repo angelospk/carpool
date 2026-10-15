@@ -5,8 +5,9 @@ import type { ReactElement } from 'react';
 import UserScreen from '../user/[id]';
 import { api } from '../../src/api/endpoints';
 
+const mockParams: { id: string; name?: string } = { id: 'u-1', name: 'Γιάννης' };
 jest.mock('expo-router', () => ({
-  useLocalSearchParams: () => ({ id: 'u-1', name: 'Γιάννης' }),
+  useLocalSearchParams: () => mockParams,
   useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
 }));
 
@@ -23,6 +24,7 @@ function render(node: ReactElement) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockParams.name = 'Γιάννης';
   (api.reportUser as jest.Mock).mockResolvedValue(undefined);
   (api.blockUser as jest.Mock).mockResolvedValue(undefined);
   (api.unblockUser as jest.Mock).mockResolvedValue(undefined);
@@ -133,4 +135,14 @@ it('a block can be undone from the same screen', async () => {
 
   await waitFor(() => expect(api.unblockUser).toHaveBeenCalledWith('u-1'));
   expect(await screen.findByTestId('block-user')).toBeTruthy();
+});
+
+// Opened without a name (a link, a reload that lost the query) the screen used
+// to print the person's id as their name.
+it('never shows the id as a name', () => {
+  mockParams.name = undefined;
+  render(<UserScreen />);
+
+  expect(screen.queryByText('u-1')).toBeNull();
+  expect(screen.getByText('Χρήστης')).toBeTruthy();
 });

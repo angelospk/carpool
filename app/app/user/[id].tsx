@@ -35,6 +35,9 @@ export default function UserScreen() {
   const { t } = useTranslation();
   const { id, name } = useLocalSearchParams<{ id: string; name?: string }>();
   const [done, setDone] = useState<string | null>(null);
+  // The name comes with the link from a trip; there is no endpoint that looks
+  // a stranger up by id. Without it, a word, never the id itself.
+  const shown = name?.trim() || t('user.someone');
 
   // Null means the report form is closed. Opening it files nothing: the old
   // screen filed on the first tap, which spent one of somebody's few daily
@@ -94,8 +97,8 @@ export default function UserScreen() {
     <Screen>
       <Card>
         <View style={styles.identity}>
-          <Avatar name={name ?? id} size={56} />
-          <Text style={styles.name}>{name ?? id}</Text>
+          <Avatar name={shown} size={56} />
+          <Text style={styles.name}>{shown}</Text>
         </View>
       </Card>
 

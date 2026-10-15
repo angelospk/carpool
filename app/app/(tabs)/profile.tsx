@@ -134,9 +134,6 @@ export default function ProfileScreen() {
             </Pressable>
             <View style={styles.who}>
               <Text style={styles.name}>{me?.name ?? t('profile.title')}</Text>
-              <Text testID="profile-phone" style={styles.phone}>
-                {me?.phone}
-              </Text>
               <View style={styles.photoActions}>
                 <Text testID="photo-change" style={styles.link} onPress={choosePhoto}>
                   {uploadPhoto.isPending ? t('common.loading') : t('profile.photoChange')}
@@ -274,7 +271,6 @@ const styles = StyleSheet.create({
   identity: { flexDirection: 'row', alignItems: 'center', gap: space.lg },
   who: { gap: 2, flex: 1 },
   name: { ...type.title, color: colors.ink },
-  phone: { ...type.caption, color: colors.muted },
   photoActions: { flexDirection: 'row', gap: space.md, marginTop: space.xs },
   link: { ...type.caption, color: colors.ink, textDecorationLine: 'underline' },
   divider: { height: 1, backgroundColor: colors.line },
