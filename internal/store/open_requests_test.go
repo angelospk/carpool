@@ -511,3 +511,71 @@ func TestAnEmptyRoadHasNoMostSeats(t *testing.T) {
 		t.Errorf("most seats on an empty road = %d, want none", *got)
 	}
 }
+
+// departure gives the template one scheduled departure at the given instant.
+func (w *corridorWorld) departure(t *testing.T, templateID uuid.UUID, at time.Time) {
+	t.Helper()
+	if _, err := w.pool.Exec(context.Background(), `
+		INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest,
+			depart_latest, seats_total, seats_free, template_revision, route_geom, route_km,
+			route_min, pricing_mode)
+		SELECT id, vehicle_id, $3::date, $2::timestamptz, $2::timestamptz + interval '30 minutes', 3, 3, 1,
+		       route_geom, route_km, route_min, 'formula'
+		  FROM route_templates WHERE id = $1`, templateID, at, at.Format("2006-01-02")); err != nil {
+		t.Fatalf("seeding a departure: %v", err)
+	}
+}
+
+// Somebody drives the road, just not then. The app said "nobody has been
+// asked yet" and the passenger waited for a car that leaves in the afternoon
+// (QA 2026-10-16, U3). The nearest departure lets it say when one does.
+func TestADriverWhoLeavesAtAnotherHourIsTheNearestDeparture(t *testing.T) {
+	w := newCorridorWorld(t)
+	id := w.route(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+	afternoon := corridorNow.Add(7 * time.Hour)
+	w.departure(t, id, afternoon)
+	w.departure(t, id, corridorNow.Add(30*time.Hour))
+
+	got := onlyRequest(t, w)
+	if got.DriversDeparting != 0 {
+		t.Errorf("departing = %d, want 0: nobody leaves inside the window", got.DriversDeparting)
+	}
+	if got.NearestDeparture == nil || !got.NearestDeparture.Equal(afternoon) {
+		t.Errorf("nearest departure = %v, want %v", got.NearestDeparture, afternoon)
+	}
+}
+
+func TestADriverWhoLeavesInTheWindowIsDeparting(t *testing.T) {
+	w := newCorridorWorld(t)
+	id := w.route(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+	w.departure(t, id, corridorNow.Add(3*time.Hour))
+
+	if got := onlyRequest(t, w).DriversDeparting; got != 1 {
+		t.Errorf("departing = %d, want 1", got)
+	}
+}
+
+// A day away is not "near": the passenger asked for this morning.
+func TestNoDepartureThatDayIsNoNearestDeparture(t *testing.T) {
+	w := newCorridorWorld(t)
+	id := w.route(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+	w.departure(t, id, corridorNow.Add(30*time.Hour))
+
+	if got := onlyRequest(t, w).NearestDeparture; got != nil {
+		t.Errorf("nearest departure = %v, want none within twelve hours", got)
+	}
+}
+
+// A departure between its earliest and latest minute has left, as the matcher
+// judges it: nobody is asked about it, so it is not a car leaving then.
+func TestADepartureThatHasStartedIsNotDeparting(t *testing.T) {
+	w := newCorridorWorld(t)
+	id := w.route(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+	w.departure(t, id, corridorNow.Add(-10*time.Minute))
+
+	got := onlyRequest(t, w)
+	if got.DriversDeparting != 0 || got.NearestDeparture != nil {
+		t.Errorf("departing = %d, nearest = %v; want neither for a car that has left",
+			got.DriversDeparting, got.NearestDeparture)
+	}
+}

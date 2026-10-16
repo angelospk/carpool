@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -230,5 +231,37 @@ func TestMyRequestsNeedsAToken(t *testing.T) {
 	h := newHarness(t)
 	if rec := h.do(http.MethodGet, "/v1/requests/mine", nil, ""); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d, want 401", rec.Code)
+	}
+}
+
+// What the matcher found when it asked nobody reaches the passenger, without
+// a driver's name: the reason, what the pickup needs and what the driver takes
+// (QA 2026-10-16, U3).
+func TestMyRequestsSaysWhyNobodyWasAsked(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000207", "Επιβάτης")
+	var passengerID string
+	h.mustQuery(`SELECT id::text FROM users WHERE phone = $1`, &passengerID, "+306900000207")
+	requestID := h.openRequest(passengerID, "open")
+	h.mustExec(`UPDATE ride_requests SET missed_reason = 'detour_min', missed_need = 12.4, missed_limit = 10
+		WHERE id = $1::uuid`, requestID)
+
+	rec := h.do(http.MethodGet, "/v1/requests/mine", nil, token)
+	var body struct {
+		Requests []struct {
+			Missed *struct {
+				Reason string  `json:"reason"`
+				Need   float64 `json:"need"`
+				Limit  float64 `json:"limit"`
+			} `json:"missed"`
+		} `json:"requests"`
+	}
+	h.decode(rec, &body)
+	m := body.Requests[0].Missed
+	if m == nil || m.Reason != "detour_min" || m.Limit != 10 || m.Need < 12.3 || m.Need > 12.5 {
+		t.Fatalf("missed = %+v", m)
+	}
+	if strings.Contains(rec.Body.String(), "Οδηγός") {
+		t.Errorf("a driver's name reached the passenger: %s", rec.Body.String())
 	}
 }

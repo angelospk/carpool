@@ -127,6 +127,11 @@
     "againNone": "No next trip with a free seat",
     "requests": "What you are waiting on",
     "requestNobody": "No driver has been asked yet.",
+    "missedDetourMin": "A car passes, but picking you up takes a {{need}}-minute detour. The driver takes up to {{limit}}. A point closer to the road may help.",
+    "missedDetourKm": "A car passes, but picking you up takes a {{need}} km detour. The driver takes up to {{limit}} km. A point closer to the road may help.",
+    "missedNoStops": "A car passes, but its driver makes no stops on this route.",
+    "requestNearest": "No driver leaves in those hours. The nearest one leaves at {{time}}.",
+    "requestNotThen": "No driver leaves in those hours.",
     "requestTooManySeats_one": "No car on this road has that many seats. At most 1 seat.",
     "requestTooManySeats_other": "No car on this road has that many seats. At most {{count}} seats.",
     "requestNoDrivers": "Nobody has published this road yet. Your request stays open. As soon as somebody does, we ask them, and you will see it here.",
@@ -371,7 +376,9 @@
     "whatHappens": "We ask drivers heading that way, one at a time, and tell you as soon as somebody says yes. Nothing is charged.",
     "supply": "At least three drivers go this way that day",
     "whatHappensNoPush": "We ask drivers heading that way, one at a time. The answer shows here and on the home screen, so check back in a little while. Nothing is charged.",
-    "noDriversNoPush": "No driver right now. The request stays open: check the home screen again later."
+    "noDriversNoPush": "No driver right now. The request stays open: check the home screen again later.",
+    "daysFailed_one": "The request is saved, but 1 day is not. Press «{{post}}» again to send it.",
+    "daysFailed_other": "The request is saved, but {{count}} days are not. Press «{{post}}» again to send them."
   },
   "share": {
     "button": "Share this route",
@@ -483,7 +490,10 @@
     "midday": "Midday",
     "afternoon": "Afternoon",
     "evening": "Evening",
-    "summary": "{{day}}, {{from}}–{{to}}"
+    "summary": "{{day}}, {{from}}–{{to}}",
+    "other": "Another day",
+    "more": "Other days work too",
+    "moreHint": "We ask drivers for these as well, at the same time of day. Once one says yes for a day, the others are cancelled."
   },
   "groups": {
     "title": "Groups",
@@ -574,7 +584,9 @@
     "trip_not_running": "This trip has been called off.",
     "bad_detour": "The detour must be 0 to 30 minutes.",
     "not_driving": "That drive is not under way.",
-    "duplicate_route": "You already offer this route on the same days and hours. See your routes."
+    "duplicate_route": "You already offer this route on the same days and hours. See your routes.",
+    "request_closed": "That request is no longer looking for a driver: one was found, or it was cancelled. Check the home screen.",
+    "day_in_another_group": "You already asked for that day together with other days. Check the home screen."
   },
   "shareRequest": {
     "button": "Send it to a group",

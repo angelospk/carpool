@@ -130,6 +130,10 @@ kind          text NOT NULL CHECK (kind IN ('open','targeted'))
 target_occurrence_id uuid REFERENCES trip_occurrences NULL  -- kind = targeted
 status        text NOT NULL DEFAULT 'open'
               CHECK (status IN ('open','asking','matched','expired','cancelled'))
+alternative_of uuid REFERENCES ride_requests NULL  -- the first day of the same journey;
+              -- accepting any day cancels the others
+missed_reason text NULL CHECK (missed_reason IN ('no_stops','detour_min','detour_km'))
+missed_need / missed_limit real NULL  -- why the last search asked nobody, without a name
 created_at
 GIST indexes on origin, destination; index on (status, window_end)
 ```

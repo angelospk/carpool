@@ -1,4 +1,4 @@
-import { athensDate, athensInstant, bandIsOpen, departureWindow, nextDate } from './when';
+import { athensDate, athensInstant, bandIsOpen, dateOf, departureWindow, nextDate } from './when';
 
 // 14 July 2026, 08:30 in Athens (UTC+3 in summer).
 const summerMorning = new Date('2026-07-14T05:30:00Z');
@@ -136,5 +136,45 @@ describe('bandIsOpen', () => {
     const nearMidnight = new Date('2026-07-14T21:30:00Z'); // 00:30 on the 15th
     expect(bandIsOpen('tomorrow', 'morning', nearMidnight)).toBe(true);
     expect(bandIsOpen('today', 'now', nearMidnight)).toBe(true);
+  });
+});
+
+describe('a day further on', () => {
+  it('is a calendar date, asked for the same way as tomorrow', () => {
+    const w = departureWindow('2026-07-20', 'morning', summerMorning);
+    expect(athensDate(w.start)).toBe('2026-07-20');
+    expect(athensClock(w.start)).toBe('06:00');
+    expect(athensClock(w.end)).toBe('10:00');
+  });
+
+  it('has every band open', () => {
+    expect(bandIsOpen('2026-07-20', 'morning', summerMorning)).toBe(true);
+  });
+
+  it('names its date the way today and tomorrow name theirs', () => {
+    expect(dateOf('today', summerMorning)).toBe('2026-07-14');
+    expect(dateOf('tomorrow', summerMorning)).toBe('2026-07-15');
+    expect(dateOf('2026-07-20', summerMorning)).toBe('2026-07-20');
+  });
+});
+
+describe('a picked date the clock has reached', () => {
+  // Picked on Sunday as "Tuesday", sent on Tuesday after the band has gone.
+  const tuesdayNight = new Date('2026-07-14T20:00:00Z'); // 23:00 in Athens
+
+  it('is today, and a band gone today is that band tomorrow', () => {
+    const w = departureWindow('2026-07-14', 'morning', tuesdayNight);
+    expect(w.start.getTime()).toBeLessThan(w.end.getTime());
+    expect(athensDate(w.start)).toBe('2026-07-15');
+  });
+
+  it('never runs backwards when the date has gone by', () => {
+    const w = departureWindow('2026-07-12', 'evening', tuesdayNight);
+    expect(w.start.getTime()).toBeLessThan(w.end.getTime());
+    expect(w.end.getTime()).toBeGreaterThan(tuesdayNight.getTime());
+  });
+
+  it('only offers the bands still open', () => {
+    expect(bandIsOpen('2026-07-14', 'morning', tuesdayNight)).toBe(false);
   });
 });

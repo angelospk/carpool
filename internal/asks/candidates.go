@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -62,13 +63,20 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 		})
 	}
 	if len(scored) == 0 {
+		s.recordMiss(ctx, req.ID, nil)
 		return uuid.Nil, ErrNoCandidates
 	}
 
+	// The first car that passes but whose driver does not take the detour, so
+	// the passenger can be told by how much it missed.
+	var missedCar *match.Candidate
 	for _, cand := range match.Rank(scored) {
 		c := byID[cand.ID]
 
 		insertion, price, basis, err := s.evaluate(ctx, c, req)
+		if errors.Is(err, match.ErrNoViableInsertion) && missedCar == nil {
+			missedCar = &c
+		}
 		if errors.Is(err, match.ErrPartyCapReached) || errors.Is(err, geo.ErrNoRoute) ||
 			errors.Is(err, match.ErrNoViableInsertion) {
 			// No room, no road, or no ordering inside what this driver agreed
@@ -88,10 +96,78 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 		if err != nil {
 			return uuid.Nil, err
 		}
+		s.recordMiss(ctx, req.ID, nil)
 		return askID, nil
 	}
 
+	var why *miss
+	if missedCar != nil {
+		m, err := s.missedBy(ctx, *missedCar, req)
+		if err != nil {
+			// The reason is a courtesy. Failing to find it is no reason to
+			// fail the search.
+			slog.Warn("measuring a missed detour", "request", req.ID, "error", err)
+		} else {
+			why = &m
+		}
+	}
+	s.recordMiss(ctx, req.ID, why)
 	return uuid.Nil, ErrNoCandidates
+}
+
+// miss is why a car that passes was not asked: its driver takes no stops
+// (no_stops), or the detour is longer than they take, in minutes of driving
+// (detour_min) or kilometres (detour_km). need is what the pickup would take
+// and limit what the driver agreed to.
+type miss struct {
+	reason      string
+	need, limit float64
+}
+
+// missedBy measures the detour c's driver would need to take this request,
+// with no limit, and says which of their limits it breaks.
+func (s *Service) missedBy(ctx context.Context, c match.Candidate, req request) (miss, error) {
+	if !c.Budget.AllowStops {
+		return miss{reason: "no_stops"}, nil
+	}
+	itin, err := s.itinerary(ctx, c.OccurrenceID)
+	if err != nil {
+		return miss{}, err
+	}
+	ins, err := match.BestInsertion(ctx, s.router, itin, req.Origin, req.Destination)
+	if err != nil {
+		return miss{}, err
+	}
+	driving := ins.TotalDetourMin - float64(ins.NewStops)*match.StopDwell.Minutes()
+	limitMin := float64(c.Budget.Min)
+	if c.Budget.OffRoadMin != nil {
+		limitMin = float64(*c.Budget.OffRoadMin)
+	}
+	if driving > limitMin {
+		return miss{reason: "detour_min", need: driving, limit: limitMin}, nil
+	}
+	return miss{reason: "detour_km", need: ins.TotalDetourKm, limit: c.Budget.Km}, nil
+}
+
+// recordMiss writes why the request's last search asked nobody, or clears it
+// with a nil m. A failed write is logged, not returned: the search itself did
+// not fail.
+func (s *Service) recordMiss(ctx context.Context, requestID uuid.UUID, m *miss) {
+	var reason *string
+	var need, limit *float64
+	if m != nil {
+		reason, need, limit = &m.reason, &m.need, &m.limit
+		if m.reason == "no_stops" {
+			need, limit = nil, nil
+		}
+	}
+	if _, err := s.pool.Exec(ctx, `
+		UPDATE ride_requests SET missed_reason = $2, missed_need = $3, missed_limit = $4
+		 WHERE id = $1
+		   AND (missed_reason, missed_need, missed_limit) IS DISTINCT FROM ($2::text, $3::real, $4::real)`,
+		requestID, reason, need, limit); err != nil {
+		slog.Warn("recording why nobody was asked", "request", requestID, "error", err)
+	}
 }
 
 // request is the subset of a ride request the ask flow needs.

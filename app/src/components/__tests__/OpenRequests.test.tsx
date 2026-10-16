@@ -88,6 +88,44 @@ test('seats that fit are not a reason', () => {
   );
 });
 
+// A car passes and its driver does not take the detour. The passenger heard
+// only "nobody asked yet" (QA 2026-10-16, U3). No name: nobody agreed to
+// anything.
+test('a missed detour says by how much, in minutes', () => {
+  const got = requestProgress(
+    waiting({ drivers_on_corridor: 1, missed: { reason: 'detour_min', need: 11.2, limit: 10 } }),
+    t,
+  );
+  expect(got).toBe(t('home.missedDetourMin', { need: 12, limit: 10 }));
+});
+
+test('a missed detour in kilometres, and a driver who takes no stops', () => {
+  expect(
+    requestProgress(waiting({ drivers_on_corridor: 1, missed: { reason: 'detour_km', need: 6.3, limit: 5 } }), t),
+  ).toBe(t('home.missedDetourKm', { need: 7, limit: 5 }));
+  expect(
+    requestProgress(waiting({ drivers_on_corridor: 1, missed: { reason: 'no_stops', need: null, limit: null } }), t),
+  ).toBe(el.home.missedNoStops);
+});
+
+test('nobody leaving then says when the nearest one does', () => {
+  const got = requestProgress(
+    waiting({ drivers_on_corridor: 1, drivers_departing: 0, nearest_departure: '2026-09-17T08:30:00Z' }),
+    t,
+  );
+  expect(got).toBe(t('home.requestNearest', { time: '11:30' }));
+});
+
+test('nobody leaving that day at all says so', () => {
+  expect(requestProgress(waiting({ drivers_on_corridor: 1, drivers_departing: 0 }), t)).toBe(
+    el.home.requestNotThen,
+  );
+});
+
+test('an older server that does not count departures keeps the old sentence', () => {
+  expect(requestProgress(waiting({ drivers_on_corridor: 1 }), t)).toBe(el.home.requestNobody);
+});
+
 // The ask lapses after half an hour, and the passenger could not see when.
 // They waited without knowing for how long (QA 2026-10-16, U6).
 test('a live ask says until when the driver has to answer', () => {
