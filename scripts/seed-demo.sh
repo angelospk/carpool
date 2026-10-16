@@ -103,7 +103,7 @@ if psql "$DSN" -tAc 'SELECT 1' >/dev/null 2>&1; then
                           WHERE phone IN ('+306900000101','+306900000102','+306900000103'))" >/dev/null
   echo "   retired the cast's previous routes"
 else
-  echo "   NOTE: no database at \$DATABASE_URL, so re-running will duplicate routes" >&2
+  echo "   NOTE: no database at \$DATABASE_URL, so a re-run is refused as duplicate_route" >&2
 fi
 
 route() {

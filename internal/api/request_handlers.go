@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -203,6 +204,8 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 				out["asking"], out["ask_id"] = true, askID
 			} else if !errors.Is(err, asks.ErrNoCandidates) {
 				slog.Warn("asking again for an existing request", "request", existing.id, "error", err)
+			} else if askID := d.liveAsk(r.Context(), existing.id); askID != nil {
+				out["asking"], out["ask_id"] = true, *askID
 			}
 		}
 		writeJSON(w, http.StatusOK, out)
@@ -242,12 +245,38 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not start matching")
 		return
 	}
+	if !matched {
+		if live := d.liveAsk(r.Context(), requestID); live != nil {
+			askID, matched = *live, true
+		}
+	}
 
 	out := map[string]any{"request_id": requestID, "asking": matched}
 	if matched {
 		out["ask_id"] = askID
 	}
 	writeJSON(w, http.StatusCreated, out)
+}
+
+// liveAsk is the request's pending ask, if it has one.
+//
+// For a post whose own attempt to ask found nothing: a copy of the same post,
+// arriving at the same moment, may have asked the driver first. AskNext then
+// sees a request that is no longer open, or loses the race on the one pending
+// ask, and says there was nobody. Both of those commit before AskNext returns,
+// so this read sees the ask (QA 2026-10-16, B5).
+func (d Deps) liveAsk(ctx context.Context, requestID uuid.UUID) *uuid.UUID {
+	var id uuid.UUID
+	err := d.Pool.QueryRow(ctx, `
+		SELECT id FROM asks WHERE request_id = $1 AND status = 'pending'
+		 ORDER BY created_at DESC LIMIT 1`, requestID).Scan(&id)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("looking for a live ask", "request", requestID, "error", err)
+		}
+		return nil
+	}
+	return &id
 }
 
 // handleMyRequests lists what the caller is still waiting on, and how far the
@@ -273,20 +302,22 @@ func (d Deps) handleMyRequests(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0, len(list))
 	for _, q := range list {
 		out = append(out, map[string]any{
-			"id":                  q.ID,
-			"origin_label":        q.OriginLabel,
-			"destination_label":   q.DestinationLabel,
-			"window_start":        q.WindowStart,
-			"window_end":          q.WindowEnd,
-			"seats":               q.Seats,
-			"status":              q.Status,
-			"drivers_asked":       q.DriversAsked,
-			"drivers_declined":    q.DriversDeclined,
-			"asking_now":          q.AskingNow,
-			"drivers_on_corridor": q.DriversOnCorridor,
-			"drivers_untried":     q.DriversUntried,
-			"stranded":            q.Stranded,
-			"created_at":          q.CreatedAt,
+			"id":                     q.ID,
+			"origin_label":           q.OriginLabel,
+			"destination_label":      q.DestinationLabel,
+			"window_start":           q.WindowStart,
+			"window_end":             q.WindowEnd,
+			"seats":                  q.Seats,
+			"status":                 q.Status,
+			"drivers_asked":          q.DriversAsked,
+			"drivers_declined":       q.DriversDeclined,
+			"asking_now":             q.AskingNow,
+			"ask_expires_at":         q.AskExpiresAt,
+			"drivers_on_corridor":    q.DriversOnCorridor,
+			"drivers_untried":        q.DriversUntried,
+			"most_seats_on_corridor": q.MostSeatsOnCorridor,
+			"stranded":               q.Stranded,
+			"created_at":             q.CreatedAt,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"requests": out})

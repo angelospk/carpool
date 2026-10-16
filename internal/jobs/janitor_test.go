@@ -37,6 +37,9 @@ type janitorFixture struct {
 	pool  *pgxpool.Pool
 	clock *clock.Fake
 	user  uuid.UUID
+	// seeded counts the routes made, so each leaves at its own minute: the
+	// same route twice is refused as a duplicate.
+	seeded int
 }
 
 func newJanitorFixture(t *testing.T) *janitorFixture {
@@ -187,6 +190,7 @@ func TestSpentRefreshTokensGoAMonthLater(t *testing.T) {
 func (f *janitorFixture) seedThread(departed time.Time, messages ...time.Time) uuid.UUID {
 	f.t.Helper()
 	ctx := context.Background()
+	f.seeded++
 
 	templateID, err := store.CreateRouteTemplate(ctx, f.pool, store.CreateRouteTemplateParams{
 		DriverID:         f.user,
@@ -205,7 +209,7 @@ func (f *janitorFixture) seedThread(departed time.Time, messages ...time.Time) u
 		Schedule: domain.Schedule{
 			Kind:           domain.ScheduleRecurring,
 			Weekdays:       []time.Weekday{time.Monday},
-			DepartEarliest: domain.TimeOfDay{Hour: 7, Minute: 30},
+			DepartEarliest: domain.TimeOfDay{Hour: 7, Minute: f.seeded},
 			DepartLatest:   domain.TimeOfDay{Hour: 8, Minute: 0},
 			EffectiveFrom:  domain.Date{Year: 2020, Month: time.January, Day: 1},
 		},

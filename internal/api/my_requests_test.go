@@ -8,16 +8,17 @@ import (
 
 // myRequest is what GET /v1/requests/mine hands back for one open request.
 type myRequest struct {
-	ID               string    `json:"id"`
-	OriginLabel      string    `json:"origin_label"`
-	DestinationLabel string    `json:"destination_label"`
-	WindowStart      time.Time `json:"window_start"`
-	WindowEnd        time.Time `json:"window_end"`
-	Seats            int       `json:"seats"`
-	Status           string    `json:"status"`
-	DriversAsked     int       `json:"drivers_asked"`
-	DriversDeclined  int       `json:"drivers_declined"`
-	AskingNow        bool      `json:"asking_now"`
+	ID               string     `json:"id"`
+	OriginLabel      string     `json:"origin_label"`
+	DestinationLabel string     `json:"destination_label"`
+	WindowStart      time.Time  `json:"window_start"`
+	WindowEnd        time.Time  `json:"window_end"`
+	Seats            int        `json:"seats"`
+	Status           string     `json:"status"`
+	DriversAsked     int        `json:"drivers_asked"`
+	DriversDeclined  int        `json:"drivers_declined"`
+	AskingNow        bool       `json:"asking_now"`
+	AskExpiresAt     *time.Time `json:"ask_expires_at"`
 }
 
 func (h *harness) myRequests(token string) []myRequest {
@@ -157,6 +158,11 @@ func TestMyRequestsCountsDriversAndLiveAsks(t *testing.T) {
 	if !got.AskingNow {
 		t.Fatalf("a pending ask that has not expired is somebody reading it now")
 	}
+	// How long the driver has, so the passenger knows how long to wait
+	// (QA 2026-10-16, U6).
+	if want := h.clock.Now().Add(time.Hour); got.AskExpiresAt == nil || !got.AskExpiresAt.Equal(want) {
+		t.Fatalf("ask_expires_at = %v, want %v", got.AskExpiresAt, want)
+	}
 }
 
 // A pending ask whose expiry has passed is nobody reading it. Saying "we are
@@ -171,8 +177,8 @@ func TestMyRequestsDoesNotCallAnExpiredAskLive(t *testing.T) {
 	requestID := h.openRequest(passengerID, "asking")
 	h.ask(requestID, h.occurrenceOf("+306900000206", "Οδηγός"), "pending", -time.Minute)
 
-	if got := h.myRequests(token)[0]; got.AskingNow {
-		t.Fatalf("an ask that expired is still being reported as live")
+	if got := h.myRequests(token)[0]; got.AskingNow || got.AskExpiresAt != nil {
+		t.Fatalf("an ask that expired is still being reported as live: %+v", got)
 	}
 }
 

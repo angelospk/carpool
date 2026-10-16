@@ -214,3 +214,48 @@ func (straightLines) Route(_ context.Context, waypoints []geo.Point) (geo.Route,
 	}
 	return geo.Route{DistanceMeters: km * 1000, Duration: time.Duration(km / 60 * float64(time.Hour))}, nil
 }
+
+// Four copies of the same post at once. One request, one driver asked, and
+// every answer says so. One of them used to answer asking:false: its own
+// attempt to ask lost to another copy's, and it reported its loss rather than
+// the ask that exists (QA 2026-10-16, B5).
+func TestCopiesOfOnePostAllSayADriverIsBeingAsked(t *testing.T) {
+	for round := range 5 {
+		h := newRoutedMatcherHarness(t)
+		token, _ := h.signUp("+306900000817", "Επιβάτης")
+		h.occurrenceOf("+306900000818", "Οδηγός")
+		body := requestBody(h, map[string]any{
+			"destination_lon": 26.1717, "destination_lat": 40.8975, "destination_label": "Φέρες",
+			"window_start": h.clock.Now().Add(23 * time.Hour).Format(time.RFC3339),
+			"window_end":   h.clock.Now().Add(26 * time.Hour).Format(time.RFC3339),
+		})
+
+		type answer struct {
+			code      int
+			RequestID string `json:"request_id"`
+			Asking    bool   `json:"asking"`
+			AskID     string `json:"ask_id"`
+		}
+		answers := make([]answer, 4)
+		var wg sync.WaitGroup
+		for i := range answers {
+			wg.Go(func() {
+				rec := h.do(http.MethodPost, "/v1/requests", body, token)
+				answers[i].code = rec.Code
+				h.decode(rec, &answers[i])
+			})
+		}
+		wg.Wait()
+
+		var asks int
+		h.mustQuery(`SELECT count(*) FROM asks WHERE status = 'pending'`, &asks)
+		if asks != 1 {
+			t.Fatalf("round %d: %d drivers asked, want 1", round, asks)
+		}
+		for i, a := range answers {
+			if a.code/100 != 2 || !a.Asking || a.AskID == "" || a.AskID != answers[0].AskID || a.RequestID != answers[0].RequestID {
+				t.Fatalf("round %d, copy %d: %+v; all: %+v", round, i, a, answers)
+			}
+		}
+	}
+}

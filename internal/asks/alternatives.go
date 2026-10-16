@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"carpool/internal/geo"
 	"carpool/internal/match"
 )
 
@@ -34,8 +35,8 @@ type Alternative struct {
 // Alternatives lists the departures the matcher would try next for this
 // request, in the order it would try them.
 //
-// It runs the same filter AskNext runs, with the same request, the same clock
-// and the same ranking, so the list cannot promise a car the dispatcher would
+// It runs the same two stages AskNext runs, with the same request, the same
+// clock and the same ranking, so the list cannot promise a car the dispatcher would
 // never approach: blocks, full cars, departed trips, restricted groups and
 // drivers already asked are all left out for the same reasons. It asks nobody
 // and books nothing — the dispatcher is already working through this list.
@@ -63,17 +64,35 @@ func (s *Service) Alternatives(
 	for _, c := range candidates {
 		scored = append(scored, match.Scored{ID: c.OccurrenceID.String(), DetourMin: -c.SharedKm})
 	}
-	ranked := match.Rank(scored)
-	if limit > 0 && len(ranked) > limit {
-		ranked = ranked[:limit]
-	}
-	if len(ranked) == 0 {
-		return []Alternative{}, nil
+	byID := make(map[string]match.Candidate, len(candidates))
+	for _, c := range candidates {
+		byID[c.OccurrenceID.String()] = c
 	}
 
-	ids := make([]uuid.UUID, 0, len(ranked))
-	for _, r := range ranked {
-		ids = append(ids, uuid.MustParse(r.ID))
+	// Through the routed check too, as AskNext does, so the list does not
+	// show a car the dispatcher would then skip: no ordering inside what the
+	// driver agreed to, or no road (QA 2026-10-16, B4). Without a router
+	// there is no second stage, here or in AskNext.
+	ids := make([]uuid.UUID, 0, max(limit, 0))
+	for _, r := range match.Rank(scored) {
+		if limit > 0 && len(ids) == limit {
+			break
+		}
+		c := byID[r.ID]
+		if s.router != nil {
+			_, _, _, err := s.evaluate(ctx, c, req)
+			if errors.Is(err, match.ErrPartyCapReached) || errors.Is(err, geo.ErrNoRoute) ||
+				errors.Is(err, match.ErrNoViableInsertion) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+		ids = append(ids, c.OccurrenceID)
+	}
+	if len(ids) == 0 {
+		return []Alternative{}, nil
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT o.id, o.depart_earliest, o.depart_latest, t.origin_label, t.destination_label, o.seats_free
@@ -83,14 +102,14 @@ func (s *Service) Alternatives(
 		return nil, fmt.Errorf("asks: loading alternatives: %w", err)
 	}
 	defer rows.Close()
-	byID := make(map[uuid.UUID]Alternative, len(ids))
+	found := make(map[uuid.UUID]Alternative, len(ids))
 	for rows.Next() {
 		var a Alternative
 		if err := rows.Scan(&a.OccurrenceID, &a.DepartEarliest, &a.DepartLatest,
 			&a.OriginLabel, &a.DestinationLabel, &a.SeatsFree); err != nil {
 			return nil, fmt.Errorf("asks: reading alternatives: %w", err)
 		}
-		byID[a.OccurrenceID] = a
+		found[a.OccurrenceID] = a
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("asks: reading alternatives: %w", err)
@@ -98,7 +117,7 @@ func (s *Service) Alternatives(
 
 	out := make([]Alternative, 0, len(ids))
 	for _, id := range ids {
-		if a, ok := byID[id]; ok {
+		if a, ok := found[id]; ok {
 			out = append(out, a)
 		}
 	}

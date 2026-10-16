@@ -110,6 +110,7 @@ export default function SearchScreen() {
                 value={from}
                 onChange={setFrom}
                 placeholder={t('search.placeholder')}
+                near={to}
                 here
               />
               <PlaceField
@@ -118,6 +119,7 @@ export default function SearchScreen() {
                 value={to}
                 onChange={setTo}
                 placeholder={t('search.placeholder')}
+                near={from}
               />
             </View>
           </View>

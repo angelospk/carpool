@@ -37,6 +37,9 @@ type OpenRequest struct {
 	// until the sweeper moves it on, and claiming otherwise would leave the
 	// screen saying "we are asking someone" at a driver who stopped reading.
 	AskingNow bool
+	// AskExpiresAt is when that live ask lapses, so the passenger can see how
+	// long the driver has to answer. Nil when nobody is being asked.
+	AskExpiresAt *time.Time
 	// DriversOnCorridor counts drivers with a published route that could ever
 	// serve this corridor, so the app can tell "nobody drives this road" apart
 	// from "nobody has been asked yet".
@@ -55,6 +58,11 @@ type OpenRequest struct {
 	// because a driver who passed and then retired is in that count and not in
 	// the corridor's.
 	DriversUntried int
+	// MostSeatsOnCorridor is the largest seat count among those routes. A
+	// request for more than that can never be asked about, and the app says
+	// so instead of "nobody has been asked yet". Nil when nobody drives the
+	// road.
+	MostSeatsOnCorridor *int
 	// Stranded is a request that had a seat and lost it to the driver: its
 	// latest booking was cancelled from the driver's side, and it is back in
 	// the queue. The passenger needs to hear that the search restarted on its
@@ -105,7 +113,8 @@ func OpenRequests(
 		       count(DISTINCT t.driver_id),
 		       count(DISTINCT t.driver_id) FILTER (WHERE a.status IN ('declined','expired')),
 		       coalesce(bool_or(a.status = 'pending' AND a.expires_at > $2), false),
-		       corridor.drivers, corridor.untried,
+		       max(a.expires_at) FILTER (WHERE a.status = 'pending' AND a.expires_at > $2),
+		       corridor.drivers, corridor.untried, corridor.most_seats,
 		       coalesce((SELECT lb.status = 'cancelled_by_driver' FROM bookings lb
 		                 WHERE lb.request_id = r.id
 		                 ORDER BY lb.created_at DESC, lb.id DESC LIMIT 1), false),
@@ -137,7 +146,8 @@ func OpenRequests(
 			           AND uo.depart_earliest <= r.window_end AND uo.depart_latest >= r.window_start
 			           AND `+match.DriveOpen("uo", "$2")+`
 			           AND NOT EXISTS (SELECT 1 FROM asks ua
-			                           WHERE ua.request_id = r.id AND ua.occurrence_id = uo.id))) AS untried
+			                           WHERE ua.request_id = r.id AND ua.occurrence_id = uo.id))) AS untried,
+			       max(ct.seats) AS most_seats
 			FROM route_templates ct
 			JOIN driver_profiles d ON d.user_id = ct.driver_id
 			JOIN users du ON du.id = ct.driver_id AND du.status = 'active'
@@ -177,7 +187,7 @@ func OpenRequests(
 		) corridor ON true
 		GROUP BY r.id, r.origin_label, r.destination_label,
 		         r.window_start, r.window_end, r.seats, r.status,
-		         r.created_at, corridor.drivers, corridor.untried
+		         r.created_at, corridor.drivers, corridor.untried, corridor.most_seats
 		ORDER BY r.created_at DESC, r.id DESC`, userID, now, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: loading open requests: %w", err)
@@ -189,7 +199,7 @@ func OpenRequests(
 		var q OpenRequest
 		if err := rows.Scan(&q.ID, &q.OriginLabel, &q.DestinationLabel,
 			&q.WindowStart, &q.WindowEnd, &q.Seats, &q.Status,
-			&q.DriversAsked, &q.DriversDeclined, &q.AskingNow, &q.DriversOnCorridor, &q.DriversUntried, &q.Stranded, &q.CreatedAt); err != nil {
+			&q.DriversAsked, &q.DriversDeclined, &q.AskingNow, &q.AskExpiresAt, &q.DriversOnCorridor, &q.DriversUntried, &q.MostSeatsOnCorridor, &q.Stranded, &q.CreatedAt); err != nil {
 			return nil, fmt.Errorf("store: scanning an open request: %w", err)
 		}
 		out = append(out, q)

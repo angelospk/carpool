@@ -1,9 +1,12 @@
 package api_test
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
+
+	"carpool/internal/jobs"
 )
 
 // A driver, a passenger with a seat, and the departure they share.
@@ -172,5 +175,32 @@ func TestCancellingFromBothSidesAtOnceDoesNotDeadlock(t *testing.T) {
 		case <-time.After(20 * time.Second):
 			t.Fatal("one of the two cancellations never returned")
 		}
+	}
+}
+
+// With its bookings cancelled the departure was one the materializer may
+// rewrite, and the next run put it back: 'scheduled', and offered to
+// passengers, on a morning the driver had called off.
+func TestACalledOffDepartureStaysCalledOff(t *testing.T) {
+	h := newHarness(t)
+	driver, _, tripID, _ := bookedTrip(t, h, "+306900001011", "+306900001012")
+	var templateID string
+	h.mustQuery(`SELECT template_id::text FROM trip_occurrences WHERE id = $1::uuid`, &templateID, tripID)
+	// Every day, at the time the departure leaves, so the schedule wants it.
+	h.mustExec(`
+		INSERT INTO route_schedules (template_id, kind, weekdays, depart_earliest, depart_latest, effective_from)
+		VALUES ($1::uuid, 'recurring', ARRAY[1,2,3,4,5,6,7], '03:00', '03:30', '2026-07-01')`, templateID)
+
+	if rec := h.do(http.MethodDelete, "/v1/trips/"+tripID, nil, driver); rec.Code != http.StatusNoContent {
+		t.Fatalf("cancel: %d %s", rec.Code, rec.Body.String())
+	}
+	if err := jobs.NewMaterializer(h.pool, h.clock, testLocation()).Run(context.Background()); err != nil {
+		t.Fatalf("materialising: %v", err)
+	}
+
+	var status string
+	h.mustQuery(`SELECT status FROM trip_occurrences WHERE id = $1::uuid`, &status, tripID)
+	if status != "cancelled" {
+		t.Fatalf("the called-off departure is %q after the next materializer run", status)
 	}
 }

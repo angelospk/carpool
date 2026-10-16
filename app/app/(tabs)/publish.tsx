@@ -10,6 +10,7 @@ import {
   type LuggageSize,
   type MeetingPoint,
   type PricingMode,
+  type RouteBody,
 } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import { refusalText } from '../../src/api/errorText';
@@ -133,8 +134,9 @@ export default function PublishScreen() {
   const [published, setPublished] = useState<ShareableRoute | null>(null);
 
   // «Αλλαγή» from the list of routes: the form arrives filled in with the
-  // route, and publishing puts out the changed one and retires the old, which
-  // calls off its empty trips. Applied once per route, because the tab stays
+  // route, and saving changes it in place. With other ends it is a new route:
+  // that one is published and the old one retired, which calls off its empty
+  // trips. Applied once per route, because the tab stays
   // mounted and re-applying would undo what the driver then edited.
   const params = useLocalSearchParams<Record<string, string | string[]>>();
   const [replaces, setReplaces] = useState<{ id: string; label: string } | null>(null);
@@ -193,8 +195,8 @@ export default function PublishScreen() {
 
 
   const publish = useMutation({
-    mutationFn: (snap: ShareableRoute) =>
-      api.publishRoute({
+    mutationFn: async (snap: ShareableRoute) => {
+      const body: RouteBody = {
         // The landmark when one was chosen, the settlement otherwise. This is
         // the whole point of offering them: "Φέρες" is a town and "Φέρες, στο
         // βενζινάδικο" is somewhere a car can stop.
@@ -222,7 +224,22 @@ export default function PublishScreen() {
         // normalises it either way; sending it anyway would put a number in
         // the request that the receipt could not later explain.
         ...(pricing === 'formula' ? { contribution_share: share } : {}),
-      }),
+      };
+      if (replaces) {
+        // In place: a departure somebody booked keeps what was agreed, and
+        // the driver still has one car on that morning, not two.
+        try {
+          const r = await api.editRoute(replaces.id, body);
+          return { ...r, edited: true as const };
+        } catch (e) {
+          // Other ends are a new route. Anything else failed, and the old
+          // route stays as it was.
+          if (!(e instanceof ApiError && e.code === 'route_ends_changed')) throw e;
+        }
+      }
+      const r = await api.publishRoute(body);
+      return { ...r, edited: false as const };
+    },
     // Cleared when an attempt starts, not when one fails. The route published a
     // minute ago still exists after a second attempt goes wrong, so "a publish
     // that failed leaves nothing published" was simply untrue from the second
@@ -237,7 +254,13 @@ export default function PublishScreen() {
       setPublished(null);
     },
     onSuccess: (r, snap) => {
-      setOutcome(`${t('publish.published')} · ${km(r.route_km)}`);
+      setOutcome(
+        r.edited
+          ? r.kept_trips > 0
+            ? `${t('publish.edited')} ${t('publish.keptTrips', { count: r.kept_trips })}`
+            : t('publish.edited')
+          : `${t('publish.published')} · ${km(r.route_km)}`,
+      );
       setPublished({ ...snap, id: r.template_id });
       // The places go, so a second press cannot publish the same route again
       // and the next route starts from empty. Schedule, seats and car stay: a
@@ -247,7 +270,10 @@ export default function PublishScreen() {
       setFromPoint(null);
       setToPoint(null);
       setLeavingNow(false);
-      if (replaces) {
+      if (r.edited) {
+        setReplaces(null);
+        void queryClient.invalidateQueries({ queryKey: ['my-routes'] });
+      } else if (replaces) {
         // After the new one exists, never before: a failed publish must not
         // leave the driver with neither.
         const old = replaces.id;
@@ -311,6 +337,7 @@ export default function PublishScreen() {
               setFromPoint(null);
             }}
             placeholder={t('search.placeholder')}
+            near={to}
             here
           />
           <MeetingPointField
@@ -328,6 +355,7 @@ export default function PublishScreen() {
               setToPoint(null);
             }}
             placeholder={t('search.placeholder')}
+            near={from}
           />
           <MeetingPointField
             testID="publish-destination-point"
@@ -335,6 +363,67 @@ export default function PublishScreen() {
             value={toPoint}
             onChange={setToPoint}
           />
+        </Card>
+
+        {/* How far out of the way, for this trip. It is a question about today:
+            the long run to Thessaloniki has room in it and the Monday commute
+            has none, which is why the answer is not kept on the profile.
+
+            Untouched, it says so rather than showing a figure. The screen does
+            not know what this driver's profile says, and inventing a plausible
+            "10 km, stops on" would be telling them something about their own
+            settings that may not be true.
+
+            Right under the road, because it is a question about the road. At
+            the bottom of the form, under the price, nobody found it
+            (QA 2026-10-16). */}
+        <SectionHeader title={t('publish.detour')} />
+        <Card>
+          {allowStops === null && detourKm === null ? (
+            <Pressable testID="detour-override" onPress={() => setAllowStops(true)}>
+              <Text style={styles.seatsLabel}>{t('publish.detourFromProfile')}</Text>
+              <Text style={styles.hint}>{t('publish.detourChange')}</Text>
+            </Pressable>
+          ) : (
+            <>
+              <Pressable
+                testID="detour-allow"
+                onPress={() => setAllowStops((a) => a === false)}
+                style={styles.seats}
+              >
+                <Text style={styles.seatsLabel}>{t('publish.allowStops')}</Text>
+                <Text style={styles.toggle}>
+                  {allowStops === false ? t('common.off') : t('common.on')}
+                </Text>
+              </Pressable>
+
+              {allowStops === false ? (
+                <Text style={styles.hint}>{t('publish.noStopsHint')}</Text>
+              ) : (
+                <>
+                  <View style={styles.divider} />
+                  <View style={styles.seats}>
+                    <Text style={styles.seatsLabel}>{t('publish.detourKm')}</Text>
+                    <Stepper
+                      testID="detour-km"
+                      value={detourKm ?? defaultDetourKm}
+                      // Choosing a distance is agreeing to stops. Sending the
+                      // distance alone would leave a driver whose profile says
+                      // no stops setting a detour that can never be taken.
+                      onChange={(v) => {
+                        setDetourKm(v);
+                        setAllowStops(true);
+                      }}
+                      min={0}
+                      max={50}
+                      step={5}
+                    />
+                  </View>
+                  <Text style={styles.hint}>{t('publish.detourHint')}</Text>
+                </>
+              )}
+            </>
+          )}
         </Card>
 
         {/* The schedule is when the car goes, and nothing else. Seats, bags and
@@ -526,63 +615,6 @@ export default function PublishScreen() {
           />
         </Card>
 
-        {/* How far out of the way, for this trip. It is a question about today:
-            the long run to Thessaloniki has room in it and the Monday commute
-            has none, which is why the answer is not kept on the profile.
-
-            Untouched, it says so rather than showing a figure. The screen does
-            not know what this driver's profile says, and inventing a plausible
-            "10 km, stops on" would be telling them something about their own
-            settings that may not be true. */}
-        <SectionHeader title={t('publish.detour')} />
-        <Card>
-          {allowStops === null && detourKm === null ? (
-            <Pressable testID="detour-override" onPress={() => setAllowStops(true)}>
-              <Text style={styles.seatsLabel}>{t('publish.detourFromProfile')}</Text>
-              <Text style={styles.hint}>{t('publish.detourChange')}</Text>
-            </Pressable>
-          ) : (
-            <>
-              <Pressable
-                testID="detour-allow"
-                onPress={() => setAllowStops((a) => a === false)}
-                style={styles.seats}
-              >
-                <Text style={styles.seatsLabel}>{t('publish.allowStops')}</Text>
-                <Text style={styles.toggle}>
-                  {allowStops === false ? t('common.off') : t('common.on')}
-                </Text>
-              </Pressable>
-
-              {allowStops === false ? (
-                <Text style={styles.hint}>{t('publish.noStopsHint')}</Text>
-              ) : (
-                <>
-                  <View style={styles.divider} />
-                  <View style={styles.seats}>
-                    <Text style={styles.seatsLabel}>{t('publish.detourKm')}</Text>
-                    <Stepper
-                      testID="detour-km"
-                      value={detourKm ?? defaultDetourKm}
-                      // Choosing a distance is agreeing to stops. Sending the
-                      // distance alone would leave a driver whose profile says
-                      // no stops setting a detour that can never be taken.
-                      onChange={(v) => {
-                        setDetourKm(v);
-                        setAllowStops(true);
-                      }}
-                      min={0}
-                      max={50}
-                      step={5}
-                    />
-                  </View>
-                  <Text style={styles.hint}>{t('publish.detourHint')}</Text>
-                </>
-              )}
-            </>
-          )}
-        </Card>
-
         {noCar ? <Hint>{t('publish.noDriverProfile')}</Hint> : null}
         {/* A boot with nothing left in it and a luggage size still chosen is a
             pair the database refuses. Saying so here is better than a 400 after
@@ -603,7 +635,7 @@ export default function PublishScreen() {
         ) : null}
         <Button
           testID="publish-submit"
-          label={t('publish.publish')}
+          label={replaces ? t('common.save') : t('publish.publish')}
           dot
           // The snapshot is what was sent, not what the form says later: the
           // form stays editable after publishing, and sharing the edited

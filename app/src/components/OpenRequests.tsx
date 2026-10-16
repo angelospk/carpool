@@ -22,6 +22,7 @@ import { useSession } from '../state/session';
 import { Card } from './ui';
 import { colors, space, type } from '../design/tokens';
 import { JourneySummary } from './JourneySummary';
+import { athensTime } from '../design/format';
 
 /**
  * What the caller is waiting on, asked the same way everywhere.
@@ -107,8 +108,15 @@ export function requestProgress(request: OpenRequest, t: TFunction): string {
   // The driver who cancelled was asked, so "waiting for an answer" would be
   // about them. Only a live ask to somebody new is worth adding.
   return request.asking_now
-    ? `${t('home.requestStranded')} ${t('home.requestAsking')}`
+    ? `${t('home.requestStranded')} ${asking(request, t)}`
     : t('home.requestStranded');
+}
+
+/** "Ρωτάμε έναν οδηγό τώρα", and until when they have to answer. */
+function asking(request: OpenRequest, t: TFunction): string {
+  return request.ask_expires_at
+    ? `${t('home.requestAsking')} ${t('home.askAnswersBy', { time: athensTime(request.ask_expires_at) })}`
+    : t('home.requestAsking');
 }
 
 function progressOf(request: OpenRequest, t: TFunction): string {
@@ -119,8 +127,16 @@ function progressOf(request: OpenRequest, t: TFunction): string {
       ? ` ${t('home.requestDeclined', { count: request.drivers_declined })}`
       : '';
 
+  // No car on the road has that many seats: nobody will be asked until one
+  // does, and "nobody asked yet" would hide why.
+  if (
+    request.drivers_asked === 0 &&
+    request.most_seats_on_corridor != null &&
+    request.most_seats_on_corridor < request.seats
+  )
+    return t('home.requestTooManySeats', { count: request.most_seats_on_corridor });
   if (request.drivers_asked === 0) return t('home.requestNobody');
-  if (request.asking_now) return t('home.requestAsking') + declined;
+  if (request.asking_now) return asking(request, t) + declined;
   // Everybody on the road has passed: there is no next driver to look for
   // until somebody publishes. A missing count is not that. The server counts
   // it, because a driver who passed and then retired is in drivers_declined

@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import PublishScreen from '../(tabs)/publish';
 import { athensDate, nextDate } from '../../src/design/when';
 import { api } from '../../src/api/endpoints';
+import i18n from 'i18next';
 
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
@@ -257,4 +258,16 @@ describe('the boot, minus what the driver is bringing', () => {
     expect(body.luggage_capacity).toBe(3);
     expect(body.luggage).toBe('suitcase');
   });
+});
+
+// "Παράκαμψη έως" sat at the bottom, under the price, and nobody found it
+// (QA 2026-10-16). It is a question about the road, so it is under the road.
+test('the detour is asked right after the road', async () => {
+  await fillRoute();
+
+  const json = JSON.stringify(screen.toJSON());
+  const at = (key: string) => json.indexOf(i18n.t(key));
+  expect(at('publish.route')).toBeGreaterThan(-1);
+  expect(at('publish.detour')).toBeGreaterThan(at('publish.route'));
+  expect(at('publish.detour')).toBeLessThan(at('publish.schedule'));
 });

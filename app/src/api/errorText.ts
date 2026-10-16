@@ -28,6 +28,7 @@ const known = new Set([
   'trip_not_running',
   'bad_detour',
   'not_driving',
+  'duplicate_route',
 ]);
 
 /** A sentence for a refusal this app knows, or null for the caller to decide. */

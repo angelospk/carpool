@@ -21,6 +21,7 @@ import { shareText } from '../../src/components/shareText';
 import { shareRequestMessage } from '../../src/design/shareRequest';
 import { ktelFor } from '../../src/design/ktel';
 import { usePushReach } from '../../src/push/reach';
+import { confirm } from '../../src/components/confirm';
 
 export default function RequestScreen() {
   const { t } = useTranslation();
@@ -228,7 +229,16 @@ export default function RequestScreen() {
               testID="cancel-request"
               label={t('request.cancel')}
               variant="secondary"
-              onPress={() => cancel.mutate()}
+              onPress={() =>
+                confirm({
+                  title: t('request.cancel'),
+                  message: t('request.cancelConfirm'),
+                  confirmLabel: t('request.cancel'),
+                  cancelLabel: t('request.keep'),
+                  destructive: true,
+                  onConfirm: () => cancel.mutate(),
+                })
+              }
               disabled={cancel.isPending}
             />
           ) : null}

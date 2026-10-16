@@ -52,7 +52,17 @@ func (d Deps) handlePlaces(w http.ResponseWriter, r *http.Request) {
 		limit = MaxPlaceResults
 	}
 
-	found := places.Search(q, limit)
+	// Where the other end of the journey is, when the client knows: places
+	// near it come first among equal matches. Anything unreadable is a
+	// client that did not say.
+	var near *places.Near
+	lon, errLon := strconv.ParseFloat(r.URL.Query().Get("near_lon"), 64)
+	lat, errLat := strconv.ParseFloat(r.URL.Query().Get("near_lat"), 64)
+	if errLon == nil && errLat == nil && math.Abs(lon) <= 180 && math.Abs(lat) <= 90 {
+		near = &places.Near{Lon: lon, Lat: lat}
+	}
+
+	found := places.SearchNear(q, limit, near)
 	if found == nil {
 		// Explicitly not null: an empty list is the ordinary answer halfway
 		// through typing a word, and a client should not have to tell the two

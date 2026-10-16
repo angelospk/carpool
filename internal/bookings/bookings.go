@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/clock"
+	"carpool/internal/jobs"
 	"carpool/internal/notices"
 	"carpool/internal/outbox"
 )
@@ -202,16 +203,34 @@ func (s *Service) CancelOccurrence(ctx context.Context, occurrenceID, userID uui
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// The materializer's lock on the route first, as it takes it: the
+	// departure is written off in the schedule below, and a run that read the
+	// schedule before that would otherwise find the departure with nobody
+	// booked on it and put it back.
+	var templateID uuid.UUID
+	err = tx.QueryRow(ctx, `SELECT template_id FROM trip_occurrences WHERE id = $1`, occurrenceID).Scan(&templateID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("bookings: loading the trip: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2))`,
+		jobs.TemplateLockNamespace, templateID.String()); err != nil {
+		return fmt.Errorf("bookings: taking the route lock: %w", err)
+	}
+
 	var (
-		driverID uuid.UUID
-		status   string
-		departs  time.Time
+		driverID    uuid.UUID
+		status      string
+		departs     time.Time
+		serviceDate time.Time
 	)
 	err = tx.QueryRow(ctx, `
-		SELECT t.driver_id, o.status, o.depart_earliest
+		SELECT t.driver_id, o.status, o.depart_earliest, o.service_date
 		FROM trip_occurrences o
 		JOIN route_templates t ON t.id = o.template_id
-		WHERE o.id = $1 FOR UPDATE OF o`, occurrenceID).Scan(&driverID, &status, &departs)
+		WHERE o.id = $1 FOR UPDATE OF o`, occurrenceID).Scan(&driverID, &status, &departs, &serviceDate)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -269,6 +288,19 @@ func (s *Service) CancelOccurrence(ctx context.Context, occurrenceID, userID uui
 		UPDATE trip_occurrences SET status = 'cancelled', updated_at = now()
 		 WHERE id = $1`, occurrenceID); err != nil {
 		return fmt.Errorf("bookings: cancelling the trip: %w", err)
+	}
+
+	// And off the schedule. With nobody booked on it any more the departure
+	// is one the materializer may rewrite, and it did: the next run set it
+	// back to 'scheduled', and passengers were matched to a morning the
+	// driver had called off. An exception is how a schedule says "not this
+	// day".
+	if _, err := tx.Exec(ctx, `
+		UPDATE route_schedules
+		   SET exceptions = array_append(exceptions, $2::date), updated_at = now()
+		 WHERE template_id = $1 AND NOT ($2::date = ANY(exceptions))`,
+		templateID, serviceDate); err != nil {
+		return fmt.Errorf("bookings: writing the day off the schedule: %w", err)
 	}
 
 	for _, c := range affected {

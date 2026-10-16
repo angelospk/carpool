@@ -74,6 +74,32 @@ test('an ask in flight outranks the count of drivers on the road', () => {
   expect(asking).toContain(el.home.requestAsking);
 });
 
+// Four seats asked for, and no car on the road has four. Nobody will ever be
+// asked, and "nobody asked yet" hid why (QA 2026-10-16, U13).
+test('more seats than any car on the road has says so', () => {
+  const got = requestProgress(waiting({ seats: 4, drivers_on_corridor: 2, most_seats_on_corridor: 3 }), t);
+  expect(got).toBe(t('home.requestTooManySeats', { count: 3 }));
+  expect(got).toContain('3');
+});
+
+test('seats that fit are not a reason', () => {
+  expect(requestProgress(waiting({ seats: 3, drivers_on_corridor: 2, most_seats_on_corridor: 3 }), t)).toBe(
+    el.home.requestNobody,
+  );
+});
+
+// The ask lapses after half an hour, and the passenger could not see when.
+// They waited without knowing for how long (QA 2026-10-16, U6).
+test('a live ask says until when the driver has to answer', () => {
+  const asking = requestProgress(
+    waiting({ drivers_asked: 1, asking_now: true, ask_expires_at: '2026-07-29T07:42:00Z' }),
+    t,
+  );
+
+  expect(asking).toContain(el.home.requestAsking);
+  expect(asking).toContain('10:42');
+});
+
 // An older app, or a server that has not been redeployed, sends no count at
 // all. Absent is not zero: claiming "there is nobody" because a field is
 // missing is the one wrong answer here.
