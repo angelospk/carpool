@@ -359,3 +359,53 @@ func TestARouteForAGroupIsCoverOnlyForItsMembers(t *testing.T) {
 		t.Errorf("a member is told %d drivers are on the road, want 1", got)
 	}
 }
+
+// passed gives the template a departure and records that its driver was
+// asked about this request and said no.
+func (w *corridorWorld) passed(t *testing.T, templateID uuid.UUID) {
+	t.Helper()
+	if _, err := w.pool.Exec(context.Background(), `
+		WITH occ AS (
+			INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest,
+				depart_latest, seats_total, seats_free, template_revision, route_geom, route_km,
+				route_min, pricing_mode)
+			SELECT id, vehicle_id, $2::date, $2, $2 + interval '30 minutes', 3, 3, 1,
+			       route_geom, route_km, route_min, 'formula'
+			  FROM route_templates WHERE id = $1
+			RETURNING id)
+		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point,
+		                  dropoff_point, suggested_price_eur, itinerary_version, status, expires_at)
+		SELECT (SELECT id FROM ride_requests), occ.id, 0, 0, ST_SetSRID(ST_MakePoint(25.87, 40.85), 4326),
+		       ST_SetSRID(ST_MakePoint(26.17, 40.90), 4326), 2.00, 1, 'declined', $2
+		  FROM occ`, templateID, corridorNow.Add(2*time.Hour)); err != nil {
+		t.Fatalf("seeding a declined ask: %v", err)
+	}
+}
+
+// The app says "every driver on this road has passed" from this count. It is
+// the drivers still on the road who have not, which the two counts beside it
+// cannot give: a driver who said no and then retired is in one and not the
+// other (QA 2026-10-16, Codex review).
+func TestDriversNotYetTriedLeavesOutTheOnesWhoPassed(t *testing.T) {
+	w := newCorridorWorld(t)
+	first := w.route(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+	w.passed(t, first)
+	if got := onlyRequest(t, w).DriversUntried; got != 0 {
+		t.Fatalf("untried = %d after the only driver passed, want 0", got)
+	}
+
+	w.route(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+	if got := onlyRequest(t, w).DriversUntried; got != 1 {
+		t.Fatalf("untried = %d with a second driver nobody asked, want 1", got)
+	}
+
+	// The first one retires: still not somebody to wait for, and the second
+	// still is, though declined (1) now equals the corridor (1).
+	if _, err := w.pool.Exec(context.Background(),
+		`UPDATE route_templates SET active = false WHERE id = $1`, first); err != nil {
+		t.Fatalf("retiring: %v", err)
+	}
+	if got := onlyRequest(t, w).DriversUntried; got != 1 {
+		t.Fatalf("untried = %d after the passed driver retired, want 1", got)
+	}
+}

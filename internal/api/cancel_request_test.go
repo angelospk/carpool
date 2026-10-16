@@ -152,3 +152,61 @@ func TestCancellingARequestKillsItsLiveAsk(t *testing.T) {
 		t.Fatalf("the ask is %q, want cancelled: a driver must not be able to accept a withdrawn ride", status)
 	}
 }
+
+// The seats a pending ask held go back when the passenger withdraws it, and
+// whoever was waiting behind them is woken now rather than at the next hourly
+// reconcile. A one-seat trip otherwise sat unoffered for up to an hour
+// (QA 2026-10-16, B1).
+func TestCancellingARequestWakesWhoeverWaitsForItsTrip(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000048", "Επιβάτης")
+	_, _, occurrence := h.bookedTrip(t)
+
+	var passengerID uuid.UUID
+	h.mustQuery(`SELECT id FROM users WHERE phone = '+306900000048'`, &passengerID)
+	requestID := h.seedRequest(t, passengerID, "asking")
+	if _, err := h.pool.Exec(context.Background(), `
+		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
+		                  suggested_price_eur, itinerary_version, status, expires_at)
+		VALUES ($1, $2, 5, 2, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+		        ST_SetSRID(ST_MakePoint(25.98,40.85),4326), 2.50, 0, 'pending', now() + interval '1 hour')`,
+		requestID, occurrence); err != nil {
+		t.Fatalf("seeding the ask: %v", err)
+	}
+	var before int
+	h.mustQuery(`SELECT count(*) FROM outbox WHERE kind = 'wake_waiting'
+	              AND payload->>'occurrence_id' = $1::text`, &before, occurrence)
+
+	if rec := h.do(http.MethodDelete, "/v1/requests/"+requestID.String(), nil, token); rec.Code != http.StatusNoContent {
+		t.Fatalf("status %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+
+	var after int
+	h.mustQuery(`SELECT count(*) FROM outbox WHERE kind = 'wake_waiting'
+	              AND payload->>'occurrence_id' = $1::text`, &after, occurrence)
+	if after != before+1 {
+		t.Fatalf("wakes for the trip went %d -> %d, want one more", before, after)
+	}
+}
+
+// A request that was never put to anybody frees nothing, and wakes nothing.
+func TestCancellingAnOpenRequestWakesNothing(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000049", "Επιβάτης")
+
+	var passengerID uuid.UUID
+	h.mustQuery(`SELECT id FROM users WHERE phone = '+306900000049'`, &passengerID)
+	requestID := h.seedRequest(t, passengerID, "open")
+	var before int
+	h.mustQuery(`SELECT count(*) FROM outbox WHERE kind = 'wake_waiting'`, &before)
+
+	if rec := h.do(http.MethodDelete, "/v1/requests/"+requestID.String(), nil, token); rec.Code != http.StatusNoContent {
+		t.Fatalf("status %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+
+	var after int
+	h.mustQuery(`SELECT count(*) FROM outbox WHERE kind = 'wake_waiting'`, &after)
+	if after != before {
+		t.Fatalf("cancelling an open request queued %d wakes", after-before)
+	}
+}

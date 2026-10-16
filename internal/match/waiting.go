@@ -56,6 +56,9 @@ WITH trip AS (
 	JOIN users du ON du.id = t.driver_id AND du.status = 'active'
 	WHERE o.id = $1
 	  AND o.status = 'scheduled'
+	  -- The mirror of the forward filter: a retired route keeps the departures
+	  -- somebody has a seat on, and takes nobody new on them.
+	  AND t.active
 	  -- The mirror of the same clause in the forward filter. A seat comes back
 	  -- whenever a booking is cancelled, including ten minutes after the car
 	  -- left, and that wake offered the seat to everybody still waiting on the
@@ -79,8 +82,10 @@ WHERE rr.status IN (` + waitingStatuses + `)
   AND rr.window_end > $2
   -- A drive is compared with when the car reaches the passenger, not when it
   -- leaves; the forward filter does that, and this side stays looser.
-  AND (trip.drive_set_at IS NOT NULL OR (rr.window_start < trip.depart_latest
-                                         AND rr.window_end > trip.depart_earliest))
+  -- Inclusive, as in the forward filter: a window that ends at 10:00 takes
+  -- a driver leaving at 10:00.
+  AND (trip.drive_set_at IS NOT NULL OR (rr.window_start <= trip.depart_latest
+                                         AND rr.window_end >= trip.depart_earliest))
   AND rr.passenger_id <> trip.driver_id
   AND rr.seats <= trip.seats_free - ` + spokenForTrip + ` + ` + ownHold + `
   AND trip.luggage >= rr.luggage

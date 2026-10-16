@@ -87,10 +87,60 @@ test('a missing count is not read as an empty road', () => {
 // The count of people who could not still explains why this is taking a while.
 test('drivers who declined are still reported alongside the search', () => {
   const searching = requestProgress(
-    waiting({ drivers_asked: 2, drivers_declined: 2, drivers_on_corridor: 2 }),
+    waiting({ drivers_asked: 2, drivers_declined: 2, drivers_on_corridor: 3 }),
     t,
   );
 
   expect(searching).toContain(el.home.requestSearching);
   expect(searching).toMatch(/2/);
+});
+
+// Every driver on the road has said no or let the ask lapse. "Looking for the
+// next driver" promised somebody who does not exist (QA 2026-10-16, U5).
+test('when every driver on the road has passed, it says so instead of searching', () => {
+  const done = requestProgress(
+    waiting({ drivers_asked: 1, drivers_declined: 1, drivers_on_corridor: 1, drivers_untried: 0 }),
+    t,
+  );
+
+  expect(done).toBe(el.home.requestExhausted);
+  expect(done).not.toContain(el.home.requestSearching);
+  expect(el.home.requestExhausted).toMatch(/ανοιχτ/);
+});
+
+// An ask that lapsed is not a refusal: the driver may never have seen it.
+test('the count of drivers who passed does not claim they refused', () => {
+  expect(el.home.requestDeclined_one).toMatch(/δεν απάντησε/);
+  expect(el.home.requestDeclined_one).not.toMatch(/δεν μπορούσε/);
+});
+
+// Absent is not zero here either: without a count, keep searching.
+test('a missing count never reads as everybody having passed', () => {
+  const unknown = requestProgress(
+    waiting({ drivers_asked: 1, drivers_declined: 1, drivers_untried: undefined }),
+    t,
+  );
+
+  expect(unknown).toContain(el.home.requestSearching);
+});
+
+// Nobody has passed yet: an ask that is out and unanswered is waiting.
+test('an unanswered ask on an emptied road is still waiting, not exhausted', () => {
+  expect(
+    requestProgress(
+      waiting({ drivers_asked: 1, drivers_declined: 0, drivers_on_corridor: 0, drivers_untried: 0 }),
+      t,
+    ),
+  ).toBe(el.home.requestWaiting);
+});
+
+// One driver passed and retired, a new one publishes: the declined count equals
+// the corridor, but somebody is still there to ask (Codex review).
+test('a new driver after one who passed is still somebody to look for', () => {
+  const line = requestProgress(
+    waiting({ drivers_asked: 1, drivers_declined: 1, drivers_on_corridor: 1, drivers_untried: 1 }),
+    t,
+  );
+
+  expect(line).toContain(el.home.requestSearching);
 });

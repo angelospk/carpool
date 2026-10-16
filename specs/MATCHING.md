@@ -20,7 +20,7 @@ Trigger 2 was specified here from the beginning and was **not implemented until
 2026-08-11**: the ask flow had three entry points and all three were on the
 passenger's side, so an open request that found nobody was never reconsidered.
 See "Reverse direction" below for what it means in practice, since "a trip
-becoming available" turned out to be six events rather than one.
+becoming available" turned out to be seven events rather than one.
 
 ## Stage 1 — gross filter (pure SQL, index-backed)
 
@@ -34,9 +34,10 @@ WITH cand AS (
   JOIN route_templates t ON t.id = o.template_id
   JOIN driver_profiles d ON d.user_id = t.driver_id
   WHERE o.status = 'scheduled'
+    AND t.active                       -- a retired route takes nobody new
     AND o.seats_free >= :seats
-    AND o.depart_earliest < :window_end
-    AND o.depart_latest  > :window_start
+    AND o.depart_earliest <= :window_end   -- inclusive: a 06–10 window
+    AND o.depart_latest   >= :window_start --   takes a 10:00 departure
     AND NOT d.notifications_muted
 )
 SELECT id,
@@ -62,6 +63,11 @@ Notes:
 - The shared-fraction floor (≥ 20 % of the passenger's own trip length, min 1 km)
   is a tunable heuristic; revisit with real data.
 - Region admissibility was already enforced at request/route creation time.
+- One passenger, one trip per hour: an occurrence is skipped when it overlaps
+  (departure window plus driving time) another occurrence where the passenger
+  holds a confirmed booking or a pending, unexpired ask. Without it two requests
+  from one person held every seat on a trip, and a route published twice could
+  seat the same person twice at the same hour (QA 2026-10-16).
 
 Output: candidate list with pickup/dropoff snap points, capped at top ~20 by
 straight-line quality score.
@@ -84,7 +90,7 @@ A wake produces a shortlist of request ids; each goes back through `AskNext`,
 which re-runs stage 1 and stage 2. There is one matching engine with two
 triggers, not two engines.
 
-"A trip becoming available" is six events, all enqueuing `wake_waiting` inside
+"A trip becoming available" is seven events, all enqueuing `wake_waiting` inside
 the transaction that caused them:
 
 | Event | Where |
@@ -95,6 +101,7 @@ the transaction that caused them:
 | Passenger suspended | `moderation` |
 | Account closed | `account` |
 | Offer declined or lapsed | `asks.requeue` |
+| Request with a live ask cancelled | `api.handleCancelRequest` |
 
 The last is a consequence of the ask cap below rather than of a seat physically
 returning, and it is what keeps the queue moving on a one-seat trip.

@@ -101,7 +101,7 @@ describe('what the waiting actually is', () => {
 
   test('one driver who could not is said in the singular', async () => {
     const line = await progress({ drivers_asked: 1, drivers_declined: 1, asking_now: false });
-    expect(line).toMatch(/1 οδηγός δεν μπορούσε/);
+    expect(line).toMatch(/1 οδηγός είπε/);
   });
 
   test('an ask that went out and has not come back is waiting, not searching', async () => {

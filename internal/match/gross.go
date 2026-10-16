@@ -88,6 +88,29 @@ type Candidate struct {
 	ItineraryVersion int
 }
 
+// PassengerHolds is the SQL for whether the passenger already has a seat on,
+// or a live offer about, a trip that overlaps the occurrence in time.
+//
+// Two requests from one person, or the same route published twice, otherwise
+// put that person to drivers twice for the same hour and held every seat on a
+// trip (QA 2026-10-16). Overlap is the departure window plus the driving time.
+// A lapsed offer or a cancelled seat holds nothing.
+func PassengerHolds(occurrence, passenger, now string) string {
+	o := occurrence
+	return `EXISTS (
+	        SELECT 1 FROM trip_occurrences ho
+	        WHERE ho.depart_earliest < ` + o + `.depart_latest + ` + o + `.route_min * interval '1 minute'
+	          AND ` + o + `.depart_earliest < ho.depart_latest + ho.route_min * interval '1 minute'
+	          AND (EXISTS (
+	                 SELECT 1 FROM bookings hb
+	                 WHERE hb.occurrence_id = ho.id AND hb.passenger_id = ` + passenger + `
+	                   AND hb.status = 'confirmed')
+	               OR EXISTS (
+	                 SELECT 1 FROM asks ha JOIN ride_requests hr ON hr.id = ha.request_id
+	                 WHERE ha.occurrence_id = ho.id AND hr.passenger_id = ` + passenger + `
+	                   AND ha.status = 'pending' AND ha.expires_at > ` + now + `)))`
+}
+
 // SeatsSpokenFor is the SQL expression for how many seats on an occurrence are
 // already promised to somebody: the party sizes behind every live ask.
 //
@@ -270,6 +293,10 @@ WITH cand AS (
 	JOIN users du ON du.id = t.driver_id AND du.status = 'active'
 	` + DriveCar("o", "$13") + `
 	WHERE o.status = 'scheduled'
+	  -- Retiring a route keeps the departures somebody has a seat on, so the
+	  -- seat is honoured. It takes nobody new on them: the driver withdrew the
+	  -- route, and after an edit the replacement carries the new seat count.
+	  AND t.active
 	  AND o.seats_free - ` + SeatsSpokenFor("o.id", "$13") + ` >= $5
 	  -- Excluded rather than ranked down. An ask a driver will certainly
 	  -- refuse costs them a notification and the passenger a wait, and the
@@ -287,7 +314,7 @@ WITH cand AS (
 	  -- passenger's window with when the car reaches them. Comparing it with
 	  -- the departure would turn away everybody further down the road whose
 	  -- window opens after the car leaves its origin.
-	  AND (o.drive_set_at IS NOT NULL OR (o.depart_earliest < $4 AND o.depart_latest > $3))
+	  AND (o.drive_set_at IS NOT NULL OR (o.depart_earliest <= $4 AND o.depart_latest >= $3))
 	  -- And it has not gone yet. The two lines above compare the departure
 	  -- against the *request's* window, which is written once and never moves:
 	  -- one driver is asked at a time with half an hour to answer, so a request
@@ -311,6 +338,9 @@ WITH cand AS (
 	  AND ($7::uuid IS NULL OR NOT EXISTS (
 	        SELECT 1 FROM bookings bk
 	        WHERE bk.occurrence_id = o.id AND bk.passenger_id = $7::uuid))
+	  -- Nor one that overlaps a trip the passenger already has a seat on or is
+	  -- being asked about. createAsk asks again under the passenger's lock.
+	  AND ($7::uuid IS NULL OR NOT ` + PassengerHolds("o", "$7::uuid", "$13") + `)
 	  -- A passenger who asked for women drivers only is not offered anybody
 	  -- else. The profile showed the setting as on long before anything read
 	  -- it, which for a safety setting is worse than not having one.

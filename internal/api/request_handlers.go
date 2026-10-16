@@ -11,6 +11,7 @@ import (
 
 	"carpool/internal/asks"
 	"carpool/internal/domain"
+	"carpool/internal/outbox"
 	"carpool/internal/store"
 )
 
@@ -283,6 +284,7 @@ func (d Deps) handleMyRequests(w http.ResponseWriter, r *http.Request) {
 			"drivers_declined":    q.DriversDeclined,
 			"asking_now":          q.AskingNow,
 			"drivers_on_corridor": q.DriversOnCorridor,
+			"drivers_untried":     q.DriversUntried,
 			"stranded":            q.Stranded,
 			"created_at":          q.CreatedAt,
 		})
@@ -338,8 +340,20 @@ func (d Deps) handleCancelRequest(w http.ResponseWriter, r *http.Request) {
 		// 204 for it would be the original bug with a smaller window. So the
 		// affected row is returned, and when there is none the status is read
 		// again to say what actually happened.
+		//
+		// The seats a killed ask held go back with it, so whoever waits behind
+		// them is woken in the same transaction. Left to the hourly reconcile,
+		// a one-seat trip sat unoffered for up to an hour.
+		tx, err := d.Pool.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not cancel the request")
+			return
+		}
+		defer func() { _ = tx.Rollback(r.Context()) }()
+
 		var cancelled uuid.UUID
-		err := d.Pool.QueryRow(r.Context(), `
+		var freed []uuid.UUID
+		err = tx.QueryRow(r.Context(), `
 			WITH cancelled AS (
 				UPDATE ride_requests SET status = 'cancelled', updated_at = now()
 				WHERE id = $1 AND passenger_id = $2 AND status IN ('open','asking')
@@ -347,14 +361,27 @@ func (d Deps) handleCancelRequest(w http.ResponseWriter, r *http.Request) {
 			), killed AS (
 				UPDATE asks SET status = 'cancelled', responded_at = now()
 				WHERE request_id IN (SELECT id FROM cancelled) AND status = 'pending'
-				RETURNING request_id
+				RETURNING occurrence_id
 			)
-			SELECT id FROM cancelled`, requestID, userID).Scan(&cancelled)
+			SELECT id, ARRAY(SELECT DISTINCT occurrence_id FROM killed) FROM cancelled`,
+			requestID, userID).Scan(&cancelled, &freed)
 		if errors.Is(err, pgx.ErrNoRows) {
+			// Released first: reportCancelRace reads through the pool, and
+			// holding this connection while it waits for another can starve a
+			// small pool.
+			_ = tx.Rollback(r.Context())
 			d.reportCancelRace(w, r, requestID, userID)
 			return
 		}
 		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not cancel the request")
+			return
+		}
+		if err := outbox.WakeAll(r.Context(), tx, freed, "request_cancelled", d.now()); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not cancel the request")
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal", "could not cancel the request")
 			return
 		}
