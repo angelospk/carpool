@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 
 import SearchScreen from '../(tabs)/search';
 import { api } from '../../src/api/endpoints';
+import { ApiError } from '../../src/api/client';
 
 // Only today or tomorrow could be asked for, so a trip on Thursday waited
 // until Wednesday (QA 2026-10-16, U1). A passenger can now pick a date, and
@@ -165,4 +166,21 @@ test('a day that could not be saved is said, and the rest are kept', async () =>
   expect(retry.alternative_of).toBe('q1');
   expect(retry.window_start).toBe(failedDay);
   await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/request/q1'));
+});
+
+test('a day the server refuses for good is said, not offered again', async () => {
+  (api.createRequest as jest.Mock).mockImplementation(async (b: { alternative_of?: string }) => {
+    if (b.alternative_of) throw new ApiError(409, 'request_closed', 'closed');
+    return { request_id: 'q1', asking: false };
+  });
+  render(wrap(<SearchScreen />));
+  await choose('from', 'φερ', 'Φέρες');
+  await choose('to', 'αλεξ', 'Αλεξανδρούπολη');
+
+  fireEvent.press(screen.getByTestId('when-more'));
+  fireEvent.press(screen.getAllByTestId(/^when-extra-/)[1]);
+  fireEvent.press(screen.getByTestId('search-submit'));
+
+  await screen.findByText(/δεν ψάχνει πια οδηγό/);
+  expect(screen.queryByText(/αποθηκεύτηκε, αλλά/)).toBeNull();
 });

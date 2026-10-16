@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { api, type LuggageSize, type MeetingPoint } from '../../src/api/endpoints';
 import { refusalText } from '../../src/api/errorText';
+import { ApiError } from '../../src/api/client';
 import { BottomBar, Button, Card, Hint, Screen, Stepper, Title } from '../../src/components/ui';
 import { PlaceField } from '../../src/components/PlaceField';
 import { MeetingPointField } from '../../src/components/MeetingPointField';
@@ -102,12 +103,19 @@ export default function SearchScreen() {
         ? { request_id: unsent.root, asking: false }
         : await post(day, band);
       // One at a time, in date order. A day that fails does not stop the rest.
+      // A refusal is final, unlike a dropped connection: the journey was taken
+      // or cancelled meanwhile, and asking again gets the same answer.
       const failed: string[] = [];
       for (const d of unsent ? unsent.days : extra) {
         if (!unsent && d === dateOf(day, now)) continue;
         try {
           await post(d as Day, band === 'now' ? 'morning' : band, first.request_id);
-        } catch {
+        } catch (e) {
+          if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+            setUnsent(null);
+            void queryClient.invalidateQueries({ queryKey: ['requests'] });
+            throw e;
+          }
           failed.push(d);
         }
       }
