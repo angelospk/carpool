@@ -121,6 +121,12 @@ function progressOf(request: OpenRequest, t: TFunction): string {
 
   if (request.drivers_asked === 0) return t('home.requestNobody');
   if (request.asking_now) return t('home.requestAsking') + declined;
+  // Everybody on the road has passed: there is no next driver to look for
+  // until somebody publishes. A missing count is not that. The server counts
+  // it, because a driver who passed and then retired is in drivers_declined
+  // and not on the corridor.
+  if (request.drivers_declined > 0 && request.drivers_untried === 0)
+    return t('home.requestExhausted');
   if (request.drivers_declined > 0) return t('home.requestSearching') + declined;
   return t('home.requestWaiting');
 }

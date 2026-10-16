@@ -398,6 +398,14 @@ func (s *Service) createAsk(
 	// been past by then, so the ask it did not see survives it. Suspension takes
 	// the user row FOR UPDATE first, so sharing it here is what makes the two
 	// orders agree and the outcome decided rather than raced.
+	//
+	// Offers to one passenger are also made one at a time: lockParticipants
+	// shares the row, so two of their requests matched at once would both pass
+	// the overlap check below. Accept and standing.Approve take the same lock,
+	// each before any row lock, so it cannot deadlock against them.
+	if _, err := tx.Exec(ctx, match.PassengerLockSQL, req.PassengerID); err != nil {
+		return uuid.Nil, fmt.Errorf("asks: locking the passenger's offers: %w", err)
+	}
 	if err := lockParticipants(ctx, tx, c.DriverID, req.PassengerID); err != nil {
 		if errors.Is(err, errNotActive) || errors.Is(err, errBlocked) {
 			// Both mean the same thing to a search: not this driver, try the
@@ -463,6 +471,23 @@ func (s *Service) createAsk(
 		return uuid.Nil, fmt.Errorf("asks: reading the drive: %w", err)
 	}
 	if !open || !ready || (pinned && (deadline == nil || !deadline.After(now))) {
+		return uuid.Nil, errNoRoomToAsk
+	}
+
+	// The filter skipped trips overlapping one this passenger holds, but two
+	// of their requests matched at once both read before either wrote. The
+	// advisory lock above serialises them, so this read is final.
+	//
+	// And retired while this candidate was being routed: the departure keeps
+	// the seats it has and takes nobody new. Read in this statement, after the
+	// lock, so a retirement that committed while the lock was awaited is seen.
+	var holds, active bool
+	if err := tx.QueryRow(ctx, `SELECT `+match.PassengerHolds("o", "$2::uuid", "$3", "NULL")+`, t.active
+		  FROM trip_occurrences o JOIN route_templates t ON t.id = o.template_id
+		 WHERE o.id = $1`, c.OccurrenceID, req.PassengerID, now).Scan(&holds, &active); err != nil {
+		return uuid.Nil, fmt.Errorf("asks: reading the passenger's other trips: %w", err)
+	}
+	if holds || !active {
 		return uuid.Nil, errNoRoomToAsk
 	}
 

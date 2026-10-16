@@ -162,6 +162,12 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Before any row lock, as in createAsk: one passenger's seats and offers
+	// are given out one at a time.
+	if _, err := tx.Exec(ctx, match.PassengerLockSQL, prePassenger); err != nil {
+		return uuid.Nil, fmt.Errorf("asks: locking the passenger's offers: %w", err)
+	}
+
 	// Read the ask's foreign keys without locking so the locks below can be
 	// taken in the canonical order regardless of which id the caller had.
 	var occurrenceID, requestID uuid.UUID
@@ -196,6 +202,19 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		return uuid.Nil, fmt.Errorf("asks: reading the passenger's preference: %w", err)
 	}
 	if unwanted {
+		return uuid.Nil, ErrAskNotPending
+	}
+
+	// A seat elsewhere at the same hour, or another live offer for it, since
+	// this offer was made: an offer that lapsed at the last second lets the
+	// passenger's other request be put to somebody else. The ask is void.
+	var busy bool
+	if err := tx.QueryRow(ctx, `SELECT `+match.PassengerHolds("o", "$2::uuid", "$3", "$4::uuid")+`
+		  FROM trip_occurrences o WHERE o.id = $1`,
+		occurrenceID, prePassenger, s.clock.Now(), askID).Scan(&busy); err != nil {
+		return uuid.Nil, fmt.Errorf("asks: reading the passenger's other trips: %w", err)
+	}
+	if busy {
 		return uuid.Nil, ErrAskNotPending
 	}
 

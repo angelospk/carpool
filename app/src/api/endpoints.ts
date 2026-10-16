@@ -370,6 +370,8 @@ export type OpenRequest = {
   asking_now: boolean;
   /** Absent from a server that predates the field. Absent is not zero. */
   drivers_on_corridor?: number;
+  /** Drivers on the road who have not passed on this request yet. Absent is not zero. */
+  drivers_untried?: number;
   /** The driver took the seat back and the request is being matched again. */
   stranded?: boolean;
   created_at: string;

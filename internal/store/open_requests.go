@@ -1,6 +1,7 @@
 package store
 
 import (
+	"carpool/internal/match"
 	"context"
 	"fmt"
 	"time"
@@ -45,6 +46,15 @@ type OpenRequest struct {
 	// whether anybody drives this road, not whether they can take this
 	// particular trip.
 	DriversOnCorridor int
+	// DriversUntried is those drivers on the corridor with a route they have
+	// not passed on for this request, or one with a departure in its window
+	// nobody has asked them about yet. The matcher excludes departures, not
+	// people: a driver who passed and then published another route, or whose
+	// route runs again inside the window, is somebody to ask again. Zero, with somebody having passed,
+	// is "everybody on this road has passed": DriversDeclined cannot say it,
+	// because a driver who passed and then retired is in that count and not in
+	// the corridor's.
+	DriversUntried int
 	// Stranded is a request that had a seat and lost it to the driver: its
 	// latest booking was cancelled from the driver's side, and it is back in
 	// the queue. The passenger needs to hear that the search restarted on its
@@ -95,7 +105,7 @@ func OpenRequests(
 		       count(DISTINCT t.driver_id),
 		       count(DISTINCT t.driver_id) FILTER (WHERE a.status IN ('declined','expired')),
 		       coalesce(bool_or(a.status = 'pending' AND a.expires_at > $2), false),
-		       corridor.drivers,
+		       corridor.drivers, corridor.untried,
 		       coalesce((SELECT lb.status = 'cancelled_by_driver' FROM bookings lb
 		                 WHERE lb.request_id = r.id
 		                 ORDER BY lb.created_at DESC, lb.id DESC LIMIT 1), false),
@@ -112,7 +122,22 @@ func OpenRequests(
 		-- the asks join. Postgres resolves the inner alias, but a reader who
 		-- misses the shadowing reads this as counting the drivers already asked.
 		LEFT JOIN LATERAL (
-			SELECT count(DISTINCT ct.driver_id) AS drivers
+			SELECT count(DISTINCT ct.driver_id) AS drivers,
+			       -- A route is tried once its driver passed on it and none of
+			       -- its departures in the window is still unasked: the matcher
+			       -- excludes departures, not routes or people.
+			       count(DISTINCT ct.driver_id) FILTER (WHERE NOT EXISTS (
+			         SELECT 1 FROM asks pa
+			         JOIN trip_occurrences po ON po.id = pa.occurrence_id
+			         WHERE pa.request_id = r.id AND pa.status IN ('declined','expired')
+			           AND po.template_id = ct.id)
+			         OR EXISTS (
+			         SELECT 1 FROM trip_occurrences uo
+			         WHERE uo.template_id = ct.id AND uo.status = 'scheduled'
+			           AND uo.depart_earliest <= r.window_end AND uo.depart_latest >= r.window_start
+			           AND `+match.DriveOpen("uo", "$2")+`
+			           AND NOT EXISTS (SELECT 1 FROM asks ua
+			                           WHERE ua.request_id = r.id AND ua.occurrence_id = uo.id))) AS untried
 			FROM route_templates ct
 			JOIN driver_profiles d ON d.user_id = ct.driver_id
 			JOIN users du ON du.id = ct.driver_id AND du.status = 'active'
@@ -152,7 +177,7 @@ func OpenRequests(
 		) corridor ON true
 		GROUP BY r.id, r.origin_label, r.destination_label,
 		         r.window_start, r.window_end, r.seats, r.status,
-		         r.created_at, corridor.drivers
+		         r.created_at, corridor.drivers, corridor.untried
 		ORDER BY r.created_at DESC, r.id DESC`, userID, now, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: loading open requests: %w", err)
@@ -164,7 +189,7 @@ func OpenRequests(
 		var q OpenRequest
 		if err := rows.Scan(&q.ID, &q.OriginLabel, &q.DestinationLabel,
 			&q.WindowStart, &q.WindowEnd, &q.Seats, &q.Status,
-			&q.DriversAsked, &q.DriversDeclined, &q.AskingNow, &q.DriversOnCorridor, &q.Stranded, &q.CreatedAt); err != nil {
+			&q.DriversAsked, &q.DriversDeclined, &q.AskingNow, &q.DriversOnCorridor, &q.DriversUntried, &q.Stranded, &q.CreatedAt); err != nil {
 			return nil, fmt.Errorf("store: scanning an open request: %w", err)
 		}
 		out = append(out, q)
