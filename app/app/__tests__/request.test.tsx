@@ -7,7 +7,7 @@ import { ApiError } from '../../src/api/client';
 import { api } from '../../src/api/endpoints';
 import { shareText } from '../../src/components/shareText';
 import { usePushReach } from '../../src/push/reach';
-import { Linking } from 'react-native';
+import { Alert, Linking } from 'react-native';
 
 const mockReplace = jest.fn();
 
@@ -35,8 +35,13 @@ function wrap(node: ReactNode) {
   return <QueryClientProvider client={client}>{node}</QueryClientProvider>;
 }
 
+// Cancelling asks first. Every test below that presses it answers yes.
+let alert: jest.SpyInstance;
 beforeEach(() => {
   jest.clearAllMocks();
+  alert = jest
+    .spyOn(Alert, 'alert')
+    .mockImplementation((_title, _message, buttons) => buttons?.[buttons.length - 1]?.onPress?.());
   (api.myRequests as jest.Mock).mockResolvedValue({ requests: [] });
 });
 
@@ -93,6 +98,19 @@ test('a request that is not in the list falls back to the general wording', asyn
 
   await waitFor(() => expect(api.myRequests).toHaveBeenCalled());
   expect(screen.queryByTestId('request-progress')).toBeNull();
+});
+
+// One tap used to cancel the request, with a driver possibly reading it
+// (QA 2026-10-16, U7).
+test('cancelling asks first, and saying no keeps the request', async () => {
+  alert.mockImplementation(() => {});
+  (api.myRequests as jest.Mock).mockResolvedValue({ requests: [asking] });
+
+  render(wrap(<RequestScreen />));
+  fireEvent.press(await screen.findByTestId('cancel-request'));
+
+  await waitFor(() => expect(alert).toHaveBeenCalled());
+  expect(api.cancelRequest).not.toHaveBeenCalled();
 });
 
 test('cancelling a request that is still asking takes them home', async () => {

@@ -164,6 +164,21 @@ func (m *Materializer) reconcile(ctx context.Context, templateID uuid.UUID) erro
 		slog.Warn("skipping an unmaterializable occurrence", "template", templateID, "error", err)
 	}
 
+	// The template's departures that have not left, before anything is
+	// checked. Writing an ask locks its departure first, and a statement that
+	// waits for that lock rechecks the departure but not the asks under it:
+	// the upsert below judged "nobody is being asked" from before the wait,
+	// and retimed a departure a driver had just been asked about. Each
+	// statement after this one starts once the locks are held, so it sees
+	// every ask committed before them.
+	if _, err := tx.Exec(ctx, `
+		SELECT 1 FROM trip_occurrences
+		 WHERE template_id = $1 AND depart_earliest > $2
+		 ORDER BY id
+		 FOR UPDATE`, templateID, now); err != nil {
+		return fmt.Errorf("jobs: locking departures: %w", err)
+	}
+
 	if err := m.upsert(ctx, tx, templateID, tmpl, planned, now); err != nil {
 		return err
 	}

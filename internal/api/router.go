@@ -245,6 +245,9 @@ func NewRouter(deps Deps) http.Handler {
 			// behind auth because it is other people's journeys.
 			r.Get("/demand", deps.handleDemand)
 			r.Delete("/me/routes/{id}", deps.handleRetireRoute)
+			// An edit, in place. It shares the publish limit: it is the same
+			// form, and it rewrites up to three weeks of departures.
+			r.With(publishing.perUser).Put("/me/routes/{id}", deps.handleEditRoute)
 			r.Post("/me/routes/{id}/share", deps.handleShareRoute)
 			r.Put("/me/routes/{id}/nudge", deps.handleRouteNudge)
 			r.Delete("/me/routes/{id}/share", deps.handleRevokeRouteShare)

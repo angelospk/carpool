@@ -4,9 +4,12 @@ import type { ReactNode } from 'react';
 
 import PublishScreen from '../(tabs)/publish';
 import { api } from '../../src/api/endpoints';
+import { ApiError } from '../../src/api/client';
 
-// «Αλλαγή» on a route opens this form filled in with it. Publishing puts the
-// changed route out and retires the old one, which calls off its empty trips.
+// «Αλλαγή» on a route opens this form filled in with it. Saving changes the
+// route in place: a departure somebody booked keeps what was agreed, and the
+// rest take the change. Only a route with other ends is published anew, and
+// then the old one is retired.
 let mockParams: Record<string, string> = {};
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
@@ -17,6 +20,7 @@ jest.mock('expo-router', () => ({
 jest.mock('../../src/api/endpoints', () => ({
   api: {
     publishRoute: jest.fn(),
+    editRoute: jest.fn(),
     retireRoute: jest.fn(),
     places: jest.fn(),
     placeNear: jest.fn(),
@@ -55,6 +59,7 @@ beforeEach(() => {
   (api.shareRouteLink as jest.Mock).mockRejectedValue(new Error('offline'));
   (api.publishRoute as jest.Mock).mockResolvedValue({ template_id: 'new-route', route_km: 62.4, ends_at_port: false });
   (api.retireRoute as jest.Mock).mockResolvedValue(undefined);
+  (api.editRoute as jest.Mock).mockResolvedValue({ template_id: 'old-route', kept_trips: 0 });
 });
 afterEach(() => jest.clearAllMocks());
 
@@ -67,25 +72,57 @@ test('the form opens filled in with the route being changed', async () => {
   expect(screen.getByTestId('editing-route')).toBeTruthy();
 });
 
-test('publishing the change retires the old route', async () => {
+async function save() {
   render(wrap(<PublishScreen />));
   await waitFor(() => expect(screen.getByTestId('publish-origin-input').props.value).toBe('Σουφλί'));
-
   await waitFor(() => expect(screen.getByTestId('publish-submit').props.accessibilityState?.disabled).toBeFalsy());
   fireEvent.press(screen.getByTestId('publish-submit'));
+}
 
-  await waitFor(() => expect(api.retireRoute).toHaveBeenCalledWith('old-route'));
-  const sent = (api.publishRoute as jest.Mock).mock.calls[0][0];
+test('saving the change edits the route in place', async () => {
+  await save();
+
+  await waitFor(() => expect(api.editRoute).toHaveBeenCalled());
+  const [id, sent] = (api.editRoute as jest.Mock).mock.calls[0];
+  expect(id).toBe('old-route');
   expect(sent).toEqual(expect.objectContaining({ weekdays: [6, 7], depart_earliest: '09:15', seats: 2 }));
+  expect(api.publishRoute).not.toHaveBeenCalled();
+  expect(api.retireRoute).not.toHaveBeenCalled();
+  expect(await screen.findByText(/Η διαδρομή άλλαξε/)).toBeTruthy();
 });
 
-test('a failed publish leaves the old route alone', async () => {
-  (api.publishRoute as jest.Mock).mockRejectedValue(new Error('nope'));
-  render(wrap(<PublishScreen />));
-  await waitFor(() => expect(screen.getByTestId('publish-origin-input').props.value).toBe('Σουφλί'));
+test('the driver is told which departures keep what was agreed', async () => {
+  (api.editRoute as jest.Mock).mockResolvedValue({ template_id: 'old-route', kept_trips: 2 });
+  await save();
 
-  await waitFor(() => expect(screen.getByTestId('publish-submit').props.accessibilityState?.disabled).toBeFalsy());
-  fireEvent.press(screen.getByTestId('publish-submit'));
+  expect(await screen.findByText(/2 αναχωρήσεις με κράτηση μένουν όπως συμφωνήθηκαν/)).toBeTruthy();
+});
+
+test('other ends publish a new route and retire the old one', async () => {
+  (api.editRoute as jest.Mock).mockRejectedValue(
+    new ApiError(409, 'route_ends_changed', 'a route with other ends is a new route'),
+  );
+  await save();
+
+  await waitFor(() => expect(api.retireRoute).toHaveBeenCalledWith('old-route'));
+  expect((api.publishRoute as jest.Mock).mock.calls[0][0]).toEqual(
+    expect.objectContaining({ weekdays: [6, 7], depart_earliest: '09:15', seats: 2 }),
+  );
+});
+
+test('a failed change leaves the old route alone', async () => {
+  (api.editRoute as jest.Mock).mockRejectedValue(new Error('nope'));
+  await save();
+
+  await waitFor(() => expect(api.editRoute).toHaveBeenCalled());
+  expect(api.publishRoute).not.toHaveBeenCalled();
+  expect(api.retireRoute).not.toHaveBeenCalled();
+});
+
+test('a failed new route leaves the old route alone', async () => {
+  (api.editRoute as jest.Mock).mockRejectedValue(new ApiError(409, 'route_ends_changed', ''));
+  (api.publishRoute as jest.Mock).mockRejectedValue(new Error('nope'));
+  await save();
 
   await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
   expect(api.retireRoute).not.toHaveBeenCalled();
@@ -103,6 +140,7 @@ test('leaving now while changing a route does not retire it', async () => {
   fireEvent.press(screen.getByTestId('publish-submit'));
 
   await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
+  expect(api.editRoute).not.toHaveBeenCalled();
   expect(api.retireRoute).not.toHaveBeenCalled();
 });
 
@@ -127,8 +165,8 @@ test('a group-only route stays group-only, with every other choice kept', async 
   await waitFor(() => expect(screen.getByTestId('publish-submit').props.accessibilityState?.disabled).toBeFalsy());
   fireEvent.press(screen.getByTestId('publish-submit'));
 
-  await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
-  expect((api.publishRoute as jest.Mock).mock.calls[0][0]).toEqual(
+  await waitFor(() => expect(api.editRoute).toHaveBeenCalled());
+  expect((api.editRoute as jest.Mock).mock.calls[0][1]).toEqual(
     expect.objectContaining({
       group_id: 'g-hospital',
       vehicle_id: 'v1',

@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -305,5 +306,71 @@ func TestARouteThatCrossesItselfCanStillBePublished(t *testing.T) {
 	params.RouteWKT = crossing
 	if _, err := store.CreateRouteTemplate(ctx, pool, params); err != nil {
 		t.Fatalf("CreateRouteTemplate on a self-crossing route: %v", err)
+	}
+}
+
+// Publishing the same route twice was accepted, and the driver's list showed
+// two identical cards (QA 2026-10-16). A double tap does it in parallel.
+func TestTheSameRouteCannotBePublishedTwice(t *testing.T) {
+	pool, driverID := driverAndPool(t)
+	p := templateParams(t, pool, driverID, match.Budget{AllowStops: true, Km: 5, Min: 10})
+
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := store.CreateRouteTemplate(context.Background(), pool, p)
+			errs <- err
+		}()
+	}
+	var ok, dup int
+	for range 2 {
+		switch err := <-errs; {
+		case err == nil:
+			ok++
+		case errors.Is(err, store.ErrDuplicateRoute):
+			dup++
+		default:
+			t.Fatalf("publishing: %v", err)
+		}
+	}
+	if ok != 1 || dup != 1 {
+		t.Fatalf("%d published, %d refused as a duplicate; want 1 and 1", ok, dup)
+	}
+}
+
+// Another day, another hour, or a route the driver retired is not the same
+// route.
+func TestOnlyTheSameRouteIsADuplicate(t *testing.T) {
+	cases := map[string]func(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, p *store.CreateRouteTemplateParams){
+		"another day": func(_ context.Context, _ *pgxpool.Pool, _ uuid.UUID, p *store.CreateRouteTemplateParams) {
+			p.Schedule.Weekdays = []time.Weekday{time.Tuesday}
+		},
+		"another hour": func(_ context.Context, _ *pgxpool.Pool, _ uuid.UUID, p *store.CreateRouteTemplateParams) {
+			p.Schedule.DepartEarliest = domain.TimeOfDay{Hour: 9}
+			p.Schedule.DepartLatest = domain.TimeOfDay{Hour: 9, Minute: 30}
+		},
+		"the way back": func(_ context.Context, _ *pgxpool.Pool, _ uuid.UUID, p *store.CreateRouteTemplateParams) {
+			p.Origin, p.Destination = p.Destination, p.Origin
+		},
+		"retired": func(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, _ *store.CreateRouteTemplateParams) {
+			if _, err := pool.Exec(ctx, `UPDATE route_templates SET active = false WHERE id = $1`, id); err != nil {
+				t.Fatalf("retiring: %v", err)
+			}
+		},
+	}
+	for name, change := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			pool, driverID := driverAndPool(t)
+			p := templateParams(t, pool, driverID, match.Budget{AllowStops: true, Km: 5, Min: 10})
+			first, err := store.CreateRouteTemplate(ctx, pool, p)
+			if err != nil {
+				t.Fatalf("first: %v", err)
+			}
+			change(ctx, pool, first, &p)
+			if _, err := store.CreateRouteTemplate(ctx, pool, p); err != nil {
+				t.Fatalf("second: %v", err)
+			}
+		})
 	}
 }

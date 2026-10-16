@@ -35,6 +35,7 @@ export function PlaceField({
   testID,
   placeholder,
   here = false,
+  near = null,
 }: {
   label: string;
   /** The chosen place, or null while the text does not name one. */
@@ -48,6 +49,8 @@ export function PlaceField({
    * the permission until pressed.
    */
   here?: boolean;
+  /** The other end of the journey, when chosen: places near it come first. */
+  near?: { lon: number; lat: number } | null;
 }) {
   const { t } = useTranslation();
   const [text, setText] = useState(value?.label ?? '');
@@ -61,6 +64,9 @@ export function PlaceField({
   // Bumped by anything that changes what the field holds, so a location
   // lookup that started before it can tell its answer is no longer wanted.
   const touched = useRef(0);
+  // Read when a search starts, not a reason to start one.
+  const nearRef = useRef(near);
+  nearRef.current = near;
 
   // What this field last handed upwards. Deliberately not read from the `value`
   // prop: that only comes back after the parent re-renders, and the rule below
@@ -129,9 +135,9 @@ export function PlaceField({
     if (selected.current === query) return;
 
     const mine = ++asked.current;
+    const around = nearRef.current;
     const timer = setTimeout(() => {
-      api
-        .places(query)
+      (around ? api.places(query, around) : api.places(query))
         .then((res) => {
           if (asked.current !== mine) return;
           setSuggestions(res.places);

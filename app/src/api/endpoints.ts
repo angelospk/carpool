@@ -368,10 +368,14 @@ export type OpenRequest = {
   drivers_declined: number;
   /** Somebody is looking at it this minute. An ask that has lapsed is not. */
   asking_now: boolean;
+  /** When the live ask lapses. Absent while nobody is being asked. */
+  ask_expires_at?: string | null;
   /** Absent from a server that predates the field. Absent is not zero. */
   drivers_on_corridor?: number;
   /** Drivers on the road who have not passed on this request yet. Absent is not zero. */
   drivers_untried?: number;
+  /** The most seats any car on the road offers. Null when nobody drives it. */
+  most_seats_on_corridor?: number | null;
   /** The driver took the seat back and the request is being matched again. */
   stranded?: boolean;
   created_at: string;
@@ -413,6 +417,46 @@ export type Message = {
   created_at: string;
 };
 
+/** The publish form, for a new route and for a change to one. */
+export type RouteBody = {
+  origin_lon: number;
+  origin_lat: number;
+  destination_lon: number;
+  destination_lat: number;
+  origin_label: string;
+  destination_label: string;
+  seats: number;
+  kind: 'oneoff' | 'recurring';
+  weekdays?: number[];
+  oneoff_date?: string;
+  depart_earliest: string;
+  depart_latest: string;
+  /** Omitted means "use my profile defaults". */
+  allow_stops?: boolean;
+  detour_km?: number;
+  /** Which car. Omitted means the default, which is what a driver with one sends. */
+  vehicle_id?: string;
+  /** Offer the route to this group's members only. Absent is everybody. */
+  group_id?: string;
+  /** The largest thing this route will take. Omitted means a suitcase. */
+  luggage?: LuggageSize;
+  /** How many of that size the boot holds. Absent means three. */
+  luggage_capacity?: number;
+  /**
+   * How much of the computed fuel share you ask for, from just above zero to
+   * one. Omitted means all of it.
+   *
+   * The app works out what the fuel comes to and caps you there; this is you
+   * deciding where under that cap you sit.
+   */
+  contribution_share?: number;
+  /**
+   * Whether a figure is suggested at all. Omitted means the formula, which
+   * is what every route published before the app asked was doing.
+   */
+  pricing_mode?: PricingMode;
+};
+
 export const api = {
   regions: () => request<{ regions: Region[] }>('/v1/regions', { anonymous: true }),
 
@@ -430,8 +474,13 @@ export const api = {
     request<{ trips: { from: string; to: string; seats_free: number; polyline: string }[] }>('/v1/live/map'),
   placeNear: (lon: number, lat: number) =>
     request<{ place: Place }>('/v1/places/near', { method: 'POST', body: { lon, lat }, anonymous: true }),
-  places: (q: string) =>
-    request<{ places: Place[] }>(`/v1/places?q=${encodeURIComponent(q)}`, { anonymous: true }),
+  /** Places named like q. With near, those close to it come first among equal matches. */
+  places: (q: string, near?: { lon: number; lat: number }) =>
+    request<{ places: Place[] }>(
+      `/v1/places?q=${encodeURIComponent(q)}` +
+        (near ? `&near_lon=${near.lon}&near_lat=${near.lat}` : ''),
+      { anonymous: true },
+    ),
 
   // dev_code comes back only when the server runs with DEV_MODE, where the code
   // is not sent by SMS at all. It lets a tester on a laptop sign in without
@@ -581,44 +630,7 @@ export const api = {
   registerPushToken: (token: string, platform: 'ios' | 'android') =>
     request<void>('/v1/me/push-token', { method: 'PUT', body: { token, platform } }),
 
-  publishRoute: (body: {
-    origin_lon: number;
-    origin_lat: number;
-    destination_lon: number;
-    destination_lat: number;
-    origin_label: string;
-    destination_label: string;
-    seats: number;
-    kind: 'oneoff' | 'recurring';
-    weekdays?: number[];
-    oneoff_date?: string;
-    depart_earliest: string;
-    depart_latest: string;
-    /** Omitted means "use my profile defaults". */
-    allow_stops?: boolean;
-    detour_km?: number;
-    /** Which car. Omitted means the default, which is what a driver with one sends. */
-    vehicle_id?: string;
-    /** Offer the route to this group's members only. Absent is everybody. */
-    group_id?: string;
-    /** The largest thing this route will take. Omitted means a suitcase. */
-    luggage?: LuggageSize;
-    /** How many of that size the boot holds. Absent means three. */
-    luggage_capacity?: number;
-    /**
-     * How much of the computed fuel share you ask for, from just above zero to
-     * one. Omitted means all of it.
-     *
-     * The app works out what the fuel comes to and caps you there; this is you
-     * deciding where under that cap you sit.
-     */
-    contribution_share?: number;
-    /**
-     * Whether a figure is suggested at all. Omitted means the formula, which
-     * is what every route published before the app asked was doing.
-     */
-    pricing_mode?: PricingMode;
-  }) =>
+  publishRoute: (body: RouteBody) =>
     request<{
       template_id: string;
       route_km: number;
@@ -629,6 +641,18 @@ export const api = {
       method: 'POST',
       body,
     }),
+
+  /**
+   * Changes a published route in place. A departure somebody booked, or is
+   * being asked about, keeps what was agreed; `kept_trips` counts them. Other
+   * ends are a new route: 409 `route_ends_changed`.
+   */
+  editRoute: (id: string, body: RouteBody) =>
+    request<{
+      template_id: string;
+      kept_trips: number;
+      first_occurrence_id?: string | null;
+    }>(`/v1/me/routes/${id}`, { method: 'PUT', body }),
 
   /**
    * Roughly what a seat on a trip like this tends to cost, before any driver

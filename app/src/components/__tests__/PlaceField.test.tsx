@@ -208,4 +208,14 @@ describe('PlaceField given a place from outside', () => {
     // Showing it is not a change the field made, so nothing goes back up.
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  // Places near the other end of the journey come first among equal matches:
+  // "Νέα…" typed in Evros led with Νέα Μουδανιά (QA 2026-10-16, U12).
+  it('says where the other end is, so nearby places come first', async () => {
+    render(
+      <PlaceField testID="from" label="Από" value={null} onChange={jest.fn()} near={{ lon: 26.53, lat: 41.5 }} />,
+    );
+    await type('νεα');
+    expect(api.places).toHaveBeenCalledWith('νεα', { lon: 26.53, lat: 41.5 });
+  });
 });

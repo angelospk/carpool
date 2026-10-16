@@ -195,3 +195,20 @@ func TestPlacesNearNamesTheSettlementAtACoordinate(t *testing.T) {
 		t.Error("the query-string form still answers")
 	}
 }
+
+// With the other end of the journey in Evros, "Νέα" starts with a place in
+// Evros, not with the biggest "Νέα" in Greece (QA 2026-10-16, U12).
+func TestPlacesNearTheOtherEndComeFirst(t *testing.T) {
+	h := newHarness(t)
+	rec := h.do(http.MethodGet, "/v1/places?q="+url.QueryEscape("Νέα")+"&near_lon=26.52&near_lat=41.50", nil, "")
+	var got placeResult
+	h.decode(rec, &got)
+	if len(got.Places) == 0 || got.Places[0].Lon < 25.5 || got.Places[0].Lat < 40.6 {
+		t.Fatalf("first near Ορεστιάδα: %+v", got.Places)
+	}
+
+	_, far := searchPlaces(h, "", "Νέα")
+	if len(far.Places) == 0 || far.Places[0].ID == got.Places[0].ID {
+		t.Fatalf("near changed nothing: %+v", far.Places)
+	}
+}

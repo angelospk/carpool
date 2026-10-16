@@ -486,3 +486,28 @@ func TestADepartureThatHasLeftIsNotYetToTry(t *testing.T) {
 		t.Fatalf("untried = %d, want 0: the only unasked departure has left", got)
 	}
 }
+
+// Four seats asked for, and every car on the road has three: nobody can ever
+// be asked, and the app said only that nobody had been yet (QA 2026-10-16,
+// U13). The most seats on the road lets it say why.
+func TestTheMostSeatsOnTheRoadAreCounted(t *testing.T) {
+	w := newCorridorWorld(t)
+	small := w.route(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+	larger := w.route(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+	ctx := context.Background()
+	if _, err := w.pool.Exec(ctx, `UPDATE route_templates SET seats = CASE WHEN id = $1 THEN 2 ELSE 3 END
+		WHERE id IN ($1, $2)`, small, larger); err != nil {
+		t.Fatalf("seats: %v", err)
+	}
+
+	if got := onlyRequest(t, w).MostSeatsOnCorridor; got == nil || *got != 3 {
+		t.Errorf("most seats on corridor = %v, want 3", got)
+	}
+}
+
+func TestAnEmptyRoadHasNoMostSeats(t *testing.T) {
+	w := newCorridorWorld(t)
+	if got := onlyRequest(t, w).MostSeatsOnCorridor; got != nil {
+		t.Errorf("most seats on an empty road = %d, want none", *got)
+	}
+}

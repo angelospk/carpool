@@ -127,8 +127,11 @@
     "againNone": "No next trip with a free seat",
     "requests": "What you are waiting on",
     "requestNobody": "No driver has been asked yet.",
+    "requestTooManySeats_one": "No car on this road has that many seats. At most 1 seat.",
+    "requestTooManySeats_other": "No car on this road has that many seats. At most {{count}} seats.",
     "requestNoDrivers": "Nobody has published this road yet. Your request stays open. As soon as somebody does, we ask them, and you will see it here.",
     "requestAsking": "A driver is being asked right now.",
+    "askAnswersBy": "They have until {{time}} to answer.",
     "requestSearching": "Looking for the next driver.",
     "requestWaiting": "Waiting for an answer.",
     "requestExhausted": "Every driver on this road said no or did not answer. The request stays open. If somebody publishes a new route, we will ask them too.",
@@ -289,8 +292,11 @@
     "linkOpens_other": "Link opened {{count}} times"
   },
   "publish": {
-    "replacing": "You are changing {{route}}. When you publish, the old one is retired and its empty trips are called off.",
+    "replacing": "You are changing {{route}}. Departures somebody booked stay as agreed. The rest change.",
     "replaceFailed": "The new route is out, but the old one was not retired. Retire it from your routes.",
+    "edited": "Route changed.",
+    "keptTrips_one": "1 booked departure stays as agreed.",
+    "keptTrips_other": "{{count}} booked departures stay as agreed.",
     "allowStops": "I accept stops",
     "departWindow": "Departure time",
     "detour": "Intermediate stops",
@@ -338,6 +344,8 @@
     "title": "Your request",
     "backHome": "Back to home",
     "cancel": "Cancel request",
+    "cancelConfirm": "We stop looking for a driver for this journey.",
+    "keep": "Keep it",
     "closed": "This request is no longer open.",
     "leaveOk": "You can close the app. We will notify you as soon as a driver accepts.",
     "strandedTitle": "Your driver cancelled. You do not need to do anything: we are already asking the next one.",
@@ -565,7 +573,8 @@
     "drive_departed": "You have already left. The time can no longer change.",
     "trip_not_running": "This trip has been called off.",
     "bad_detour": "The detour must be 0 to 30 minutes.",
-    "not_driving": "That drive is not under way."
+    "not_driving": "That drive is not under way.",
+    "duplicate_route": "You already offer this route on the same days and hours. See your routes."
   },
   "shareRequest": {
     "button": "Send it to a group",
