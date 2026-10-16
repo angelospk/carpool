@@ -140,7 +140,10 @@ For each surviving candidate, compute the **incremental detour**:
    `/route/v1` calls (one call per insertion candidate, waypoints in order).
 3. `detour_min = new_itinerary_min − current_itinerary_min`.
 4. Keep candidates where `detour_min ≤ driver.detour_budget_min` (and detour_km
-   sane). Pickup/dropoff points snapped via OSRM `/nearest`.
+   sane). Pickup/dropoff points snapped via OSRM `/nearest`. The budget is
+   driving only: the 2 minutes per stop (`StopDwell`) stay in `detour_min`,
+   which the timetable uses, but are taken back out before the budget check
+   (QA 2026-10-16).
 
 OSRM insertion calls are the expensive step — that's why stage 1 must cut hard
 and why candidates are capped. Cache `(occurrence, itinerary_version, Ro, Rd)`

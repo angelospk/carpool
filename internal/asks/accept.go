@@ -377,6 +377,35 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		return uuid.Nil, fmt.Errorf("asks: closing request: %w", err)
 	}
 
+	// The same journey posted for other days too ("Thursday, or else Friday")
+	// is carried once: the other days are withdrawn with their offers, and the
+	// cars those offers held are free for whoever waits behind them. Safe
+	// against two of the days being accepted together: both hold the
+	// passenger's lock, taken first above.
+	var freed []uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		WITH me AS (
+			SELECT passenger_id, COALESCE(alternative_of, id) AS root FROM ride_requests WHERE id = $1
+		), others AS (
+			UPDATE ride_requests r SET status = 'cancelled', updated_at = now()
+			  FROM me
+			 WHERE r.passenger_id = me.passenger_id AND r.id <> $1
+			   AND COALESCE(r.alternative_of, r.id) = me.root
+			   AND r.status IN ('open', 'asking')
+			RETURNING r.id
+		), killed AS (
+			UPDATE asks SET status = 'cancelled', responded_at = $2
+			 WHERE request_id IN (SELECT id FROM others) AND status = 'pending'
+			RETURNING occurrence_id
+		)
+		SELECT ARRAY(SELECT DISTINCT occurrence_id FROM killed)`,
+		requestID, now).Scan(&freed); err != nil {
+		return uuid.Nil, fmt.Errorf("asks: withdrawing the other days: %w", err)
+	}
+	if err := outbox.WakeAll(ctx, tx, freed, "alternative_taken", s.clock.Now()); err != nil {
+		return uuid.Nil, err
+	}
+
 	payload, err := json.Marshal(map[string]any{
 		"booking_id":   bookingID,
 		"request_id":   requestID,

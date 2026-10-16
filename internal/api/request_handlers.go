@@ -12,9 +12,14 @@ import (
 
 	"carpool/internal/asks"
 	"carpool/internal/domain"
+	"carpool/internal/match"
 	"carpool/internal/outbox"
 	"carpool/internal/store"
 )
+
+// maxAlternativeDays is how many days one journey can be looking for a driver
+// on at once. A week covers "this week, any day"; more is a standing request.
+const maxAlternativeDays = 7
 
 func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	userID, ok := callerID(r.Context())
@@ -41,9 +46,21 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		// given and none when it was not, so a client that has not been updated
 		// keeps meaning what it used to.
 		LuggageCount *int `json:"luggage_count"`
+		// AlternativeOf is the request this one is another day of: the same
+		// journey, "or else on Friday". Accepting any day withdraws the rest.
+		AlternativeOf *string `json:"alternative_of"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
+	}
+	var alternativeOf *uuid.UUID
+	if body.AlternativeOf != nil {
+		id, err := uuid.Parse(*body.AlternativeOf)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "alternative_of must be a uuid")
+			return
+		}
+		alternativeOf = &id
 	}
 
 	seats, problem := seatsProblem(body.Seats, 1, maxPartySeats)
@@ -159,15 +176,62 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Another day joins the group of the first day, whichever day it names,
+	// so the group has one root for Accept to find.
+	//
+	// Under the passenger's matching lock too, the one Accept takes first: a
+	// day added while a driver is accepting another would otherwise be
+	// inserted after Accept withdrew the group, and survive it.
+	var root *uuid.UUID
+	if alternativeOf != nil {
+		if _, err := tx.Exec(r.Context(), match.PassengerLockSQL, userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not save the request")
+			return
+		}
+		var id uuid.UUID
+		var status string
+		err := tx.QueryRow(r.Context(), `
+			SELECT COALESCE(alternative_of, id), status
+			  FROM ride_requests WHERE id = $1 AND passenger_id = $2`,
+			*alternativeOf, userID).Scan(&id, &status)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			writeError(w, http.StatusNotFound, "not_found", "no such request")
+			return
+		case err != nil:
+			writeError(w, http.StatusInternalServerError, "internal", "could not save the request")
+			return
+		case status != "open" && status != "asking":
+			writeError(w, http.StatusConflict, "request_closed",
+				"that request is no longer looking for a driver")
+			return
+		}
+		root = &id
+	}
+	// One more live day in the group, refused past a week of them.
+	groupFull := func() (bool, error) {
+		var days int
+		err := tx.QueryRow(r.Context(), `
+			SELECT count(*) FROM ride_requests
+			 WHERE passenger_id = $1 AND status IN ('open', 'asking')
+			   AND COALESCE(alternative_of, id) = $2`, userID, *root).Scan(&days)
+		return days >= maxAlternativeDays, err
+	}
+
 	var existing struct {
 		id     uuid.UUID
 		status string
 		askID  *uuid.UUID
+		root   uuid.UUID
+		linked bool
 	}
 	err = tx.QueryRow(r.Context(), `
 		SELECT rr.id, rr.status,
 		       (SELECT a.id FROM asks a WHERE a.request_id = rr.id AND a.status = 'pending'
-		         ORDER BY a.created_at DESC LIMIT 1)
+		         ORDER BY a.created_at DESC LIMIT 1),
+		       COALESCE(rr.alternative_of, rr.id),
+		       rr.alternative_of IS NOT NULL
+		         OR EXISTS (SELECT 1 FROM ride_requests c WHERE c.alternative_of = rr.id)
 		  FROM ride_requests rr
 		 WHERE rr.passenger_id = $1
 		   AND rr.status IN ('open', 'asking')
@@ -184,8 +248,32 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		userID, seats, body.WindowStart, body.WindowEnd,
 		body.OriginLon, body.OriginLat, body.DestinationLon, body.DestinationLat,
 		string(luggage), count, d.now(),
-	).Scan(&existing.id, &existing.status, &existing.askID)
+	).Scan(&existing.id, &existing.status, &existing.askID, &existing.root, &existing.linked)
 	switch {
+	case err == nil && root != nil && existing.root != *root:
+		// The same day is already asked for, on its own or as another
+		// journey's day. On its own it joins this group, so accepting either
+		// withdraws both; in another group it cannot be in two.
+		if existing.linked {
+			writeError(w, http.StatusConflict, "day_in_another_group",
+				"that day is already asked for with other days")
+			return
+		}
+		if full, err := groupFull(); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not save the request")
+			return
+		} else if full {
+			writeError(w, http.StatusConflict, "too_many_days",
+				"one journey can be asked for on up to seven days")
+			return
+		}
+		if _, err := tx.Exec(r.Context(),
+			`UPDATE ride_requests SET alternative_of = $2, updated_at = now() WHERE id = $1`,
+			existing.id, *root); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not save the request")
+			return
+		}
+		fallthrough
 	case err == nil:
 		if err := tx.Commit(r.Context()); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal", "could not check your open requests")
@@ -215,18 +303,30 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if root != nil {
+		if full, err := groupFull(); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not save the request")
+			return
+		} else if full {
+			writeError(w, http.StatusConflict, "too_many_days",
+				"one journey can be asked for on up to seven days")
+			return
+		}
+	}
+
 	var requestID uuid.UUID
 	err = tx.QueryRow(r.Context(), `
 		INSERT INTO ride_requests (passenger_id, origin, destination, origin_label, destination_label,
-		                           window_start, window_end, seats, kind, status, luggage, luggage_count)
+		                           window_start, window_end, seats, kind, status, luggage, luggage_count,
+		                           alternative_of)
 		VALUES ($1,
 		        ST_SetSRID(ST_MakePoint($2, $3), 4326),
 		        ST_SetSRID(ST_MakePoint($4, $5), 4326),
-		        $6, $7, $8, $9, $10, 'open', 'open', $11::luggage_size, $12)
+		        $6, $7, $8, $9, $10, 'open', 'open', $11::luggage_size, $12, $13)
 		RETURNING id`,
 		userID, body.OriginLon, body.OriginLat, body.DestinationLon, body.DestinationLat,
 		originLabel, destinationLabel, body.WindowStart, body.WindowEnd, seats,
-		string(luggage), count).Scan(&requestID)
+		string(luggage), count, root).Scan(&requestID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "the request was rejected")
 		return
@@ -256,6 +356,14 @@ func (d Deps) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		out["ask_id"] = askID
 	}
 	writeJSON(w, http.StatusCreated, out)
+}
+
+// missedJSON is why the last search asked nobody though a car passes, or nil.
+func missedJSON(q store.OpenRequest) map[string]any {
+	if q.MissedReason == nil {
+		return nil
+	}
+	return map[string]any{"reason": *q.MissedReason, "need": q.MissedNeed, "limit": q.MissedLimit}
 }
 
 // liveAsk is the request's pending ask, if it has one.
@@ -316,6 +424,9 @@ func (d Deps) handleMyRequests(w http.ResponseWriter, r *http.Request) {
 			"drivers_on_corridor":    q.DriversOnCorridor,
 			"drivers_untried":        q.DriversUntried,
 			"most_seats_on_corridor": q.MostSeatsOnCorridor,
+			"drivers_departing":      q.DriversDeparting,
+			"nearest_departure":      q.NearestDeparture,
+			"missed":                 missedJSON(q),
 			"stranded":               q.Stranded,
 			"created_at":             q.CreatedAt,
 		})

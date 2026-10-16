@@ -13,3 +13,8 @@ test('a pin outside the country gets a sentence, not a generic error', () => {
 test('an unknown code is left to the caller', () => {
   expect(refusalText(new ApiError(400, 'something_new', 'x'))).toBeNull();
 });
+
+test('another day for a journey a driver already took says so', () => {
+  const text = refusalText(new ApiError(409, 'request_closed', 'that request is no longer looking'));
+  expect(text).toMatch(/οδηγό/);
+});

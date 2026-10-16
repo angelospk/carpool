@@ -63,6 +63,21 @@ type OpenRequest struct {
 	// so instead of "nobody has been asked yet". Nil when nobody drives the
 	// road.
 	MostSeatsOnCorridor *int
+	// DriversDeparting is those drivers with a departure inside the window
+	// that has not left. None, with somebody on the road, is "they drive it,
+	// just not then".
+	DriversDeparting int
+	// NearestDeparture is the corridor's departure closest to the window,
+	// within twelve hours of it, that has not left: what the app offers when
+	// nobody leaves inside the window. No driver is named. Nil when there is
+	// none.
+	NearestDeparture *time.Time
+	// MissedReason is why the matcher's last look asked nobody when a car did
+	// pass: no_stops, detour_min or detour_km. MissedNeed is what the pickup
+	// would take and MissedLimit what that driver agreed to. Nil otherwise.
+	MissedReason *string
+	MissedNeed   *float64
+	MissedLimit  *float64
 	// Stranded is a request that had a seat and lost it to the driver: its
 	// latest booking was cancelled from the driver's side, and it is back in
 	// the queue. The passenger needs to hear that the search restarted on its
@@ -99,7 +114,8 @@ func OpenRequests(
 		WITH mine AS (
 			SELECT r.id, r.origin_label, r.destination_label, r.origin, r.destination,
 			       r.window_start, r.window_end, r.seats, r.status,
-			       r.passenger_id, r.created_at
+			       r.passenger_id, r.created_at,
+			       r.missed_reason, r.missed_need, r.missed_limit
 			FROM ride_requests r
 			WHERE r.passenger_id = $1
 			  AND r.status IN ('open','asking')
@@ -114,7 +130,8 @@ func OpenRequests(
 		       count(DISTINCT t.driver_id) FILTER (WHERE a.status IN ('declined','expired')),
 		       coalesce(bool_or(a.status = 'pending' AND a.expires_at > $2), false),
 		       max(a.expires_at) FILTER (WHERE a.status = 'pending' AND a.expires_at > $2),
-		       corridor.drivers, corridor.untried, corridor.most_seats,
+		       corridor.drivers, corridor.untried, corridor.most_seats, corridor.departing, corridor.nearest,
+		       r.missed_reason, r.missed_need::float8, r.missed_limit::float8,
 		       coalesce((SELECT lb.status = 'cancelled_by_driver' FROM bookings lb
 		                 WHERE lb.request_id = r.id
 		                 ORDER BY lb.created_at DESC, lb.id DESC LIMIT 1), false),
@@ -147,10 +164,27 @@ func OpenRequests(
 			           AND `+match.DriveOpen("uo", "$2")+`
 			           AND NOT EXISTS (SELECT 1 FROM asks ua
 			                           WHERE ua.request_id = r.id AND ua.occurrence_id = uo.id))) AS untried,
-			       max(ct.seats) AS most_seats
+			       max(ct.seats) AS most_seats,
+			       count(DISTINCT ct.driver_id) FILTER (WHERE nd.in_window) AS departing,
+			       (array_agg(nd.at ORDER BY nd.gap) FILTER (WHERE nd.at IS NOT NULL))[1] AS nearest
 			FROM route_templates ct
 			JOIN driver_profiles d ON d.user_id = ct.driver_id
 			JOIN users du ON du.id = ct.driver_id AND du.status = 'active'
+			-- The departure of this route closest to the window, within twelve
+			-- hours of it, that has not left.
+			LEFT JOIN LATERAL (
+				SELECT wo.depart_earliest AS at,
+				       wo.depart_earliest <= r.window_end AND wo.depart_latest >= r.window_start AS in_window,
+				       CASE WHEN wo.depart_latest < r.window_start THEN r.window_start - wo.depart_latest
+				            WHEN wo.depart_earliest > r.window_end THEN wo.depart_earliest - r.window_end
+				            ELSE interval '0' END AS gap
+				  FROM trip_occurrences wo
+				 WHERE wo.template_id = ct.id AND wo.status = 'scheduled'
+				   -- Not left, as the matcher judges it.
+				   AND `+match.DriveOpen("wo", "$2")+`
+				   AND wo.depart_earliest < r.window_end + interval '12 hours'
+				   AND wo.depart_latest > r.window_start - interval '12 hours'
+				 ORDER BY 3 LIMIT 1) nd ON true
 			-- A schedule that can still produce a departure. The active column is
 			-- the retire flag and nothing sets it when a schedule merely runs
 			-- out, so a one-off whose day has gone and a recurring route past
@@ -187,7 +221,8 @@ func OpenRequests(
 		) corridor ON true
 		GROUP BY r.id, r.origin_label, r.destination_label,
 		         r.window_start, r.window_end, r.seats, r.status,
-		         r.created_at, corridor.drivers, corridor.untried, corridor.most_seats
+		         r.created_at, corridor.drivers, corridor.untried, corridor.most_seats, corridor.departing, corridor.nearest,
+		         r.missed_reason, r.missed_need, r.missed_limit
 		ORDER BY r.created_at DESC, r.id DESC`, userID, now, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: loading open requests: %w", err)
@@ -199,7 +234,8 @@ func OpenRequests(
 		var q OpenRequest
 		if err := rows.Scan(&q.ID, &q.OriginLabel, &q.DestinationLabel,
 			&q.WindowStart, &q.WindowEnd, &q.Seats, &q.Status,
-			&q.DriversAsked, &q.DriversDeclined, &q.AskingNow, &q.AskExpiresAt, &q.DriversOnCorridor, &q.DriversUntried, &q.MostSeatsOnCorridor, &q.Stranded, &q.CreatedAt); err != nil {
+			&q.DriversAsked, &q.DriversDeclined, &q.AskingNow, &q.AskExpiresAt, &q.DriversOnCorridor, &q.DriversUntried, &q.MostSeatsOnCorridor, &q.DriversDeparting, &q.NearestDeparture,
+			&q.MissedReason, &q.MissedNeed, &q.MissedLimit, &q.Stranded, &q.CreatedAt); err != nil {
 			return nil, fmt.Errorf("store: scanning an open request: %w", err)
 		}
 		out = append(out, q)

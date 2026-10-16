@@ -140,9 +140,11 @@ func TestADriverWhoWantsNoStopsGetsNone(t *testing.T) {
 	}
 }
 
-// Pulling over, waiting and pulling out again is time, and a route that is
-// geometrically unchanged is not free.
-func TestEveryStopCostsTimeEvenWhenTheRouteDoesNotChange(t *testing.T) {
+// Pulling over, waiting and pulling out again is time, and the total says so.
+// The driver's minutes are not spent on it: "10 λεπτά παράκαμψη" is ten
+// minutes of driving off the road. Counting two minutes a stop left six for
+// the road, while the driver was shown only the driving (QA 2026-10-16).
+func TestTheDetourLimitIsDrivingNotStopping(t *testing.T) {
 	r := &stepRouter{baseKm: 100, baseMin: 100, perStop: 0}
 	got, err := match.BestInsertion(context.Background(), r, plainItinerary(),
 		geo.Point{Lon: 25.0, Lat: 40.8}, geo.Point{Lon: 24.0, Lat: 40.7})
@@ -154,8 +156,18 @@ func TestEveryStopCostsTimeEvenWhenTheRouteDoesNotChange(t *testing.T) {
 	if got.TotalDetourMin != want {
 		t.Errorf("TotalDetourMin = %v for two stops on the route, want %v of dwell", got.TotalDetourMin, want)
 	}
-	if got.WithinBudget(match.Budget{AllowStops: true, Km: 100, Min: 3}) {
-		t.Error("two stops fitted a three-minute budget; the dwell is not being counted")
+	if !got.WithinBudget(match.Budget{AllowStops: true, Km: 100, Min: 0}) {
+		t.Error("two stops on the road were refused for the time it takes to stop")
+	}
+
+	// Ten minutes of road and two stops is inside ten minutes, not over.
+	ten := match.Insertion{TotalDetourMin: 10 + want, NewStops: 2}
+	if !ten.WithinBudget(match.Budget{AllowStops: true, Km: 100, Min: 10}) {
+		t.Error("ten minutes off the road did not fit a ten-minute limit")
+	}
+	eleven := match.Insertion{TotalDetourMin: 11 + want, NewStops: 2}
+	if eleven.WithinBudget(match.Budget{AllowStops: true, Km: 100, Min: 10}) {
+		t.Error("eleven minutes off the road fitted a ten-minute limit")
 	}
 }
 

@@ -4,10 +4,11 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { api, type LuggageSize } from '../../src/api/endpoints';
+import { api, type LuggageSize, type MeetingPoint } from '../../src/api/endpoints';
 import { refusalText } from '../../src/api/errorText';
 import { BottomBar, Button, Card, Hint, Screen, Stepper, Title } from '../../src/components/ui';
 import { PlaceField } from '../../src/components/PlaceField';
+import { MeetingPointField } from '../../src/components/MeetingPointField';
 import { LuggagePicker } from '../../src/components/LuggagePicker';
 import { WhenPicker } from '../../src/components/WhenPicker';
 import { Estimate } from '../../src/components/Estimate';
@@ -15,8 +16,8 @@ import { LiveMapCard } from '../../src/components/LiveMapCard';
 import { Supply } from '../../src/components/Supply';
 import { colors, space, type } from '../../src/design/tokens';
 import { usePushReach } from '../../src/push/reach';
-import { pinsFromParams, type Pin } from '../../src/design/pin';
-import { athensDate, departureWindow, nextDate, type Band, type Day } from '../../src/design/when';
+import { pinsFromParams, pointLabel, type Pin } from '../../src/design/pin';
+import { dateOf, departureWindow, type Band, type Day } from '../../src/design/when';
 
 export default function SearchScreen() {
   const { t } = useTranslation();
@@ -28,11 +29,23 @@ export default function SearchScreen() {
   // is edited.
   const [from, setFrom] = useState<Pin | null>(null);
   const [to, setTo] = useState<Pin | null>(null);
+  // Where exactly, as a driver says it: the middle of the village is not
+  // always where a car can stop. Φέρες sits 4 km off the road that passes it,
+  // and never matched a driver on it (QA 2026-10-16, U4).
+  const [fromPoint, setFromPoint] = useState<MeetingPoint | null>(null);
+  const [toPoint, setToPoint] = useState<MeetingPoint | null>(null);
   const [seats, setSeats] = useState(1);
   // "Now" keeps the behaviour this screen always had; the difference is that it
   // is now a visible answer rather than an assumption.
   const [day, setDay] = useState<Day>('today');
   const [band, setBand] = useState<Band>('now');
+  // Other days that would do as well. Each is its own request, pointed at the
+  // first, so the first one a driver takes withdraws the rest.
+  const [extra, setExtra] = useState<string[]>([]);
+  // Days that failed to save, with the request they are other days of. The
+  // next press sends only these: sending the first day again would make a new
+  // request if a driver had taken it meanwhile, and carry the passenger twice.
+  const [unsent, setUnsent] = useState<{ root: string; days: string[] } | null>(null);
   const [luggage, setLuggage] = useState<LuggageSize>('none');
   const [luggageCount, setLuggageCount] = useState(0);
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -43,6 +56,11 @@ export default function SearchScreen() {
   // overwrite whatever the person typed after they got here. `preset` is the
   // identity of the link, so pressing the same suggestion again fills the form
   // again, while editing it afterwards is left alone.
+  // A changed form is a new request, not the rest of the old one.
+  useEffect(() => {
+    setUnsent(null);
+  }, [from, to, fromPoint, toPoint, day, band, extra, seats, luggage, luggageCount]);
+
   const params = useLocalSearchParams<Record<string, string | string[]>>();
   const preset = Array.isArray(params.preset) ? params.preset[0] : params.preset;
   const applied = useRef<string | null>(null);
@@ -54,28 +72,55 @@ export default function SearchScreen() {
     applied.current = preset;
     setFrom(pins.from);
     setTo(pins.to);
+    setFromPoint(null);
+    setToPoint(null);
   }, [preset, params]);
 
   const create = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       // Read at the moment of sending rather than at render: somebody can sit
       // on this screen for ten minutes, and "now" has to mean now.
-      const { start, end } = departureWindow(day, band, new Date());
-      return api.createRequest({
-        origin_lon: (from as Pin).lon,
-        origin_lat: (from as Pin).lat,
-        destination_lon: (to as Pin).lon,
-        destination_lat: (to as Pin).lat,
-        origin_label: (from as Pin).label,
-        destination_label: (to as Pin).label,
-        window_start: start.toISOString(),
-        window_end: end.toISOString(),
-        seats,
-        luggage,
-        luggage_count: luggageCount,
-      });
+      const now = new Date();
+      const post = (d: Day, b: Band, alternativeOf?: string) => {
+        const { start, end } = departureWindow(d, b, now);
+        return api.createRequest({
+          origin_lon: fromPoint?.lon ?? (from as Pin).lon,
+          origin_lat: fromPoint?.lat ?? (from as Pin).lat,
+          destination_lon: toPoint?.lon ?? (to as Pin).lon,
+          destination_lat: toPoint?.lat ?? (to as Pin).lat,
+          origin_label: pointLabel(from as Pin, fromPoint),
+          destination_label: pointLabel(to as Pin, toPoint),
+          window_start: start.toISOString(),
+          window_end: end.toISOString(),
+          seats,
+          luggage,
+          luggage_count: luggageCount,
+          ...(alternativeOf ? { alternative_of: alternativeOf } : {}),
+        });
+      };
+      const first = unsent
+        ? { request_id: unsent.root, asking: false }
+        : await post(day, band);
+      // One at a time, in date order. A day that fails does not stop the rest.
+      const failed: string[] = [];
+      for (const d of unsent ? unsent.days : extra) {
+        if (!unsent && d === dateOf(day, now)) continue;
+        try {
+          await post(d as Day, band === 'now' ? 'morning' : band, first.request_id);
+        } catch {
+          failed.push(d);
+        }
+      }
+      return { ...first, failed };
     },
     onSuccess: (res) => {
+      if (res.failed.length > 0) {
+        setUnsent({ root: res.request_id, days: res.failed });
+        void queryClient.invalidateQueries({ queryKey: ['requests'] });
+        setOutcome(t('search.daysFailed', { count: res.failed.length, post: t('search.post') }));
+        return;
+      }
+      setUnsent(null);
       // No driver yet is a normal outcome, not an error: the request stays open
       // and the server asks someone when a route appears.
       setOutcome(res.asking ? t('search.asking') : t(on ? 'search.noDrivers' : 'search.noDriversNoPush'));
@@ -108,19 +153,27 @@ export default function SearchScreen() {
                 testID="from"
                 label={t('search.from')}
                 value={from}
-                onChange={setFrom}
+                onChange={(p) => {
+                  setFrom(p);
+                  setFromPoint(null);
+                }}
                 placeholder={t('search.placeholder')}
                 near={to}
                 here
               />
+              <MeetingPointField testID="from-point" place={from} value={fromPoint} onChange={setFromPoint} />
               <PlaceField
                 testID="to"
                 label={t('search.to')}
                 value={to}
-                onChange={setTo}
+                onChange={(p) => {
+                  setTo(p);
+                  setToPoint(null);
+                }}
                 placeholder={t('search.placeholder')}
                 near={from}
               />
+              <MeetingPointField testID="to-point" place={to} value={toPoint} onChange={setToPoint} />
             </View>
           </View>
 
@@ -134,12 +187,14 @@ export default function SearchScreen() {
               setDay(next.day);
               setBand(next.band);
             }}
+            extra={extra}
+            onExtraChange={setExtra}
           />
 
           <Supply
             from={from}
             to={to}
-            date={day === 'today' ? athensDate(new Date()) : nextDate(athensDate(new Date()))}
+            date={dateOf(day, new Date())}
           />
 
           <LuggagePicker

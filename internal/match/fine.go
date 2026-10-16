@@ -62,8 +62,9 @@ type Router interface {
 
 // StopDwell is what pulling over, waiting and pulling out again costs, per
 // stop. A pickup exactly on the route changes the road distance by nothing and
-// still takes real minutes out of the driver's day; counting it as free is how
-// a driver ends up agreeing to four "free" stops.
+// still takes real minutes out of the driver's day, so the total detour counts
+// it. The driver's minute limit does not: it is minutes of driving, and a
+// driver who wants no stops at all says so with AllowStops.
 const StopDwell = 2 * time.Minute
 
 // Insertion is the cheapest way to fit a new passenger into an itinerary.
@@ -103,7 +104,8 @@ type Budget struct {
 	// Min is the time limit over the same journey. It exists because the two do
 	// not track each other: fifteen kilometres on the Egnatia is nine minutes
 	// and fifteen up a mountain road is thirty-five, and a driver who said
-	// fifteen kilometres did not agree to thirty-five minutes.
+	// fifteen kilometres did not agree to thirty-five minutes. It counts
+	// driving only, not the time stops take (see StopDwell).
 	Min int
 	// OffRoadMin, when set, replaces Min for a drive: the minutes the driver
 	// will spend off their road, not counting the time stops take. A driver
@@ -231,10 +233,15 @@ func (i Insertion) WithinBudget(b Budget) bool {
 	if i.TotalDetourKm > b.Km {
 		return false
 	}
+	// Minutes of driving off the road. The time stops take is in the total,
+	// and not in what the driver agreed to: "10 λεπτά" left six for the road
+	// once two stops had taken theirs, while the driver was shown only the
+	// driving (QA 2026-10-16).
+	driving := i.TotalDetourMin - float64(i.NewStops)*StopDwell.Minutes()
 	if b.OffRoadMin != nil {
-		return i.TotalDetourMin-float64(i.NewStops)*StopDwell.Minutes() <= float64(*b.OffRoadMin)
+		return driving <= float64(*b.OffRoadMin)
 	}
-	return i.TotalDetourMin <= float64(b.Min)
+	return driving <= float64(b.Min)
 }
 
 // waypoints renders an itinerary as an ordered coordinate list.

@@ -376,6 +376,16 @@ export type OpenRequest = {
   drivers_untried?: number;
   /** The most seats any car on the road offers. Null when nobody drives it. */
   most_seats_on_corridor?: number | null;
+  /** Drivers with a departure inside the window. Absent from an older server. */
+  drivers_departing?: number;
+  /** The road's departure nearest the window, within twelve hours. No driver is named. */
+  nearest_departure?: string | null;
+  /** Why the last search asked nobody though a car passes. No driver is named. */
+  missed?: {
+    reason: 'no_stops' | 'detour_min' | 'detour_km';
+    need: number | null;
+    limit: number | null;
+  } | null;
   /** The driver took the seat back and the request is being matched again. */
   stranded?: boolean;
   created_at: string;
@@ -686,6 +696,8 @@ export const api = {
     luggage?: LuggageSize;
     /** How many of that size you are bringing. Absent means one, or none. */
     luggage_count?: number;
+    /** The request this is another day of. Accepting any day withdraws the rest. */
+    alternative_of?: string;
   }) =>
     request<{ request_id: string; asking: boolean; ask_id?: string }>('/v1/requests', {
       method: 'POST',

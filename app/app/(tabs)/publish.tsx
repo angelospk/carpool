@@ -31,7 +31,7 @@ import { LuggagePicker } from '../../src/components/LuggagePicker';
 import { BootShare } from '../../src/components/BootShare';
 import { ContributionChoice } from '../../src/components/ContributionChoice';
 import { colors, space, type } from '../../src/design/tokens';
-import { pinsFromParams, type Pin } from '../../src/design/pin';
+import { pinsFromParams, pointLabel, type Pin } from '../../src/design/pin';
 import { PlaceField } from '../../src/components/PlaceField';
 import { MeetingPointField } from '../../src/components/MeetingPointField';
 import { ShareRouteButton } from '../../src/components/ShareRouteButton';
@@ -648,8 +648,8 @@ export default function PublishScreen() {
               ? { latest: laterOf(athensTime(new Date(at + 17 * 60_000).toISOString()), athensTime(new Date(at + 2 * 60_000).toISOString())) }
               : null;
             publish.mutate({
-              origin_label: label(from as Pin, fromPoint),
-              destination_label: label(to as Pin, toPoint),
+              origin_label: pointLabel(from as Pin, fromPoint),
+              destination_label: pointLabel(to as Pin, toPoint),
               kind,
               ...(leavingNow
                 ? { oneoff_date: athensDate(new Date(at + 2 * 60_000)) }
@@ -714,12 +714,6 @@ function first(value: string | string[] | undefined): string | undefined {
 // sorted, but a preset is a set either way.
 function sameDays(chosen: number[], preset: readonly number[]): boolean {
   return chosen.length === preset.length && preset.every((d) => chosen.includes(d));
-}
-
-// "Φέρες, ΚΤΕΛ Έβρου" rather than either alone: the town is what somebody
-// recognises in a list and the landmark is what they drive to.
-function label(pin: Pin, point: MeetingPoint | null): string {
-  return point ? `${pin.label}, ${point.name}` : pin.label;
 }
 
 /**

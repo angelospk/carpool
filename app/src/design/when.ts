@@ -13,7 +13,8 @@
 /** Athens, always — the same pinning `format.ts` does, for the same reason. */
 const ZONE = 'Europe/Athens';
 
-export type Day = 'today' | 'tomorrow';
+/** Today, tomorrow, or a calendar date further on as `YYYY-MM-DD`. */
+export type Day = 'today' | 'tomorrow' | `${number}-${number}-${number}`;
 
 /**
  * A band of the day, named the way people say it rather than in hours.
@@ -94,6 +95,22 @@ export function nextDate(date: string): string {
   return next.toISOString().slice(0, 10);
 }
 
+/** The Athens calendar date a day names. */
+export function dateOf(day: Day, now: Date): string {
+  if (day === 'today') return athensDate(now);
+  if (day === 'tomorrow') return nextDate(athensDate(now));
+  return day;
+}
+
+/**
+ * A picked date the clock has since reached is today. A date picked on Sunday
+ * for Tuesday and sent on Tuesday night is otherwise a window that starts at
+ * this minute and ends that morning: backwards, and refused by the server.
+ */
+function settled(day: Day, now: Date): Day {
+  return day !== 'today' && day !== 'tomorrow' && day <= athensDate(now) ? 'today' : day;
+}
+
 /**
  * Whether a band is still worth offering.
  *
@@ -101,8 +118,9 @@ export function nextDate(date: string): string {
  * take, and offering it produces a request the matcher will never fill. Bands
  * on a later day are always open.
  */
-export function bandIsOpen(day: Day, band: Band, now: Date): boolean {
-  if (day === 'tomorrow') return true;
+export function bandIsOpen(picked: Day, band: Band, now: Date): boolean {
+  const day = settled(picked, now);
+  if (day !== 'today') return true;
   if (band === 'now') return true;
   const [, to] = BAND_HOURS[band];
   return athensInstant(athensDate(now), to).getTime() > now.getTime();
@@ -124,12 +142,13 @@ export function bandIsOpen(day: Day, band: Band, now: Date): boolean {
  * It is reachable because the selected band lives outside the picker: the chip
  * disappears once bandIsOpen goes false, and the selection does not.
  */
-export function departureWindow(day: Day, band: Band, now: Date): Window {
+export function departureWindow(picked: Day, band: Band, now: Date): Window {
+  const day = settled(picked, now);
   if (band === 'now') return { start: now, end: new Date(now.getTime() + NOW_WINDOW_MS) };
 
   const today = athensDate(now);
   const gone = day === 'today' && !bandIsOpen(day, band, now);
-  const date = day === 'today' && !gone ? today : nextDate(today);
+  const date = day !== 'today' ? dateOf(day, now) : gone ? nextDate(today) : today;
   const [from, to] = BAND_HOURS[band];
   const start = athensInstant(date, from);
   const end = athensInstant(date, to);

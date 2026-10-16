@@ -112,6 +112,28 @@ export function requestProgress(request: OpenRequest, t: TFunction): string {
     : t('home.requestStranded');
 }
 
+/**
+ * Why nobody has been asked, when the server knows: a car passes but its
+ * driver does not take the detour, or nobody leaves in those hours. No driver
+ * is named, because none of them agreed to anything (QA 2026-10-16, U3).
+ */
+function whyNobody(request: OpenRequest, t: TFunction): string | null {
+  const m = request.missed;
+  if (m?.reason === 'no_stops') return t('home.missedNoStops');
+  if (m && m.need != null && m.limit != null) {
+    const need = Math.ceil(m.need);
+    return m.reason === 'detour_min'
+      ? t('home.missedDetourMin', { need, limit: m.limit })
+      : t('home.missedDetourKm', { need, limit: m.limit });
+  }
+  if (request.drivers_departing === 0) {
+    return request.nearest_departure
+      ? t('home.requestNearest', { time: athensTime(request.nearest_departure) })
+      : t('home.requestNotThen');
+  }
+  return null;
+}
+
 /** "Ρωτάμε έναν οδηγό τώρα", and until when they have to answer. */
 function asking(request: OpenRequest, t: TFunction): string {
   return request.ask_expires_at
@@ -135,6 +157,10 @@ function progressOf(request: OpenRequest, t: TFunction): string {
     request.most_seats_on_corridor < request.seats
   )
     return t('home.requestTooManySeats', { count: request.most_seats_on_corridor });
+  if (request.drivers_asked === 0) {
+    const why = whyNobody(request, t);
+    if (why) return why;
+  }
   if (request.drivers_asked === 0) return t('home.requestNobody');
   if (request.asking_now) return asking(request, t) + declined;
   // Everybody on the road has passed: there is no next driver to look for

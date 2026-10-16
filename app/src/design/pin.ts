@@ -70,3 +70,11 @@ function pinFromParams(
 function one(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
+
+/**
+ * "Φέρες, ΚΤΕΛ Έβρου" rather than either alone: the town is what somebody
+ * recognises in a list and the landmark is what they go to.
+ */
+export function pointLabel(pin: Pin, point: { name: string } | null): string {
+  return point ? `${pin.label}, ${point.name}` : pin.label;
+}
