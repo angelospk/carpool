@@ -9,6 +9,7 @@
 package standing
 
 import (
+	"carpool/internal/match"
 	"context"
 	"errors"
 	"fmt"
@@ -172,6 +173,24 @@ func (s *Service) Approve(ctx context.Context, arrangementID, driverID uuid.UUID
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// The passenger lock comes before every row lock, as in createAsk and
+	// Accept, so that a week is not booked while the passenger is given a seat
+	// elsewhere at the same hour. Taken after the arrangement row it closed a
+	// cycle with Accept and a suspension. The passenger of an arrangement
+	// never changes, so reading it unlocked first is safe.
+	var lockFor uuid.UUID
+	err = tx.QueryRow(ctx, `SELECT passenger_id FROM standing_arrangements WHERE id = $1`,
+		arrangementID).Scan(&lockFor)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotRepeatable
+	}
+	if err != nil {
+		return fmt.Errorf("standing: loading the arrangement: %w", err)
+	}
+	if _, err := tx.Exec(ctx, match.PassengerLockSQL, lockFor); err != nil {
+		return fmt.Errorf("standing: taking the passenger lock: %w", err)
+	}
+
 	var (
 		templateID, passengerID, owner uuid.UUID
 		weekday, seats                 int
@@ -221,6 +240,8 @@ func (s *Service) Approve(ctx context.Context, arrangementID, driverID uuid.UUID
 		  AND EXTRACT(ISODOW FROM o.service_date) = $4
 		  AND NOT EXISTS (SELECT 1 FROM bookings b
 		                  WHERE b.occurrence_id = o.id AND b.passenger_id = $5)
+		  -- Nor a week they already ride with somebody else at that hour.
+		  AND NOT `+match.PassengerHolds("o", "$5::uuid", "$3", "NULL")+`
 		ORDER BY o.service_date
 		FOR UPDATE OF o`, templateID, until, now, weekday, passengerID)
 	if err != nil {

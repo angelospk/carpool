@@ -7,10 +7,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"carpool/internal/asks"
 	"carpool/internal/clock"
 	"carpool/internal/jobs"
+	"carpool/internal/match"
 	"carpool/internal/standing"
 	"carpool/internal/store"
 	"carpool/internal/store/testdb"
@@ -463,5 +466,224 @@ func TestARepeatTakesItsWeekdayAndItsEndDateFromTheRideItRepeats(t *testing.T) {
 	if want := testNow.AddDate(0, 0, jobs.HorizonDays); !until.Truncate(24 * time.Hour).Equal(want.Truncate(24 * time.Hour)) {
 		t.Errorf("the arrangement ends at %s, want the %d-day horizon at %s",
 			until.Format("2006-01-02"), jobs.HorizonDays, want.Format("2006-01-02"))
+	}
+}
+
+// A week the passenger already rides with somebody else at that hour is not
+// booked again by the arrangement; the other weeks are (Codex review, round 2).
+func TestApprovalSkipsAWeekThePassengerAlreadyRidesElsewhere(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	if _, err := w.pool.Exec(ctx, `
+		WITH tpl AS (
+			INSERT INTO route_templates
+			SELECT (jsonb_populate_record(t, jsonb_build_object('id', gen_random_uuid()))).*
+			  FROM route_templates t WHERE t.id = $1
+			RETURNING id),
+		occ AS (
+			INSERT INTO trip_occurrences
+			SELECT (jsonb_populate_record(o, jsonb_build_object(
+			          'id', gen_random_uuid(), 'template_id', (SELECT id FROM tpl)))).*
+			  FROM trip_occurrences o WHERE o.id = $2
+			RETURNING id),
+		req AS (
+			INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end, kind, status)
+			VALUES ($3, ST_SetSRID(ST_MakePoint(25.87, 40.85), 4326), ST_SetSRID(ST_MakePoint(26.17, 40.90), 4326),
+			        '2026-08-11T03:00:00Z', '2026-08-11T07:00:00Z', 'open', 'matched')
+			RETURNING id),
+		ask AS (
+			INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
+			                  suggested_price_eur, itinerary_version, expires_at, status)
+			SELECT req.id, occ.id, 0, 0, ST_SetSRID(ST_MakePoint(25.90, 40.86), 4326),
+			       ST_SetSRID(ST_MakePoint(26.17, 40.90), 4326), 2.00, 0, '2026-08-11T03:00:00Z', 'accepted'
+			  FROM req, occ
+			RETURNING id, request_id, occurrence_id)
+		INSERT INTO bookings (occurrence_id, request_id, ask_id, passenger_id, seats, price_eur, pickup_point, dropoff_point)
+		SELECT ask.occurrence_id, ask.request_id, ask.id, $3, 1, 2.00, ST_SetSRID(ST_MakePoint(25.90, 40.86), 4326),
+		       ST_SetSRID(ST_MakePoint(26.17, 40.90), 4326)
+		  FROM ask`, w.templateID, w.tuesdays[1], w.passengerID); err != nil {
+		t.Fatalf("seeding the other ride: %v", err)
+	}
+
+	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
+	if err != nil {
+		t.Fatalf("Repeat: %v", err)
+	}
+	if err := w.svc.Approve(ctx, id, w.driverID); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+
+	if free := w.seatsFree(t, w.tuesdays[1]); free != 3 {
+		t.Errorf("the week the passenger rides elsewhere has %d seats free, want 3", free)
+	}
+	if free := w.seatsFree(t, w.tuesdays[2]); free != 2 {
+		t.Errorf("the free week has %d seats free, want 2", free)
+	}
+}
+
+// otherRideSQL gives the passenger a seat with somebody else on the second
+// Tuesday at the same hour. $1 template, $2 that Tuesday, $3 the passenger.
+const otherRideSQL = `
+		WITH tpl AS (
+			INSERT INTO route_templates
+			SELECT (jsonb_populate_record(t, jsonb_build_object('id', gen_random_uuid()))).*
+			  FROM route_templates t WHERE t.id = $1
+			RETURNING id),
+		occ AS (
+			INSERT INTO trip_occurrences
+			SELECT (jsonb_populate_record(o, jsonb_build_object(
+			          'id', gen_random_uuid(), 'template_id', (SELECT id FROM tpl)))).*
+			  FROM trip_occurrences o WHERE o.id = $2
+			RETURNING id),
+		req AS (
+			INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end, kind, status)
+			VALUES ($3, ST_SetSRID(ST_MakePoint(25.87, 40.85), 4326), ST_SetSRID(ST_MakePoint(26.17, 40.90), 4326),
+			        '2026-08-11T03:00:00Z', '2026-08-11T07:00:00Z', 'open', 'matched')
+			RETURNING id),
+		ask AS (
+			INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
+			                  suggested_price_eur, itinerary_version, expires_at, status)
+			SELECT req.id, occ.id, 0, 0, ST_SetSRID(ST_MakePoint(25.90, 40.86), 4326),
+			       ST_SetSRID(ST_MakePoint(26.17, 40.90), 4326), 2.00, 0, '2026-08-11T03:00:00Z', 'accepted'
+			  FROM req, occ
+			RETURNING id, request_id, occurrence_id)
+		INSERT INTO bookings (occurrence_id, request_id, ask_id, passenger_id, seats, price_eur, pickup_point, dropoff_point)
+		SELECT ask.occurrence_id, ask.request_id, ask.id, $3, 1, 2.00, ST_SetSRID(ST_MakePoint(25.90, 40.86), 4326),
+		       ST_SetSRID(ST_MakePoint(26.17, 40.90), 4326)
+		  FROM ask`
+
+// The lock, not only the check: while another admission for the passenger
+// holds it, Approve waits, and then sees what that admission did (Codex review).
+func TestApprovalWaitsForThePassengerLockAndThenSkipsTheWeek(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
+	if err != nil {
+		t.Fatalf("Repeat: %v", err)
+	}
+
+	tx, err := w.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback(ctx) })
+	if _, err := tx.Exec(ctx, match.PassengerLockSQL, w.passengerID); err != nil {
+		t.Fatalf("taking the passenger lock: %v", err)
+	}
+
+	done := make(chan struct{})
+	var approveErr error
+	go func() { defer close(done); approveErr = w.svc.Approve(ctx, id, w.driverID) }()
+	blocked(t, w, 1, done, "Approve")
+
+	if _, err := tx.Exec(ctx, otherRideSQL, w.templateID, w.tuesdays[1], w.passengerID); err != nil {
+		t.Fatalf("seeding the other ride: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	<-done
+	if approveErr != nil {
+		t.Fatalf("Approve: %v", approveErr)
+	}
+	if free := w.seatsFree(t, w.tuesdays[1]); free != 3 {
+		t.Errorf("the week the passenger rides elsewhere has %d seats free, want 3", free)
+	}
+}
+
+// blocked waits until n sessions in this test's database wait for a lock, and
+// fails if done closes first.
+func blocked(t *testing.T, w *world, n int, done <-chan struct{}, what string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		select {
+		case <-done:
+			t.Fatalf("%s finished while the lock was held", what)
+		default:
+		}
+		var waiting int
+		if err := w.pool.QueryRow(context.Background(), `
+			SELECT count(*) FROM pg_stat_activity
+			 WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+			t.Fatalf("reading lock waits: %v", err)
+		}
+		if waiting >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s never waited for a lock", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// The cycle the passenger lock once closed. A suspension holds the user row
+// and goes for the arrangement; Accept holds the passenger lock and waits for
+// the user row; Approve waits for the passenger lock. Approve must not be
+// holding the arrangement while it waits, or the three deadlock (Codex review).
+func TestApprovalDoesNotHoldTheArrangementWhileWaitingForThePassenger(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	id, err := w.svc.Repeat(ctx, w.booking, w.passengerID)
+	if err != nil {
+		t.Fatalf("Repeat: %v", err)
+	}
+	var askID uuid.UUID
+	if err := w.pool.QueryRow(ctx, `
+		WITH req AS (
+			INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end, kind, status)
+			VALUES ($1, ST_SetSRID(ST_MakePoint(25.87, 40.85), 4326), ST_SetSRID(ST_MakePoint(26.17, 40.90), 4326),
+			        '2026-08-18T03:00:00Z', '2026-08-18T07:00:00Z', 'open', 'asking')
+			RETURNING id)
+		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
+		                  suggested_price_eur, itinerary_version, expires_at, status)
+		SELECT req.id, $2, 0, 0, ST_SetSRID(ST_MakePoint(25.90, 40.86), 4326),
+		       ST_SetSRID(ST_MakePoint(26.17, 40.90), 4326), 2.00, 0, $3, 'pending'
+		  FROM req RETURNING id`, w.passengerID, w.tuesdays[2], testNow.Add(30*time.Minute)).Scan(&askID); err != nil {
+		t.Fatalf("seeding an offer: %v", err)
+	}
+
+	suspension, err := w.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	t.Cleanup(func() { _ = suspension.Rollback(ctx) })
+	if _, err := suspension.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, w.passengerID); err != nil {
+		t.Fatalf("holding the user row: %v", err)
+	}
+
+	accepted := make(chan struct{})
+	var acceptErr error
+	go func() {
+		defer close(accepted)
+		_, acceptErr = asks.NewService(w.pool, clock.NewFake(testNow), nil).Accept(ctx, askID, w.driverID)
+	}()
+	blocked(t, w, 1, accepted, "Accept")
+
+	approved := make(chan struct{})
+	var approveErr error
+	go func() { defer close(approved); approveErr = w.svc.Approve(ctx, id, w.driverID) }()
+	blocked(t, w, 2, approved, "Approve")
+
+	// Where a suspension goes next. Bounded, so a regression fails here
+	// instead of hanging or waiting for the deadlock detector.
+	if _, err := suspension.Exec(ctx, `SET LOCAL lock_timeout = '2s'`); err != nil {
+		t.Fatalf("lock_timeout: %v", err)
+	}
+	if _, err := suspension.Exec(ctx,
+		`SELECT 1 FROM standing_arrangements WHERE id = $1 FOR UPDATE`, id); err != nil {
+		t.Fatalf("the arrangement was held by an Approve waiting for the passenger: %v", err)
+	}
+	if err := suspension.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	<-accepted
+	<-approved
+	for name, err := range map[string]error{"Accept": acceptErr, "Approve": approveErr} {
+		var pg *pgconn.PgError
+		if errors.As(err, &pg) && pg.Code == "40P01" {
+			t.Fatalf("%s deadlocked: %v", name, err)
+		}
 	}
 }

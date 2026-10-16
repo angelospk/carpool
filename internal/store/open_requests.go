@@ -1,6 +1,7 @@
 package store
 
 import (
+	"carpool/internal/match"
 	"context"
 	"fmt"
 	"time"
@@ -45,8 +46,11 @@ type OpenRequest struct {
 	// whether anybody drives this road, not whether they can take this
 	// particular trip.
 	DriversOnCorridor int
-	// DriversUntried is those drivers on the corridor who have not yet said no
-	// to this request or let its ask lapse. Zero, with somebody having passed,
+	// DriversUntried is those drivers on the corridor with a route they have
+	// not passed on for this request, or one with a departure in its window
+	// nobody has asked them about yet. The matcher excludes departures, not
+	// people: a driver who passed and then published another route, or whose
+	// route runs again inside the window, is somebody to ask again. Zero, with somebody having passed,
 	// is "everybody on this road has passed": DriversDeclined cannot say it,
 	// because a driver who passed and then retired is in that count and not in
 	// the corridor's.
@@ -119,12 +123,21 @@ func OpenRequests(
 		-- misses the shadowing reads this as counting the drivers already asked.
 		LEFT JOIN LATERAL (
 			SELECT count(DISTINCT ct.driver_id) AS drivers,
+			       -- A route is tried once its driver passed on it and none of
+			       -- its departures in the window is still unasked: the matcher
+			       -- excludes departures, not routes or people.
 			       count(DISTINCT ct.driver_id) FILTER (WHERE NOT EXISTS (
 			         SELECT 1 FROM asks pa
 			         JOIN trip_occurrences po ON po.id = pa.occurrence_id
-			         JOIN route_templates pt  ON pt.id = po.template_id
 			         WHERE pa.request_id = r.id AND pa.status IN ('declined','expired')
-			           AND pt.driver_id = ct.driver_id)) AS untried
+			           AND po.template_id = ct.id)
+			         OR EXISTS (
+			         SELECT 1 FROM trip_occurrences uo
+			         WHERE uo.template_id = ct.id AND uo.status = 'scheduled'
+			           AND uo.depart_earliest <= r.window_end AND uo.depart_latest >= r.window_start
+			           AND `+match.DriveOpen("uo", "$2")+`
+			           AND NOT EXISTS (SELECT 1 FROM asks ua
+			                           WHERE ua.request_id = r.id AND ua.occurrence_id = uo.id))) AS untried
 			FROM route_templates ct
 			JOIN driver_profiles d ON d.user_id = ct.driver_id
 			JOIN users du ON du.id = ct.driver_id AND du.status = 'active'

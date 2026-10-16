@@ -401,10 +401,9 @@ func (s *Service) createAsk(
 	//
 	// Offers to one passenger are also made one at a time: lockParticipants
 	// shares the row, so two of their requests matched at once would both pass
-	// the overlap check below. Only this function takes the advisory lock, and
-	// it takes it first, so it cannot deadlock against the row locks.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('ask:' || $1::text, 0))`,
-		req.PassengerID); err != nil {
+	// the overlap check below. Accept and standing.Approve take the same lock,
+	// each before any row lock, so it cannot deadlock against them.
+	if _, err := tx.Exec(ctx, match.PassengerLockSQL, req.PassengerID); err != nil {
 		return uuid.Nil, fmt.Errorf("asks: locking the passenger's offers: %w", err)
 	}
 	if err := lockParticipants(ctx, tx, c.DriverID, req.PassengerID); err != nil {
@@ -428,13 +427,9 @@ func (s *Service) createAsk(
 	var seatsFree int
 	var departs time.Time
 	if err := tx.QueryRow(ctx, `
-		SELECT o.seats_free, o.depart_earliest FROM trip_occurrences o
-		  JOIN route_templates t ON t.id = o.template_id
-		WHERE o.id = $1 AND o.status = 'scheduled'
-		  -- Retired while this candidate was being routed: it keeps the seats
-		  -- it has and takes nobody new.
-		  AND t.active
-		FOR UPDATE OF o`, c.OccurrenceID).Scan(&seatsFree, &departs); err != nil {
+		SELECT seats_free, depart_earliest FROM trip_occurrences
+		WHERE id = $1 AND status = 'scheduled'
+		FOR UPDATE`, c.OccurrenceID).Scan(&seatsFree, &departs); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Cancelled or gone between the filter and here. Not this request's
 			// problem, and not something retrying fixes.
@@ -482,12 +477,17 @@ func (s *Service) createAsk(
 	// The filter skipped trips overlapping one this passenger holds, but two
 	// of their requests matched at once both read before either wrote. The
 	// advisory lock above serialises them, so this read is final.
-	var holds bool
-	if err := tx.QueryRow(ctx, `SELECT `+match.PassengerHolds("o", "$2::uuid", "$3")+`
-		  FROM trip_occurrences o WHERE o.id = $1`, c.OccurrenceID, req.PassengerID, now).Scan(&holds); err != nil {
+	//
+	// And retired while this candidate was being routed: the departure keeps
+	// the seats it has and takes nobody new. Read in this statement, after the
+	// lock, so a retirement that committed while the lock was awaited is seen.
+	var holds, active bool
+	if err := tx.QueryRow(ctx, `SELECT `+match.PassengerHolds("o", "$2::uuid", "$3", "NULL")+`, t.active
+		  FROM trip_occurrences o JOIN route_templates t ON t.id = o.template_id
+		 WHERE o.id = $1`, c.OccurrenceID, req.PassengerID, now).Scan(&holds, &active); err != nil {
 		return uuid.Nil, fmt.Errorf("asks: reading the passenger's other trips: %w", err)
 	}
-	if holds {
+	if holds || !active {
 		return uuid.Nil, errNoRoomToAsk
 	}
 

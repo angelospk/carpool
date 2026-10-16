@@ -409,3 +409,80 @@ func TestDriversNotYetTriedLeavesOutTheOnesWhoPassed(t *testing.T) {
 		t.Fatalf("untried = %d after the passed driver retired, want 1", got)
 	}
 }
+
+// A driver who passed on one route and publishes another (an edit makes a new
+// one) is somebody to ask again: the matcher excludes trips it asked about,
+// not people (Codex review, round 2).
+func TestADriversOtherRouteIsNotYetTried(t *testing.T) {
+	w := newCorridorWorld(t)
+	first := w.route(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+	w.passed(t, first)
+
+	var second uuid.UUID
+	if err := w.pool.QueryRow(context.Background(), `
+		INSERT INTO route_templates
+		SELECT (jsonb_populate_record(t, jsonb_build_object('id', gen_random_uuid()))).*
+		  FROM route_templates t WHERE t.id = $1
+		RETURNING id`, first).Scan(&second); err != nil {
+		t.Fatalf("seeding the second route: %v", err)
+	}
+	w.schedule(t, second, "recurring", nil, nil, nil)
+
+	if got := onlyRequest(t, w).DriversUntried; got != 1 {
+		t.Fatalf("untried = %d, want 1: the driver's other route was never asked", got)
+	}
+}
+
+// A route the driver passed on today that runs again tomorrow, inside a
+// two-day window, is still somebody to ask: the matcher excludes the trip it
+// asked about, not the route (Codex review).
+func TestARouteThatRunsAgainInTheWindowIsNotYetTried(t *testing.T) {
+	w := newCorridorWorld(t)
+	ctx := context.Background()
+	if _, err := w.pool.Exec(ctx, `UPDATE ride_requests SET window_end = window_end + interval '2 days'`); err != nil {
+		t.Fatalf("widening the window: %v", err)
+	}
+	first := w.route(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+	w.passed(t, first)
+	if _, err := w.pool.Exec(ctx, `
+		INSERT INTO trip_occurrences
+		SELECT (jsonb_populate_record(o, jsonb_build_object(
+		          'id', gen_random_uuid(),
+		          'service_date', o.service_date + 1,
+		          'depart_earliest', o.depart_earliest + interval '1 day',
+		          'depart_latest', o.depart_latest + interval '1 day'))).*
+		  FROM trip_occurrences o`); err != nil {
+		t.Fatalf("seeding tomorrow: %v", err)
+	}
+
+	if got := onlyRequest(t, w).DriversUntried; got != 1 {
+		t.Fatalf("untried = %d, want 1: tomorrow's departure was never asked", got)
+	}
+}
+
+// A departure in the window that has already left is not somebody to ask
+// (Codex review, round 2).
+func TestADepartureThatHasLeftIsNotYetToTry(t *testing.T) {
+	w := newCorridorWorld(t)
+	ctx := context.Background()
+	if _, err := w.pool.Exec(ctx, `UPDATE ride_requests SET window_start = $1`,
+		corridorNow.Add(-3*time.Hour)); err != nil {
+		t.Fatalf("opening the window earlier: %v", err)
+	}
+	first := w.route(t, "LINESTRING(25.87 40.85, 26.17 40.90)", true)
+	w.passed(t, first)
+	if _, err := w.pool.Exec(ctx, `
+		INSERT INTO trip_occurrences
+		SELECT (jsonb_populate_record(o, jsonb_build_object(
+		          'id', gen_random_uuid(),
+		          'service_date', o.service_date - 1,
+		          'depart_earliest', $1::timestamptz,
+		          'depart_latest', $1::timestamptz + interval '30 minutes'))).*
+		  FROM trip_occurrences o`, corridorNow.Add(-time.Hour)); err != nil {
+		t.Fatalf("seeding a departure that has left: %v", err)
+	}
+
+	if got := onlyRequest(t, w).DriversUntried; got != 0 {
+		t.Fatalf("untried = %d, want 0: the only unasked departure has left", got)
+	}
+}

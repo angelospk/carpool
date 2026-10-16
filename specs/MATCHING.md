@@ -67,7 +67,10 @@ Notes:
   (departure window plus driving time) another occurrence where the passenger
   holds a confirmed booking or a pending, unexpired ask. Without it two requests
   from one person held every seat on a trip, and a route published twice could
-  seat the same person twice at the same hour (QA 2026-10-16).
+  seat the same person twice at the same hour (QA 2026-10-16). The filter is
+  advisory; the guarantee is `match.PassengerLockSQL`, a per-passenger advisory
+  lock that `createAsk`, `Accept` and `standing.Approve` take before any row
+  lock, each rechecking `match.PassengerHolds` under it.
 
 Output: candidate list with pickup/dropoff snap points, capped at top ~20 by
 straight-line quality score.

@@ -95,7 +95,9 @@ type Candidate struct {
 // put that person to drivers twice for the same hour and held every seat on a
 // trip (QA 2026-10-16). Overlap is the departure window plus the driving time.
 // A lapsed offer or a cancelled seat holds nothing.
-func PassengerHolds(occurrence, passenger, now string) string {
+//
+// exceptAsk leaves one offer out (the one being accepted); "NULL" for none.
+func PassengerHolds(occurrence, passenger, now, exceptAsk string) string {
 	o := occurrence
 	return `EXISTS (
 	        SELECT 1 FROM trip_occurrences ho
@@ -108,8 +110,15 @@ func PassengerHolds(occurrence, passenger, now string) string {
 	               OR EXISTS (
 	                 SELECT 1 FROM asks ha JOIN ride_requests hr ON hr.id = ha.request_id
 	                 WHERE ha.occurrence_id = ho.id AND hr.passenger_id = ` + passenger + `
-	                   AND ha.status = 'pending' AND ha.expires_at > ` + now + `)))`
+	                   AND ha.status = 'pending' AND ha.expires_at > ` + now + `
+	                   AND ha.id IS DISTINCT FROM ` + exceptAsk + `)))`
 }
+
+// PassengerLockSQL serialises everything that gives one passenger a seat or an
+// offer: createAsk, Accept and standing.Approve. Each takes it before any row
+// lock, which is what keeps it out of a deadlock with them. $1 is the
+// passenger.
+const PassengerLockSQL = `SELECT pg_advisory_xact_lock(hashtextextended('ask:' || $1::text, 0))`
 
 // SeatsSpokenFor is the SQL expression for how many seats on an occurrence are
 // already promised to somebody: the party sizes behind every live ask.
@@ -340,7 +349,7 @@ WITH cand AS (
 	        WHERE bk.occurrence_id = o.id AND bk.passenger_id = $7::uuid))
 	  -- Nor one that overlaps a trip the passenger already has a seat on or is
 	  -- being asked about. createAsk asks again under the passenger's lock.
-	  AND ($7::uuid IS NULL OR NOT ` + PassengerHolds("o", "$7::uuid", "$13") + `)
+	  AND ($7::uuid IS NULL OR NOT ` + PassengerHolds("o", "$7::uuid", "$13", "NULL") + `)
 	  -- A passenger who asked for women drivers only is not offered anybody
 	  -- else. The profile showed the setting as on long before anything read
 	  -- it, which for a safety setting is worse than not having one.
