@@ -37,6 +37,21 @@ type Trip struct {
 	SeatsFree      int
 }
 
+// tripEndsAt is when the departure o is over, for listing it as next or as
+// past: when it arrives (the latest departure plus the route's minutes), or
+// for a drive when the driver taps «Τέλος». A drive nobody ended is given three
+// hours past its arrival, so a forgotten one does not stay on the home screen.
+//
+// Listing by the departure window instead dropped a trip from the driver's
+// home, and moved it into the passenger's past trips, while the car was still
+// on the road (QA 2026-10-17 U F1).
+func tripEndsAt(o string) string {
+	arrives := o + ".depart_latest + make_interval(mins => " + o + ".route_min)"
+	return "(CASE WHEN " + o + ".drive_ended_at IS NOT NULL THEN " + o + ".drive_ended_at" +
+		" WHEN " + o + ".drive_set_at IS NOT NULL THEN " + arrives + " + interval '3 hours'" +
+		" ELSE " + arrives + " END)"
+}
+
 // UpcomingTrips lists a user's future trips, driving and riding merged, which
 // is what the app's home screen shows.
 func UpcomingTrips(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, now time.Time) ([]Trip, error) {
@@ -47,7 +62,7 @@ func UpcomingTrips(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, no
 		JOIN route_templates t ON t.id = o.template_id
 		WHERE t.driver_id = $1
 		  AND o.status IN ('scheduled','started')
-		  AND o.depart_latest >= $2
+		  AND `+tripEndsAt("o")+` >= $2
 
 		UNION ALL
 
@@ -59,7 +74,7 @@ func UpcomingTrips(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, no
 		WHERE b.passenger_id = $1
 		  AND b.status = 'confirmed'
 		  AND o.status IN ('scheduled','started')
-		  AND o.depart_latest >= $2
+		  AND `+tripEndsAt("o")+` >= $2
 
 		ORDER BY 3`, userID, now)
 	if err != nil {
@@ -521,7 +536,7 @@ func PastTrips(
 		JOIN users u            ON u.id = t.driver_id
 		WHERE b.passenger_id = $1
 		  AND b.status IN ('confirmed','completed')
-		  AND o.depart_latest < $2
+		  AND `+tripEndsAt("o")+` < $2
 		ORDER BY o.depart_earliest DESC
 		LIMIT $3`, userID, now, limit)
 	if err != nil {
