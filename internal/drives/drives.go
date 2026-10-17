@@ -602,19 +602,19 @@ func (s *Service) Here(ctx context.Context, passengerID, occurrenceID uuid.UUID)
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var bookingID, driverID uuid.UUID
-	var already, driving bool
+	var already, driving, ended bool
 	var earliest, latest time.Time
 	var routeMin int
 	err = tx.QueryRow(ctx, `
 		SELECT b.id, t.driver_id, b.arrived_at IS NOT NULL, o.drive_set_at IS NOT NULL,
-		       o.depart_earliest, o.depart_latest, o.route_min
+		       o.drive_ended_at IS NOT NULL, o.depart_earliest, o.depart_latest, o.route_min
 		  FROM bookings b
 		  JOIN trip_occurrences o ON o.id = b.occurrence_id
 		  JOIN route_templates t ON t.id = o.template_id
 		 WHERE b.occurrence_id = $1 AND b.passenger_id = $2 AND b.status = 'confirmed'
 		   AND o.status = 'scheduled'
 		 FOR UPDATE OF b`, occurrenceID, passengerID).
-		Scan(&bookingID, &driverID, &already, &driving, &earliest, &latest, &routeMin)
+		Scan(&bookingID, &driverID, &already, &driving, &ended, &earliest, &latest, &routeMin)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotYours
 	}
@@ -622,6 +622,10 @@ func (s *Service) Here(ctx context.Context, passengerID, occurrenceID uuid.UUID)
 		return fmt.Errorf("drives: finding the seat: %w", err)
 	}
 	now := s.clock.Now()
+	// A drive the driver has ended with «Τέλος» is over, whatever its status.
+	if ended {
+		return ErrNotYours
+	}
 	if !driving {
 		// A scheduled trip has no drive to say it is under way, so the same
 		// window the live positions use stands in for it.

@@ -936,5 +936,8 @@ function ownSeat(trip: TripDetail, me: string | undefined) {
 function herePossible(trip: TripDetail, me: string | undefined, now: number): boolean {
   if (trip.role !== 'passenger' || trip.status !== 'scheduled' || !ownSeat(trip, me)) return false;
   if (trip.drive_set_at) return !trip.drive_ended_at;
+  // An older server sends no route_min, and a window guessed with zero
+  // minutes of road would close before the car arrives.
+  if (trip.route_min == null) return false;
   return liveWindowOpen(trip, now);
 }
