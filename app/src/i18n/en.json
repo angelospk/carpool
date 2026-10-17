@@ -599,6 +599,7 @@
     "notSharingNow": "Your location is no longer shared: the trip's sharing window has closed.",
     "needsHttps": "Location in the browser needs https.",
     "ago": "{{name}} · {{minutes}}′ ago",
+    "driverEta": "The driver is about {{min}}′ away",
     "openMap": "Map",
     "denied": "Without location permission your location cannot be shared.",
     "who": "Only the driver and their passengers see it. Passengers do not see each other.",

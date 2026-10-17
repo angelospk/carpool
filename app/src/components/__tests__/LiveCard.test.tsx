@@ -7,9 +7,20 @@ import * as Location from 'expo-location';
 import { LiveCard } from '../LiveCard';
 import { ApiError } from '../../api/client';
 import { api } from '../../api/endpoints';
+import type { MapMarker } from '../../map/Map';
 
 jest.mock('../../api/endpoints', () => ({
   api: { live: jest.fn(), putPosition: jest.fn(), stopPosition: jest.fn() },
+}));
+
+// The map is drawn by MapLibre, which a test cannot run. What matters here is
+// which markers the card hands it.
+let mockMapProps: { markers?: MapMarker[]; centre?: unknown } | null = null;
+jest.mock('../../map/Map', () => ({
+  Map: (props: { markers?: MapMarker[]; centre?: unknown }) => {
+    mockMapProps = props;
+    return null;
+  },
 }));
 
 let mockOnPosition:
@@ -36,6 +47,7 @@ const window = { opens: '2026-07-30T04:00:00Z', closes: '2026-07-30T06:20:00Z' }
 beforeEach(() => {
   jest.clearAllMocks();
   mockOnPosition = null;
+  mockMapProps = null;
   (api.putPosition as jest.Mock).mockResolvedValue(undefined);
   (api.stopPosition as jest.Mock).mockResolvedValue(undefined);
   (Location.requestForegroundPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
@@ -222,3 +234,115 @@ test('when the drive shares the car, an empty list says only you too', async () 
   render(wrap(<LiveCard tripId="occ-1" now={() => at} carShared />));
   expect(await screen.findByText('Μόνο εσύ μοιράζεσαι τη θέση σου τώρα.')).toBeTruthy();
 });
+
+// The passenger waiting for the car: a map with the car, themself and the
+// meeting point, and how far away the car is. No link out to OpenStreetMap.
+describe('the passenger waiting for the car', () => {
+  // 2 km of road due east of 25.80, encoded at precision 6.
+  const route = polylineOf([
+    [40.85, 25.8],
+    [40.85, 25.9],
+  ]);
+  const pickup: [number, number] = [25.85, 40.85];
+  const driver = { user_id: 'd', name: 'Γιώργος', lat: 40.85, lon: 25.82, updated_at: '2026-07-30T04:19:30Z' };
+  const card = (extra?: object) =>
+    render(wrap(<LiveCard tripId="occ-1" now={() => at} role="passenger" routePolyline={route} pickup={pickup} {...extra} />));
+
+  test('says how far away the driver is, and shows the three markers', async () => {
+    (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [driver], driver_eta_min: 12, eta_at: '2026-07-30T04:19:40Z' });
+    card();
+    expect(await screen.findByTestId('live-eta')).toHaveTextContent('Ο οδηγός είναι περίπου 12′ μακριά');
+    expect(mockMapProps!.markers!.map((m) => m.kind).sort()).toEqual(['driver', 'me', 'meeting']);
+    const meeting = mockMapProps!.markers!.find((m) => m.kind === 'meeting')!;
+    expect(meeting).toMatchObject({ lon: 25.85, lat: 40.85 });
+    // Not sharing: I am drawn at my pickup point.
+    expect(mockMapProps!.markers!.find((m) => m.kind === 'me')).toMatchObject({ lon: 25.85, lat: 40.85 });
+  });
+
+  test('without an ETA there is no line, but the map is there', async () => {
+    (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [driver] });
+    card();
+    await waitFor(() => expect(mockMapProps).not.toBeNull());
+    expect(screen.queryByTestId('live-eta')).toBeNull();
+  });
+
+  test('the link to OpenStreetMap is gone for a passenger, and stays for the driver', async () => {
+    (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [driver] });
+    card();
+    await screen.findByTestId('live-d');
+    expect(screen.queryByTestId('live-map-d')).toBeNull();
+    expect(screen.queryByText('Χάρτης')).toBeNull();
+  });
+
+  test('a driver still gets the link, and no map', async () => {
+    (api.live as jest.Mock).mockResolvedValue({
+      ...window,
+      positions: [{ user_id: 'p', name: 'Μαρία', lat: 40.85, lon: 25.87, updated_at: '2026-07-30T04:19:50Z' }],
+    });
+    render(wrap(<LiveCard tripId="occ-1" now={() => at} role="driver" routePolyline={route} />));
+    expect(await screen.findByTestId('live-map-p')).toBeTruthy();
+    expect(mockMapProps).toBeNull();
+  });
+
+  test('a fix older than two minutes is drawn grey', async () => {
+    (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [{ ...driver, updated_at: '2026-07-30T04:17:00Z' }] });
+    card();
+    await waitFor(() => expect(mockMapProps).not.toBeNull());
+    expect(mockMapProps!.markers!.find((m) => m.kind === 'driver')!.stale).toBe(true);
+  });
+
+  test('a fresh fix is not grey', async () => {
+    (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [driver] });
+    card();
+    await waitFor(() => expect(mockMapProps).not.toBeNull());
+    expect(mockMapProps!.markers!.find((m) => m.kind === 'driver')!.stale).toBe(false);
+  });
+
+  test('between reports the car moves along the road', async () => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
+    try {
+      let clock = at;
+      const first = { ...driver, lon: 25.8, updated_at: '2026-07-30T04:19:00Z' };
+      const second = { ...driver, lon: 25.81, updated_at: '2026-07-30T04:19:30Z' };
+      (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [first] });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const tree = (n: number) => (
+        <QueryClientProvider client={client}>
+          <LiveCard tripId="occ-1" now={() => n} role="passenger" routePolyline={route} pickup={pickup} />
+        </QueryClientProvider>
+      );
+      const view = render(tree(clock));
+      await waitFor(() => expect(mockMapProps).not.toBeNull());
+      (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [second] });
+      await act(async () => {
+        await client.invalidateQueries({ queryKey: ['trips', 'occ-1', 'live'] });
+      });
+      clock = Date.parse('2026-07-30T04:19:40Z');
+      view.rerender(tree(clock));
+      await act(async () => {
+        jest.advanceTimersByTime(1000);
+      });
+      const car = mockMapProps!.markers!.find((m) => m.kind === 'driver')!;
+      expect(car.lon).toBeGreaterThan(25.81);
+      expect(car.stale).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('my own position replaces the pickup point while I share', async () => {
+    (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [driver] });
+    card();
+    fireEvent.press(await screen.findByTestId('live-start'));
+    await waitFor(() => expect(mockOnPosition).not.toBeNull());
+    act(() => mockOnPosition!({ coords: { latitude: 40.851, longitude: 25.851 } }));
+    await waitFor(() =>
+      expect(mockMapProps!.markers!.find((m) => m.kind === 'me')).toMatchObject({ lon: 25.851, lat: 40.851 }),
+    );
+  });
+});
+
+function polylineOf(points: [number, number][]) {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return (require('@mapbox/polyline') as { encode: (p: [number, number][], precision?: number) => string }).encode(points, 6);
+}

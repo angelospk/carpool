@@ -74,8 +74,10 @@ type Position struct {
 
 // Service stores and reads live positions.
 type Service struct {
-	pool  *pgxpool.Pool
-	clock clock.Clock
+	pool   *pgxpool.Pool
+	clock  clock.Clock
+	router Router
+	eta    etaCache
 }
 
 // NewService returns a service reading time from c.

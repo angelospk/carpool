@@ -34,6 +34,9 @@ export class Marker {
   setLngLat() {
     return this;
   }
+  getElement() {
+    return null;
+  }
   addTo() {
     return this;
   }

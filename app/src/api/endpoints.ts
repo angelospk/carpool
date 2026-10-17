@@ -805,7 +805,14 @@ export const api = {
 
   /** When sharing is open for this trip, and where the others you may see are. */
   live: (id: string) =>
-    request<{ opens: string; closes: string; positions: LivePosition[] }>(`/v1/trips/${id}/live`),
+    request<{
+      opens: string;
+      closes: string;
+      positions: LivePosition[];
+      /** A passenger's only: minutes from the driver's latest fix to their pickup. */
+      driver_eta_min?: number;
+      eta_at?: string;
+    }>(`/v1/trips/${id}/live`),
   /** accuracy_m and observed_at are what let a moving drive take people:
       a fix without them still shows a dot, but times no pickup. */
   putPosition: (

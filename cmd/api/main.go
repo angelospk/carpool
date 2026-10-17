@@ -212,7 +212,7 @@ func run() error {
 		Bookings:      bookings.NewService(pool, clk),
 		Invites:       invites.NewService(pool, clk, cfg.InviteOnly),
 		Groups:        groups.NewService(pool, clk),
-		Live:          live.NewService(pool, clk),
+		Live:          live.NewService(pool, clk).WithRouter(router),
 		Drives:        driveSvc,
 		DevMode:       cfg.DevMode,
 		DevOTPLogOnly: cfg.DevOTPLogOnly,

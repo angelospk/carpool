@@ -1,9 +1,14 @@
 package api_test
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
+
+	"carpool/internal/api"
+	"carpool/internal/geo"
+	"carpool/internal/live"
 )
 
 // Over HTTP: nothing is taken before the trip is near, then the driver's
@@ -55,5 +60,36 @@ func TestLiveLocationOverTheAPI(t *testing.T) {
 	}
 	if rec := h.do(http.MethodGet, base+"/live", nil, ""); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("no token: %d", rec.Code)
+	}
+}
+
+type eightMinutes struct{}
+
+func (eightMinutes) Route(context.Context, []geo.Point) (geo.Route, error) {
+	return geo.Route{Duration: 8 * time.Minute}, nil
+}
+
+// The passenger is told how far the driver is; the driver is not.
+func TestLiveAnswersTheDriversETAToThePassengerOnly(t *testing.T) {
+	h := newHarnessDeps(t, false, nil, func(d *api.Deps) {
+		d.Live = live.NewService(d.Pool, d.Clock).WithRouter(eightMinutes{})
+	})
+	driver, _, occurrenceID := h.bookedTrip(t)
+	base := "/v1/trips/" + occurrenceID.String()
+	h.clock.Set(time.Date(2026, time.July, 30, 4, 15, 0, 0, time.UTC))
+	driver, _ = h.signUp("+306900000031", "Οδηγός")
+	passenger, _ := h.signUp("+306900000032", "Επιβάτης")
+	if rec := h.do(http.MethodPut, base+"/position", map[string]any{"lat": 40.85, "lon": 25.85}, driver); rec.Code != http.StatusNoContent {
+		t.Fatalf("PUT: %d %s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	h.decode(h.do(http.MethodGet, base+"/live", nil, passenger), &got)
+	if got["driver_eta_min"] != float64(8) || got["eta_at"] == nil {
+		t.Fatalf("passenger body = %v, want driver_eta_min 8 and eta_at", got)
+	}
+	got = nil
+	h.decode(h.do(http.MethodGet, base+"/live", nil, driver), &got)
+	if _, has := got["driver_eta_min"]; has {
+		t.Fatalf("driver body has an ETA: %v", got)
 	}
 }

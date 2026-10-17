@@ -59,7 +59,17 @@ func (d Deps) handleLive(w http.ResponseWriter, r *http.Request) {
 			"user_id": p.UserID, "name": p.Name, "lat": p.Lat, "lon": p.Lon, "updated_at": p.UpdatedAt,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"opens": opens, "closes": closes, "positions": out})
+	body := map[string]any{"opens": opens, "closes": closes, "positions": out}
+	eta, err := d.Live.DriverETA(r.Context(), tripID, userID)
+	if err != nil {
+		d.liveError(w, err)
+		return
+	}
+	if eta != nil {
+		body["driver_eta_min"] = eta.Minutes
+		body["eta_at"] = eta.At
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (d Deps) handlePutPosition(w http.ResponseWriter, r *http.Request) {

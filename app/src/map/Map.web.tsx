@@ -17,12 +17,14 @@ import polyline from '@mapbox/polyline';
 
 import { haveTiles, rasterStyle } from './tiles';
 import { MapFallback } from './Fallback';
-import type { MapPin } from './Map';
+import type { MapMarker, MapPin } from './Map';
+import { markerColour } from './markerColour';
 import { border, colors, radius } from '../design/tokens';
 
 export function Map({
   centre,
   pins = [],
+  markers = [],
   polyline: encoded,
   lines = [],
   zoom = 13,
@@ -31,6 +33,7 @@ export function Map({
 }: {
   centre: MapPin;
   pins?: MapPin[];
+  markers?: MapMarker[];
   polyline?: string;
   lines?: string[];
   zoom?: number;
@@ -39,7 +42,8 @@ export function Map({
 }) {
   const host = useRef<HTMLDivElement | null>(null);
   const map = useRef<GLMap | null>(null);
-  const markers = useRef<Marker[]>([]);
+  const pinMarkers = useRef<Marker[]>([]);
+  const kindMarkers = useRef<Marker[]>([]);
   // Held in a ref so that changing the handler does not tear the map down.
   const pick = useRef(onPick);
   pick.current = onPick;
@@ -75,9 +79,34 @@ export function Map({
     const m = map.current;
     if (!m) return;
 
-    markers.current.forEach((marker) => marker.remove());
-    markers.current = pins.map((p) => new Marker({ color: colors.ink }).setLngLat([p.lon, p.lat]).addTo(m));
+    pinMarkers.current.forEach((marker) => marker.remove());
+    pinMarkers.current = pins.map((p) => new Marker({ color: colors.ink }).setLngLat([p.lon, p.lat]).addTo(m));
   }, [pins]);
+
+  // The labelled markers move every second for a car on the road, so they are
+  // moved rather than rebuilt: a marker removed and added again flickers.
+  const kinds = markers.map((k) => k.kind).join(',');
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    kindMarkers.current.forEach((marker) => marker.remove());
+    kindMarkers.current = markers.map((k) => {
+      const el = document.createElement('div');
+      el.setAttribute('data-marker', k.kind);
+      el.style.cssText = 'width:18px;height:18px;border-radius:9px;border:2px solid #fff';
+      return new Marker({ element: el }).setLngLat([k.lon, k.lat]).addTo(m);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kinds]);
+  useEffect(() => {
+    markers.forEach((k, i) => {
+      const marker = kindMarkers.current[i];
+      if (!marker) return;
+      marker.setLngLat([k.lon, k.lat]);
+      const el = marker.getElement();
+      if (el) el.style.background = markerColour(k);
+    });
+  }, [markers, kinds]);
 
   // One key for every line, so the effect below runs when any of them change
   // rather than whenever the array is rebuilt. Joined on a newline: an encoded

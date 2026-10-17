@@ -570,6 +570,9 @@ export default function TripScreen() {
                 {phase !== 'cancelled' ? (
                   <LiveCard
                     tripId={id}
+                    role={trip.data.role}
+                    routePolyline={trip.data.route_polyline}
+                    pickup={trip.data.stops?.find((s) => s.mine && s.kind === 'pickup')?.point ?? null}
                     // Only a phone runs the drive's background task; a
                     // browser shares nothing on its own, so it keeps the
                     // ordinary button rather than claiming otherwise.

@@ -32,12 +32,14 @@ import polyline from '@mapbox/polyline';
 
 import { attribution, haveTiles, rasterStyle } from './tiles';
 import { MapFallback } from './Fallback';
-import type { MapPin } from './Map';
+import type { MapMarker, MapPin } from './Map';
+import { markerColour } from './markerColour';
 import { border, colors, radius } from '../design/tokens';
 
 export function Map({
   centre,
   pins = [],
+  markers = [],
   polyline: encoded,
   lines = [],
   zoom = 13,
@@ -46,6 +48,7 @@ export function Map({
 }: {
   centre: MapPin;
   pins?: MapPin[];
+  markers?: MapMarker[];
   polyline?: string;
   lines?: string[];
   zoom?: number;
@@ -85,6 +88,12 @@ export function Map({
         {pins.map((p, i) => (
           <Marker key={`${p.lon},${p.lat},${i}`} lngLat={[p.lon, p.lat]}>
             <View style={styles.pin} />
+          </Marker>
+        ))}
+
+        {markers.map((k) => (
+          <Marker key={k.kind} lngLat={[k.lon, k.lat]}>
+            <View testID={`marker-${k.kind}`} style={[styles.pin, { backgroundColor: markerColour(k) }]} />
           </Marker>
         ))}
 
