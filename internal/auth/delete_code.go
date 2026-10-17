@@ -87,9 +87,13 @@ func (s *DeleteCodeService) Request(ctx context.Context, userID uuid.UUID) (stri
 		return "", fmt.Errorf("auth: locking: %w", err)
 	}
 
+	// The account row before any code row, the order Spend and a phone change
+	// take them in. Read without the lock, the insert's foreign key would still
+	// wait on the account after the superseded codes were locked, and a Spend
+	// holding the account and waiting on those codes would deadlock with it.
 	var phone string
 	err = tx.QueryRow(ctx,
-		`SELECT phone FROM users WHERE id = $1 AND status = 'active'`, userID).Scan(&phone)
+		`SELECT phone FROM users WHERE id = $1 AND status = 'active' FOR UPDATE`, userID).Scan(&phone)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrDeleteCodeFailed
 	}

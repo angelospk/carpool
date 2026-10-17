@@ -299,3 +299,40 @@ func TestAResendReplacesTheEarlierDeleteCode(t *testing.T) {
 		t.Fatalf("current code: %d %s, want 204", rec.Code, rec.Body.String())
 	}
 }
+
+// Codex review, wave 3: a resend and a redemption at the same moment take the
+// account and the code rows in one order, so neither deadlocks the other.
+func TestAResendDuringARedemptionDoesNotDeadlock(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000811", "Γιώργος")
+	var userID uuid.UUID
+	h.mustQuery(`SELECT id FROM users WHERE phone = '+306900000811'`, &userID)
+	requestDeleteCode(h, token)
+
+	svc := auth.NewDeleteCodeService(h.pool, h.clock, h.sms, []byte(testSecret))
+	ctx := context.Background()
+	for round := 0; round < 4; round++ {
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		var resendErr, spendErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, resendErr = svc.Request(ctx, userID)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			spendErr = svc.Spend(ctx, userID, "000000")
+		}()
+		close(start)
+		wg.Wait()
+		if resendErr != nil {
+			t.Fatalf("round %d: resend: %v", round, resendErr)
+		}
+		if spendErr != nil && !errors.Is(spendErr, auth.ErrDeleteCodeFailed) {
+			t.Fatalf("round %d: spend: %v", round, spendErr)
+		}
+	}
+}
