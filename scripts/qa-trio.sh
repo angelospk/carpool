@@ -265,10 +265,11 @@ s1_first_passenger() {
   [ "$mine" != null ] || fail "D's pending asks do not list the ask: $(body)"
   ok "D sees it: $mine"
   # Nobody else can answer for D.
-  eq "a stranger accepts D's offer" "$(call POST "/asks/$R_ASK/accept" X)" 403
-  eq "another driver accepts it" "$(call POST "/asks/$R_ASK/accept" D2)" 403
-  eq "the passenger accepts their own offer" "$(call POST "/asks/$R_ASK/accept" P1)" 403
-  eq "a stranger declines it" "$(call POST "/asks/$R_ASK/decline" X)" 403
+  # 404, not 403: somebody else's ask answers like a missing one (QA 2026-10-17 A7).
+  eq "a stranger accepts D's offer" "$(call POST "/asks/$R_ASK/accept" X)" 404
+  eq "another driver accepts it" "$(call POST "/asks/$R_ASK/accept" D2)" 404
+  eq "the passenger accepts their own offer" "$(call POST "/asks/$R_ASK/accept" P1)" 404
+  eq "a stranger declines it" "$(call POST "/asks/$R_ASK/decline" X)" 404
   eq "a stranger opens the ask" "$(call GET "/asks/$R_ASK" X)" 404
   eq "the offer is still pending" "$(q "SELECT status FROM asks WHERE id = '$R_ASK'")" pending
 

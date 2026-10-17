@@ -495,10 +495,14 @@ dbeq "B's last position is erased when the seat is cancelled" \
   "SELECT count(*) FROM trip_live_positions WHERE occurrence_id='$OCC' AND user_id='$BU'" 0
 
 section "4b. standing arrangements (repeat a booking) and again"
-req POST "/bookings/$BA/repeat" "$B";  want "B repeats A's booking" '403|404'
-req POST "/bookings/$BA/repeat" "$S";  want "S repeats A's booking" '403|404'
-req POST "/bookings/$BA/again" "$S";   want "S asks again on A's booking" '403|404'
-req POST "/bookings/$BA/again" "$B";   want "B asks again on A's booking" '403|404'
+# Somebody else's booking answers exactly like one that does not exist (A7).
+NOBOOK=00000000-0000-4000-8000-000000000000
+req POST "/bookings/$NOBOOK/repeat" "$B"; RMISS=$CODE
+req POST "/bookings/$NOBOOK/again" "$B";  AMISS=$CODE
+req POST "/bookings/$BA/repeat" "$B";  want "B repeats A's booking" "403|404|$RMISS"
+req POST "/bookings/$BA/repeat" "$S";  want "S repeats A's booking" "403|404|$RMISS"
+req POST "/bookings/$BA/again" "$S";   want "S asks again on A's booking" "403|404|$AMISS"
+req POST "/bookings/$BA/again" "$B";   want "B asks again on A's booking" "403|404|$AMISS"
 req POST "/bookings/$BA/repeat" "$A";  want "A repeats her booking" 200
 AR=$(printf '%s' "$RES" | j .arrangement_id)
 if [ -n "$AR" ] && [ "$AR" != null ]; then
@@ -575,8 +579,10 @@ req PATCH /me "$A" '{"id":"'$BU'"}';               want "PATCH /me id" 400
 req POST "/trips/$OCC/messages" "$A" '{"body":"<script>alert(1)</script> ‮ gnirts"}'
 want "chat with markup and an RTL override" 201
 MID=$(printf '%s' "$RES" | j .id)
-[ "$(printf '%s' "$RES" | j .body)" = $'<script>alert(1)</script> \u202e gnirts' ] && ok "the response echoes the markup and the override raw (JSON-escaped on the wire)" || bad "chat echo" "$(excerpt)"
-dbeq "stored raw, including U+202E" "SELECT body LIKE '%<script>%' AND body LIKE '%'||chr(8238)||'%' FROM trip_messages WHERE id='$MID'" t
+# Markup is kept (the clients render text, not HTML); the override is
+# stripped by NormaliseChat (A13), so a message cannot reverse what follows it.
+[ "$(printf '%s' "$RES" | j .body)" = '<script>alert(1)</script>  gnirts' ] && ok "the response keeps the markup and drops the override" || bad "chat echo" "$(excerpt)"
+dbeq "stored with the markup, without U+202E" "SELECT body LIKE '%<script>%' AND body NOT LIKE '%'||chr(8238)||'%' FROM trip_messages WHERE id='$MID'" t
 req POST "/trips/$OCC/messages" "$A" '{"body":"nul:\u0000:end"}'
 want "chat with a NUL character" 400
 lacks "the 400 does not quote the database/driver error" 'store:'
@@ -682,7 +688,8 @@ login "$SPHONE"; LT=$TOKEN; LR=$REFRESH
 req POST /auth/logout "" "{\"refresh_token\":\"$LR\"}"; want "logout" 204
 req POST /auth/refresh "" "{\"refresh_token\":\"$LR\"}"; want "refresh after logout" 401
 req GET /me "$LT"
-[ "$CODE" = 401 ] && ok "access token dies at logout" || bad "access token survives logout" "GET /me with the token of a logged-out session -> $CODE (valid until its 15 min expiry; stateless JWT)"
+# Accepted (A10, specs/RISKS.md): a 15 minute stateless token, the refresh revoked.
+[ "$CODE" = 401 ] && ok "access token dies at logout" || note "accepted: access token survives logout" "GET /me with the token of a logged-out session -> $CODE (valid until its 15 min expiry; stateless JWT)"
 # OTP brute force
 PHONE=$BPHONE; next_ip
 body=$(curl -s --interface "$IPADDR" -X POST "$API/auth/otp/request" -H 'Content-Type: application/json' -d "{\"phone\":\"$PHONE\"}")
@@ -720,8 +727,12 @@ req DELETE /me/photo "$A" >/dev/null
 # deleted account
 section "7b. account deletion"
 req GET /me "$Z"; want "Z is alive" 200
-req DELETE /me "$Z" ; note "DELETE /me with no confirmation body: [$CODE] $(excerpt 120)"
-if [ "$CODE" = 400 ] || [ "$CODE" = 422 ]; then req DELETE /me "$Z" '{"confirm":true}'; note "DELETE /me with a confirm body: [$CODE] $(excerpt 120)"; fi
+# Deleting needs a code sent by SMS (A14). DEV_MODE hands it back.
+req DELETE /me "$Z"; want "DELETE /me without a code" 400
+req DELETE /me "$Z" '{"code":"000000"}'; want "DELETE /me with a wrong code" '400|403'
+req POST /me/delete-code "$Z"; want "Z asks for a delete code" 200
+ZCODE=$(printf '%s' "$RES" | j .dev_code)
+req DELETE /me "$Z" "{\"code\":\"$ZCODE\"}"; want "DELETE /me with the code" 204
 req GET /me "$Z";                 want "deleted account's access token" '401|403'
 req GET /asks/pending "$Z";       want "deleted account lists asks" '401|403'
 req POST /requests "$Z" "$(rbody 22.95 40.65 23.54 41.08 "$SW1" "$SW2")"; want "deleted account posts a request" '401|403'
@@ -746,7 +757,9 @@ note "5 /supply: $n429 x 429 (limit is 30/min/user)"
 last=0; for i in $(seq 1 62); do req GET /shared-routes/zzz "" "" -H 'X-Real-IP: 10.99.99.9'; last=$CODE; done
 req GET /shared-routes/zzz "" "" -H 'X-Real-IP: 10.99.99.10'
 if [ "$last" = 429 ] && [ "$CODE" = 404 ]; then
-  bad "per-IP limits key on a client-supplied X-Real-IP" "62 x GET /shared-routes/zzz with X-Real-IP: 10.99.99.9 -> last $last; same TCP peer with X-Real-IP: 10.99.99.10 -> $CODE. Behind a proxy that overwrites the header this is fine; on a directly reachable port (dev-lan, a VPS without Caddy) it lets anyone dodge the OTP-per-IP SMS-pumping cap too"
+  # Accepted (A9): in production Caddy overwrites the header and the API
+  # listens on 127.0.0.1 only; see internal/api/ratelimit.go.
+  note "accepted on a dev listener: per-IP limits key on a client-supplied X-Real-IP (last=$last, other=$CODE)"
 else ok "per-IP limit does not honour a spoofed X-Real-IP (last=$last, other=$CODE)"; fi
 
 # ======================================= phase 2: after the trip has left ====
@@ -777,6 +790,9 @@ HUGE=$(head -c 40000 /dev/zero | tr '\0' 'x')
 req POST "/trips/$OCC/rate" "$A" "{\"stars\":4,\"tag\":\"$HUGE\"}"
 if [ "$CODE" = 201 ]; then bad "rating tag is unbounded and unvalidated" "POST /trips/$OCC/rate {stars:4, tag:<40000 x>} -> 201; ratings.tag is text with no length check ($(q "SELECT length(tag) FROM ratings WHERE rater_id='$AU'") chars stored)"
 else ok "oversized rating tag refused [$CODE]"; fi
+# The oversized tag used to be stored, which was A's first rating; refused
+# now, so A rates once before trying twice.
+[ "$CODE" = 201 ] || { req POST "/trips/$OCC/rate" "$A" '{"stars":5}'; want "A rates the driver" 201; }
 req POST "/trips/$OCC/rate" "$A" '{"stars":5}'; want "A rates the driver a second time" 409
 req POST "/trips/$OCC/rate" "$D" "{\"stars\":5,\"ratee_id\":\"$AU\",\"tag\":\"<b>ok</b>\"}"; want "D rates A" 201
 req POST "/trips/$OCC/rate" "$D" "{\"stars\":1,\"ratee_id\":\"$AU\"}"; want "D rates A twice" 409
