@@ -342,8 +342,14 @@ section "2. what B learns about A, and what a stranger learns"
 req GET "/trips/$OCC" "$B"
 want "B reads the trip" 200
 lacks "B's trip view carries no phone number (A)" "$APHONE"
-lacks "B's trip view carries no phone number (D)" "$DPHONE"
-lacks "B's trip view carries no phone field" '"phone"'
+# The trip leaves within store.CallWindow (2 h) and B's seat is confirmed, so
+# the driver's number is his by design (QA #16); a co-passenger's never is.
+if printf '%s' "$RES" | grep -qF "$DPHONE"; then
+  [ "$(printf '%s' "$RES" | jq -r '.driver.call_until // empty')" ] && ok "B gets D's phone only with a call_until (call window)" \
+    || bad "B gets D's phone with no call_until" "GET /trips/$OCC as B -> $(excerpt)"
+else note "B gets no phone of D (outside the call window or not confirmed)"; fi
+PH_OTHERS=$(printf '%s' "$RES" | jq -r --arg b "$BU" '[.passengers[]?|select(.id!=$b)|.phone // empty]|length')
+[ "$PH_OTHERS" = 0 ] && ok "B gets no co-passenger phone field" || bad "B gets a co-passenger phone" "GET /trips/$OCC as B -> $PH_OTHERS phone fields"
 lacks "B does not get A's pickup" '[22.95,40.65]'
 lacks "B does not get A's drop-off" '[23.54,41.08]'
 has   "B gets his own pickup" '[22.9501,40.6501]'
@@ -355,7 +361,11 @@ PRICE_A=$(printf '%s' "$RES" | jq -r --arg a "$AU" '.passengers[]|select(.id==$a
   || bad "co-passenger sees the price A pays" "GET /trips/$OCC as B -> passengers[A].price_eur=$PRICE_A (also seats, bio, rating)"
 req GET "/trips/$OCC" "$D"
 has   "D (control) sees A's pickup" '[22.95,40.65]'
-lacks "D's view of the trip carries no passenger phone" "$APHONE"
+# In the call window the driver gets the number of each confirmed passenger (QA #16).
+CU_A=$(printf '%s' "$RES" | jq -r --arg a "$AU" '.passengers[]|select(.id==$a)|.call_until // empty')
+if printf '%s' "$RES" | grep -qF "$APHONE"; then
+  [ "$CU_A" ] && ok "D gets A's phone only with a call_until (call window)" || bad "D gets A's phone with no call_until" "GET /trips/$OCC as D -> $(excerpt)"
+else note "D gets no phone of A (outside the call window or not confirmed)"; fi
 req GET "/trips/$OCC" "$S";                want "S reads the trip" '404'
 req GET "/trips/$OCC/messages" "$S";       want "S reads the chat" '404'
 req POST "/trips/$OCC/messages" "$S" '{"body":"hola"}'; want "S posts to the chat" '404'
