@@ -2,7 +2,9 @@ package match_test
 
 import (
 	"context"
+	"fmt"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,8 +63,13 @@ func withCreatedAt(at time.Time) func(*requestOpts) {
 	return func(o *requestOpts) { o.createdAt = at }
 }
 
+// seededPhones numbers the passengers addRequest makes up, in a range of
+// their own (+30698…) that no fixed phone in these tests uses.
+var seededPhones atomic.Int64
+
 // addRequest inserts somebody waiting for the corridor the fixture's routes run
 // along, travelling in the same direction as query().
+
 func (f *fixture) addRequest(t *testing.T, opts ...func(*requestOpts)) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
@@ -85,12 +92,13 @@ func (f *fixture) addRequest(t *testing.T, opts ...func(*requestOpts)) uuid.UUID
 
 	passenger := o.passenger
 	if passenger == nil {
+		// A counter, not a random number: thousands of random eight-digit
+		// phones collide often enough to fail a run now and then.
 		var id uuid.UUID
 		err := f.pool.QueryRow(ctx, `
 			INSERT INTO users (date_of_birth, phone, name, home_region_id)
-			VALUES (DATE '1990-01-01', '+3069' || lpad((floor(random()*100000000))::bigint::text, 8, '0'),
-			        'Passenger', $1)
-			RETURNING id`, f.regionID).Scan(&id)
+			VALUES (DATE '1990-01-01', $2, 'Passenger', $1)
+			RETURNING id`, f.regionID, fmt.Sprintf("+30698%07d", seededPhones.Add(1))).Scan(&id)
 		if err != nil {
 			t.Fatalf("seeding passenger: %v", err)
 		}
