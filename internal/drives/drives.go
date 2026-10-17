@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/clock"
+	"carpool/internal/live"
 	"carpool/internal/match"
 	"carpool/internal/notices"
 	"carpool/internal/outbox"
@@ -590,8 +591,9 @@ func (s *Service) Adjust(ctx context.Context, driverID, occurrenceID uuid.UUID, 
 	return nil
 }
 
-// Here is «Είμαι εδώ»: a passenger with a seat on a drive is at the pickup.
-// The driver is told once; saying it again changes nothing.
+// Here is «Είμαι εδώ»: a passenger with a seat is at the pickup, on a drive or
+// on a scheduled trip inside the window live sharing is open for. The driver is
+// told once; saying it again changes nothing.
 func (s *Service) Here(ctx context.Context, passengerID, occurrenceID uuid.UUID) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -600,25 +602,37 @@ func (s *Service) Here(ctx context.Context, passengerID, occurrenceID uuid.UUID)
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var bookingID, driverID uuid.UUID
-	var already bool
+	var already, driving bool
+	var earliest, latest time.Time
+	var routeMin int
 	err = tx.QueryRow(ctx, `
-		SELECT b.id, t.driver_id, b.arrived_at IS NOT NULL
+		SELECT b.id, t.driver_id, b.arrived_at IS NOT NULL, o.drive_set_at IS NOT NULL,
+		       o.depart_earliest, o.depart_latest, o.route_min
 		  FROM bookings b
 		  JOIN trip_occurrences o ON o.id = b.occurrence_id
 		  JOIN route_templates t ON t.id = o.template_id
 		 WHERE b.occurrence_id = $1 AND b.passenger_id = $2 AND b.status = 'confirmed'
-		   AND o.drive_set_at IS NOT NULL AND o.status = 'scheduled'
-		 FOR UPDATE OF b`, occurrenceID, passengerID).Scan(&bookingID, &driverID, &already)
+		   AND o.status = 'scheduled'
+		 FOR UPDATE OF b`, occurrenceID, passengerID).
+		Scan(&bookingID, &driverID, &already, &driving, &earliest, &latest, &routeMin)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotYours
 	}
 	if err != nil {
 		return fmt.Errorf("drives: finding the seat: %w", err)
 	}
+	now := s.clock.Now()
+	if !driving {
+		// A scheduled trip has no drive to say it is under way, so the same
+		// window the live positions use stands in for it.
+		opens, closes := live.WindowOf(earliest, latest, routeMin)
+		if now.Before(opens) || !now.Before(closes) {
+			return ErrNotYours
+		}
+	}
 	if already {
 		return tx.Commit(ctx)
 	}
-	now := s.clock.Now()
 	if _, err := tx.Exec(ctx, `UPDATE bookings SET arrived_at = $2 WHERE id = $1`, bookingID, now); err != nil {
 		return fmt.Errorf("drives: marking the passenger here: %w", err)
 	}

@@ -140,6 +140,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		"depart_latest":      trip.DepartLatest,
 		"status":             trip.Status,
 		"route_km":           trip.RouteKm,
+		"route_min":          trip.RouteMin,
 		"ends_at_port":       trip.EndsAtPort,
 		"price_eur":          trip.PriceEUR,
 		"seats_free":         trip.SeatsFree,

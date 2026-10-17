@@ -52,6 +52,7 @@ import { border, colors, radius, size, space, type } from '../../src/design/toke
 import { athensDay, athensTime, eur, km, seatPriceNote } from '../../src/design/format';
 import { approxArrival } from '../../src/design/ticket';
 import { Ticket } from '../../src/components/Ticket';
+import { liveWindow, liveWindowOpen } from '../../src/design/liveWindow';
 import { tripPollInterval } from '../../src/design/tripPolling';
 
 // How far from the end still counts as «at the bottom», in px: a bubble's
@@ -199,7 +200,13 @@ export default function TripScreen() {
   const [trackingWarning, setTrackingWarning] = useState<string | null>(null);
   const earliestAt = trip.data ? new Date(trip.data.depart_earliest).getTime() : null;
   const latestAt = trip.data ? new Date(trip.data.depart_latest).getTime() : null;
-  const nextEdge = [earliestAt, latestAt].find((at) => at !== null && at > now) ?? null;
+  // The sharing window's two ends are edges too: «Είμαι εδώ» appears at one
+  // and goes at the other.
+  const sharing = trip.data ? liveWindow(trip.data) : null;
+  const nextEdge =
+    [sharing?.opens ?? null, earliestAt, latestAt, sharing?.closes ?? null]
+      .filter((at): at is number => at !== null && at > now)
+      .sort((a, b) => a - b)[0] ?? null;
   useEffect(() => {
     if (nextEdge === null) return;
     const timer = setTimeout(() => setNow(Date.now()), nextEdge - now + 1000);
@@ -486,6 +493,9 @@ export default function TripScreen() {
                           </Text>
                           <SharedGroups names={p.shared_groups} />
                         </View>
+                        {trip.data.role === 'driver' && p.arrived_at ? (
+                          <Badge testID={`at-pickup-${p.id}`} label={t('drive.atPickup')} tone="accent" />
+                        ) : null}
                       </View>
                       </PersonLink>
                     ))}
@@ -524,7 +534,7 @@ export default function TripScreen() {
                   />
                 ) : null}
 
-                {herePossible(trip.data, me?.id) ? (
+                {herePossible(trip.data, me?.id, now) ? (
                   <View style={styles.here}>
                     {ownSeat(trip.data, me?.id)?.arrived_at || here.isSuccess ? (
                       <Text testID="here-done" style={styles.pickupAt}>
@@ -919,15 +929,12 @@ function ownSeat(trip: TripDetail, me: string | undefined) {
 }
 
 /**
- * «Είμαι εδώ» belongs to a passenger with a seat on a drive that is still
- * going: the driver has said when they leave and has not said «Τέλος».
+ * «Είμαι εδώ» belongs to a passenger with a seat on a trip that is still going:
+ * a drive the driver has not ended with «Τέλος», or a scheduled trip inside the
+ * window live sharing is open for.
  */
-function herePossible(trip: TripDetail, me: string | undefined): boolean {
-  return (
-    trip.role === 'passenger' &&
-    trip.status === 'scheduled' &&
-    !!trip.drive_set_at &&
-    !trip.drive_ended_at &&
-    !!ownSeat(trip, me)
-  );
+function herePossible(trip: TripDetail, me: string | undefined, now: number): boolean {
+  if (trip.role !== 'passenger' || trip.status !== 'scheduled' || !ownSeat(trip, me)) return false;
+  if (trip.drive_set_at) return !trip.drive_ended_at;
+  return liveWindowOpen(trip, now);
 }

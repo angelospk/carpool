@@ -171,6 +171,9 @@ type TripDetail struct {
 	// BookingID is the caller's own booking, and the thing a repeat is founded
 	// on. It is empty for the driver, who has no booking of their own.
 	BookingID *uuid.UUID
+	// RouteMin is how long the road takes, which with the departure window is
+	// when live sharing and «Είμαι εδώ» are open.
+	RouteMin int
 	// EndsAtPort marks a trip the router cut short at a ferry terminal, so the
 	// app can explain why it stops somewhere nobody typed.
 	EndsAtPort bool
@@ -238,7 +241,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 	var destination []float64
 
 	err = pool.QueryRow(ctx, `
-		SELECT o.depart_earliest, o.depart_latest, o.status, o.route_km, o.seats_free, o.ends_at_port, o.seats_total,
+		SELECT o.depart_earliest, o.depart_latest, o.status, o.route_km, o.route_min, o.seats_free, o.ends_at_port, o.seats_total,
 		       t.origin_label, t.destination_label,
 		       o.template_id, EXTRACT(ISODOW FROM o.service_date)::int,
 		       (SELECT b.id FROM bookings b
@@ -288,7 +291,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		JOIN users u            ON u.id = t.driver_id
 		`+match.DriveCar("o", "$3")+`
 		WHERE o.id = $1`, occurrenceID, userID, now).Scan(
-		&d.DepartEarliest, &d.DepartLatest, &d.Status, &d.RouteKm, &d.SeatsFree, &d.EndsAtPort, &d.SeatsTotal,
+		&d.DepartEarliest, &d.DepartLatest, &d.Status, &d.RouteKm, &d.RouteMin, &d.SeatsFree, &d.EndsAtPort, &d.SeatsTotal,
 		&d.OriginLabel, &d.DestLabel, &d.TemplateID, &d.Weekday, &d.BookingID, &d.RoutePolyline,
 		&d.Driver.UserID, &d.Driver.Name, &d.Driver.PhotoVersion, &d.Driver.FacebookHandle, &d.Driver.InstagramHandle, &d.Driver.Rating,
 		&d.Driver.CarModel, &d.Driver.CarColor, &d.Driver.CarPlate,

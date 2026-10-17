@@ -121,14 +121,21 @@ func (s *Service) load(ctx context.Context, occurrenceID, userID uuid.UUID) (tri
 	if !t.isDriver && !hasSeat {
 		return trip{}, ErrNotOnTrip
 	}
+	t.opens, t.closes = WindowOf(earliest, latest, routeMin)
+	t.cancelled = status == "cancelled"
+	return t, nil
+}
+
+// WindowOf is when sharing is open for a departure window and a route of
+// routeMin minutes: from Before the earliest departure to After the latest
+// one could arrive. Other features that ride on "the trip is happening" use
+// it, so there is one answer.
+func WindowOf(earliest, latest time.Time, routeMin int) (opens, closes time.Time) {
 	length := time.Duration(routeMin) * time.Minute
 	if length < 0 || length > maxRouteTime {
 		length = maxRouteTime
 	}
-	t.opens = earliest.Add(-Before)
-	t.closes = latest.Add(length + After)
-	t.cancelled = status == "cancelled"
-	return t, nil
+	return earliest.Add(-Before), latest.Add(length + After)
 }
 
 func (t trip) open(now time.Time) bool {

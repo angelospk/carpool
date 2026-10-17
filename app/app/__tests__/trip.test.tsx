@@ -519,6 +519,60 @@ test('there is no «Είμαι εδώ» without a drive', async () => {
   expect(screen.queryByTestId('here')).toBeNull();
 });
 
+// A scheduled trip has no drive, but «Είμαι εδώ» is there inside the window
+// live sharing is open for: 30 minutes before the earliest departure to an
+// hour after the latest one could arrive.
+describe('«Είμαι εδώ» on a scheduled trip', () => {
+  const MIN = 60_000;
+  const within = (earliestInMin: number, route_min = 30) =>
+    tripOf({
+      depart_earliest: new Date(Date.now() + earliestInMin * MIN).toISOString(),
+      depart_latest: new Date(Date.now() + (earliestInMin + 15) * MIN).toISOString(),
+      route_min,
+      passengers: [person('me', 'Εγώ', { arrived_at: null })],
+    });
+
+  it('is there inside the window, and tells the driver once pressed', async () => {
+    (api.here as jest.Mock).mockResolvedValue(undefined);
+    (api.trip as jest.Mock).mockResolvedValue(within(20));
+    render(<TripScreen />);
+    fireEvent.press(await screen.findByTestId('here'));
+    await waitFor(() => expect(api.here).toHaveBeenCalledWith('occ-1'));
+    expect(await screen.findByTestId('here-done')).toBeTruthy();
+  });
+
+  it('is there from 30 minutes before', async () => {
+    (api.trip as jest.Mock).mockResolvedValue(within(29));
+    render(<TripScreen />);
+    expect(await screen.findByTestId('here')).toBeTruthy();
+  });
+
+  it('is not there earlier than that', async () => {
+    (api.trip as jest.Mock).mockResolvedValue(within(40));
+    render(<TripScreen />);
+    await screen.findByTestId('route-glyph');
+    expect(screen.queryByTestId('here')).toBeNull();
+  });
+
+  it('is not there once the window has closed', async () => {
+    (api.trip as jest.Mock).mockResolvedValue(within(-300));
+    render(<TripScreen />);
+    await screen.findByTestId('route-glyph');
+    expect(screen.queryByTestId('here')).toBeNull();
+  });
+
+  it('is not the driver\'s, who sees who is at the pickup instead', async () => {
+    (api.trip as jest.Mock).mockResolvedValue({
+      ...within(20),
+      role: 'driver',
+      passengers: [person('p1', 'Μαρία', { arrived_at: new Date().toISOString() })],
+    });
+    render(<TripScreen />);
+    expect(await screen.findByTestId('at-pickup-p1')).toBeTruthy();
+    expect(screen.queryByTestId('here')).toBeNull();
+  });
+});
+
 // On the road the trip is under way, not over: nobody is asked «Έγινε;»
 // a minute after setting off, only after «Τέλος».
 test('a driver on the road is not asked whether the trip happened', async () => {

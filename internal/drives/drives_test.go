@@ -707,6 +707,42 @@ func TestAPassengerSaysTheyAreAtThePickup(t *testing.T) {
 	}
 }
 
+// A scheduled trip has no drive, and «Είμαι εδώ» still works there inside the
+// window live sharing is open for: 30 minutes before the earliest departure to
+// an hour after the latest could arrive. Outside it the answer is the one a
+// stranger gets.
+func TestAPassengerOnAScheduledTripSaysTheyAreHereInsideTheSharingWindow(t *testing.T) {
+	w := newWorld(t, at("06:00"))
+	passenger, booking := w.book(t, "+306900000045")
+
+	for _, early := range []string{"06:00", "06:29"} {
+		w.clock.Set(at(early))
+		if err := w.svc.Here(context.Background(), passenger, w.occ); !errors.Is(err, drives.ErrNotYours) {
+			t.Errorf("here at %s: %v, want ErrNotYours", early, err)
+		}
+	}
+	if got := w.notices(t, notices.PassengerHere); len(got) != 0 {
+		t.Fatalf("the driver was told before the window: %+v", got)
+	}
+
+	w.clock.Set(at("06:30"))
+	for i := 0; i < 2; i++ {
+		if err := w.svc.Here(context.Background(), passenger, w.occ); err != nil {
+			t.Fatalf("Here #%d: %v", i+1, err)
+		}
+	}
+	got := w.notices(t, notices.PassengerHere)
+	if len(got) != 1 || got[0].RecipientID != w.driverID || *got[0].BookingID != booking {
+		t.Fatalf("the driver was told %+v", got)
+	}
+
+	w.clock.Set(at("08:50"))
+	late, _ := w.book(t, "+306900000046")
+	if err := w.svc.Here(context.Background(), late, w.occ); !errors.Is(err, drives.ErrNotYours) {
+		t.Errorf("here after the window: %v, want ErrNotYours", err)
+	}
+}
+
 // The driver sees every pickup and where the road ends, to hand to their maps
 // app; a passenger sees their own pickup and nobody else's.
 func TestOnlyTheDriverSeesEveryPickup(t *testing.T) {
