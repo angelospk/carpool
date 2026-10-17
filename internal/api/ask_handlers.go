@@ -21,6 +21,16 @@ func askErrorStatus(err error) (int, string, string) {
 	// here would tell a caller holding an id which of the two it is.
 	case errors.Is(err, asks.ErrNotYours), errors.Is(err, asks.ErrAskNotFound):
 		return http.StatusNotFound, "not_found", "no such request"
+	// A weekend request that is not there, or not open, is as absent to the
+	// driver offering to it as any other id.
+	case errors.Is(err, asks.ErrRequestNotFound):
+		return http.StatusNotFound, "not_found", "no such request"
+	case errors.Is(err, asks.ErrTooLate):
+		return http.StatusConflict, "too_late", "the trip leaves too soon to make an offer"
+	case errors.Is(err, asks.ErrCannotCarry):
+		return http.StatusConflict, "cannot_carry", "this trip cannot take that request"
+	case errors.Is(err, asks.ErrAlreadyOffered):
+		return http.StatusConflict, "already_offered", "this trip was already offered to that request"
 	case errors.Is(err, asks.ErrAskExpired):
 		return http.StatusConflict, "ask_expired", "this request has expired"
 	case errors.Is(err, asks.ErrAskNotPending):

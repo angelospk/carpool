@@ -15,6 +15,7 @@ import (
 	"carpool/internal/domain"
 	"carpool/internal/geo"
 	"carpool/internal/match"
+	"carpool/internal/notices"
 	"carpool/internal/outbox"
 	"carpool/internal/store"
 	"carpool/internal/tolls"
@@ -92,7 +93,7 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 			return uuid.Nil, err
 		}
 
-		askID, err := s.createAsk(ctx, req, c, insertion, price, basis)
+		askID, err := s.createAsk(ctx, req, c, insertion, price, basis, byMatcher)
 		if errors.Is(err, errAskExists) || errors.Is(err, errNoRoomToAsk) {
 			// Raced with another worker, or the seats were spoken for between
 			// the filter and the lock. Either way, try the next occurrence.
@@ -496,10 +497,12 @@ const minDriveAnswer = 2 * time.Minute
 // already promised to somebody, so the next candidate should be tried instead.
 var errNoRoomToAsk = errors.New("asks: no unspoken-for seat on this occurrence")
 
-// createAsk writes the ask and queues the driver's push, in one transaction.
+// createAsk writes the ask and queues the push, in one transaction: to the
+// driver when the matcher is asking them, to the passenger when a driver is
+// offering a seat.
 func (s *Service) createAsk(
 	ctx context.Context, req request, c match.Candidate,
-	insertion match.Insertion, priceCents int, basis domain.Basis,
+	insertion match.Insertion, priceCents int, basis domain.Basis, by askedBy,
 ) (uuid.UUID, error) {
 	// Marshalled here rather than in the SQL so that a basis that cannot be
 	// encoded fails loudly instead of storing a null next to a real price.
@@ -560,6 +563,9 @@ func (s *Service) createAsk(
 		return uuid.Nil, fmt.Errorf("asks: locking occurrence: %w", err)
 	}
 
+	// What the passenger is told the day is, whatever a drive does to departs.
+	scheduled := departs
+
 	// The clock is read here, after the row is held, and everything below uses
 	// this one instant. The filter that chose this candidate checked that the
 	// departure had not gone, but it checked seconds ago and without the lock,
@@ -613,13 +619,27 @@ func (s *Service) createAsk(
 	if departs.Before(expiresAt) {
 		expiresAt = departs
 	}
+	// A driver's offer is read by a passenger who is not looking at the phone:
+	// it lives a day, or until two hours before the car leaves.
+	if by == byDriver {
+		expiresAt = departs.Add(-OfferLeadTime)
+		if latest := now.Add(OfferTTL); latest.Before(expiresAt) {
+			expiresAt = latest
+		}
+	}
 
+	if !open || !ready || (pinned && deadline == nil) {
+		return uuid.Nil, errNoRoomToAsk
+	}
+	if by == byDriver && expiresAt.Before(now.Add(MinOfferLife)) {
+		return uuid.Nil, ErrTooLate
+	}
 	// An offer that would lapse before the driver can unlock the phone and
 	// answer it is not sent: it would only take the passenger's request out of
 	// play for a question nobody could answer. Judged on the expiry exactly as
 	// it will be written, so a one-off leaving in a minute is refused too, not
 	// only a pinned drive.
-	if !open || !ready || (pinned && deadline == nil) || expiresAt.Before(now.Add(minDriveAnswer)) {
+	if expiresAt.Before(now.Add(minDriveAnswer)) {
 		return uuid.Nil, errNoRoomToAsk
 	}
 
@@ -691,15 +711,15 @@ func (s *Service) createAsk(
 	err = tx.QueryRow(ctx, `
 		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km,
 		                  pickup_point, dropoff_point, suggested_price_eur, pricing_basis,
-		                  itinerary_version, expires_at)
+		                  itinerary_version, expires_at, offered_by)
 		VALUES ($1, $2, $3, $4,
 		        ST_SetSRID(ST_MakePoint($5, $6), 4326),
 		        ST_SetSRID(ST_MakePoint($7, $8), 4326),
-		        $9, $10, $11, $12)
+		        $9, $10, $11, $12, $13)
 		RETURNING id`,
 		req.ID, c.OccurrenceID, insertion.DetourMin, insertion.DetourKm,
 		pickup.Lon, pickup.Lat, dropoff.Lon, dropoff.Lat,
-		float64(priceCents)/100, encoded, c.ItineraryVersion, expiresAt).Scan(&askID)
+		float64(priceCents)/100, encoded, c.ItineraryVersion, expiresAt, string(by)).Scan(&askID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return uuid.Nil, errAskExists
@@ -712,23 +732,37 @@ func (s *Service) createAsk(
 		return uuid.Nil, fmt.Errorf("asks: marking request asking: %w", err)
 	}
 
-	payload, err := json.Marshal(map[string]any{
-		"ask_id":        askID,
-		"occurrence_id": c.OccurrenceID,
-		"driver_id":     c.DriverID,
-		"detour_min":    insertion.DetourMin,
-		// A drive's offer is answered with one tap on the notification.
-		"drive": pinned,
-	})
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("asks: encoding ask notification: %w", err)
-	}
-	if err := outbox.Enqueue(ctx, tx, outbox.Message{
-		Kind:           "push",
-		IdempotencyKey: "ask:" + askID.String(),
-		Payload:        payload,
-	}, s.clock.Now()); err != nil {
-		return uuid.Nil, err
+	if by == byDriver {
+		var driver string
+		if err := tx.QueryRow(ctx, `SELECT name FROM users WHERE id = $1`, c.DriverID).Scan(&driver); err != nil {
+			return uuid.Nil, fmt.Errorf("asks: reading the driver's name: %w", err)
+		}
+		msg, err := notices.Offer(req.PassengerID, askID, driver, dayPhrase(scheduled))
+		if err != nil {
+			return uuid.Nil, err
+		}
+		if err := outbox.Enqueue(ctx, tx, msg, s.clock.Now()); err != nil {
+			return uuid.Nil, err
+		}
+	} else {
+		payload, err := json.Marshal(map[string]any{
+			"ask_id":        askID,
+			"occurrence_id": c.OccurrenceID,
+			"driver_id":     c.DriverID,
+			"detour_min":    insertion.DetourMin,
+			// A drive's offer is answered with one tap on the notification.
+			"drive": pinned,
+		})
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("asks: encoding ask notification: %w", err)
+		}
+		if err := outbox.Enqueue(ctx, tx, outbox.Message{
+			Kind:           "push",
+			IdempotencyKey: "ask:" + askID.String(),
+			Payload:        payload,
+		}, s.clock.Now()); err != nil {
+			return uuid.Nil, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {

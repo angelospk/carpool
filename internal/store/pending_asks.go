@@ -82,7 +82,9 @@ func queryAsks(ctx context.Context, pool *pgxpool.Pool, where string, args ...an
 		-- An ask that accepting would refuse is not one to show: a passenger
 		-- no longer active, or a block made since in either direction, which
 		-- accepting checks and the ask row does not remember.
-		WHERE u.status = 'active'
+		-- Only what the matcher asked. A seat the driver offered themselves is the
+		-- passenger's to answer, and is not a question for the driver.
+		WHERE u.status = 'active' AND a.offered_by = 'matcher'
 		  AND NOT EXISTS (SELECT 1 FROM blocks b
 		                  WHERE (b.blocker_id = t.driver_id AND b.blocked_id = r.passenger_id)
 		                     OR (b.blocker_id = r.passenger_id AND b.blocked_id = t.driver_id))

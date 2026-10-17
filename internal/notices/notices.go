@@ -68,6 +68,9 @@ const (
 	// WeekendAsk reaches a passenger with a weekend plan, on the Thursday
 	// evening: are you going this weekend?
 	WeekendAsk Event = "weekend_ask"
+	// DriverOffer reaches a passenger who is waiting on a weekend plan: a
+	// driver can take them, and the question is whether they want it.
+	DriverOffer Event = "driver_offer"
 )
 
 // All is every event a producer can emit, and the reason a new one cannot be
@@ -84,6 +87,7 @@ func All() []Event {
 		DriveNudge,
 		PassengerHere,
 		WeekendAsk,
+		DriverOffer,
 	}
 }
 
@@ -103,6 +107,11 @@ type Payload struct {
 	ArrangementID *uuid.UUID `json:"arrangement_id,omitempty"`
 	OccurrenceID  *uuid.UUID `json:"occurrence_id,omitempty"`
 	PlanID        *uuid.UUID `json:"plan_id,omitempty"`
+	AskID         *uuid.UUID `json:"ask_id,omitempty"`
+	// Driver and Day are the words a driver's offer is read with: who, and the
+	// day of the departure («την Παρασκευή»).
+	Driver string `json:"driver,omitempty"`
+	Day    string `json:"day,omitempty"`
 	// Count is how many people a nudge is about.
 	Count int `json:"count,omitempty"`
 }
@@ -135,6 +144,13 @@ func (p Payload) Validate() error {
 	case WeekendAsk:
 		if p.PlanID == nil || *p.PlanID == uuid.Nil {
 			return fmt.Errorf("notices: %s names no weekend plan", p.Event)
+		}
+	case DriverOffer:
+		if p.AskID == nil || *p.AskID == uuid.Nil {
+			return fmt.Errorf("notices: %s names no offer", p.Event)
+		}
+		if p.Driver == "" || p.Day == "" {
+			return fmt.Errorf("notices: %s does not say who or when", p.Event)
 		}
 	default:
 		return fmt.Errorf("notices: unknown event %q", p.Event)
@@ -192,6 +208,13 @@ func Here(driver, booking uuid.UUID) (outbox.Message, error) {
 func WeekendQuestion(passenger, plan uuid.UUID, friday time.Time) (outbox.Message, error) {
 	return message(Payload{Event: WeekendAsk, RecipientID: passenger, PlanID: &plan},
 		"weekend_ask:"+plan.String()+":"+friday.Format("2006-01-02"))
+}
+
+// Offer builds the notice that a driver can take a waiting passenger. day is
+// the departure's day as it is read after «την»; one per offer.
+func Offer(passenger, ask uuid.UUID, driver, day string) (outbox.Message, error) {
+	return message(Payload{Event: DriverOffer, RecipientID: passenger, AskID: &ask, Driver: driver, Day: day},
+		"driver_offer:"+ask.String())
 }
 
 func message(p Payload, key string) (outbox.Message, error) {

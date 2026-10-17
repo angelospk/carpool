@@ -346,6 +346,10 @@ func NewRouter(deps Deps) http.Handler {
 				r.Get("/asks/{id}", deps.handleGetAsk)
 				r.Post("/asks/{id}/accept", deps.handleAcceptAsk)
 				r.Post("/asks/{id}/decline", deps.handleDeclineAsk)
+				// A seat a driver offered to somebody waiting on a weekend plan.
+				r.Get("/offers", deps.handleListOffers)
+				r.Post("/offers/{id}/accept", deps.handleAcceptOffer)
+				r.Post("/offers/{id}/decline", deps.handleDeclineOffer)
 			}
 
 			// Guarded on its own collaborator: these handlers dereference
@@ -383,6 +387,10 @@ func NewRouter(deps Deps) http.Handler {
 					r.Delete("/", deps.handleCancelTrip)
 				}
 				r.Post("/rate", deps.handleRateTrip)
+				if deps.Asks != nil {
+					r.Get("/waiting", deps.handleWaiting)
+					r.Post("/offers", deps.handleOffer)
+				}
 				r.Get("/messages", deps.handleListMessages)
 				r.With(chat.perUser).Post("/messages", deps.handlePostMessage)
 				if deps.Hub != nil {

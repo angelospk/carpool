@@ -75,6 +75,10 @@ func TestEveryNoticeReachesThePersonItNames(t *testing.T) {
 			"Φεύγεις αυτό το Σαββατοκύριακο;",
 			"Πες μας με ένα πάτημα, για να ψάξουμε οδηγό.",
 		},
+		notices.DriverOffer: {
+			"Βρέθηκε οδηγός για το Σαββατοκύριακο",
+			"Ο/Η Μαρία μπορεί να σε πάρει την Παρασκευή. Το θέλεις;",
+		},
 	}
 
 	for _, event := range notices.All() {
@@ -131,6 +135,8 @@ func TestEveryNoticeReachesThePersonItNames(t *testing.T) {
 				field = "occurrence_id"
 			case notices.WeekendAsk:
 				field = "plan_id"
+			case notices.DriverOffer:
+				field = "ask_id"
 			}
 			if got.Data[field] != resource.String() {
 				t.Errorf("carried %s %v, want %s", field, got.Data[field], resource)
@@ -157,6 +163,8 @@ func build(event notices.Event, recipient, resource uuid.UUID) (outbox.Message, 
 		return notices.Nudge(recipient, resource, 2)
 	case notices.PassengerHere:
 		return notices.Here(recipient, resource)
+	case notices.DriverOffer:
+		return notices.Offer(recipient, resource, "Μαρία", "την Παρασκευή")
 	case notices.WeekendAsk:
 		return notices.WeekendQuestion(recipient, resource, time.Date(2026, time.July, 31, 0, 0, 0, 0, time.UTC))
 	}

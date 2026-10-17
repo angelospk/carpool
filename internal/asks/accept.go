@@ -129,9 +129,19 @@ func (s *Service) WithRouter(r match.Router) *Service {
 // passenger looked for elsewhere if not. The routing is done before any lock
 // and checked against the version found under it; if the plan moved in
 // between, the whole accept starts again.
+//
+// This is a driver answering the matcher's question. A seat a driver offered
+// is the passenger's to take, through AcceptOffer: a driver cannot accept for
+// somebody who has not been asked.
 func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.UUID, error) {
+	return s.acceptAsked(ctx, askID, driverID, byMatcher)
+}
+
+// acceptAsked is Accept for an ask made by the given side. driverID is the
+// template's driver either way: it is who the seat is with.
+func (s *Service) acceptAsked(ctx context.Context, askID, driverID uuid.UUID, by askedBy) (uuid.UUID, error) {
 	for attempt := 0; attempt < acceptAttempts; attempt++ {
-		bookingID, err := s.accept(ctx, askID, driverID)
+		bookingID, err := s.accept(ctx, askID, driverID, by)
 		if !errors.Is(err, errPlanMoved) {
 			return bookingID, err
 		}
@@ -139,7 +149,7 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	return uuid.Nil, ErrBusy
 }
 
-func (s *Service) accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.UUID, error) {
+func (s *Service) accept(ctx context.Context, askID, driverID uuid.UUID, by askedBy) (uuid.UUID, error) {
 	// Read the version the ask was quoted against and the one the plan is at,
 	// then verify and route outside any transaction.
 	var (
@@ -150,15 +160,17 @@ func (s *Service) accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		preExpiresAt  time.Time
 		preDriver     uuid.UUID
 		prePassenger  uuid.UUID
+		preBy         string
 	)
 	err := s.pool.QueryRow(ctx, `
-		SELECT a.itinerary_version, o.itinerary_version, o.id, a.status, a.expires_at, t.driver_id, rr.passenger_id
+		SELECT a.itinerary_version, o.itinerary_version, o.id, a.status, a.expires_at, t.driver_id, rr.passenger_id,
+		       a.offered_by
 		FROM asks a
 		JOIN trip_occurrences o ON o.id = a.occurrence_id
 		JOIN route_templates  t ON t.id = o.template_id
 		JOIN ride_requests   rr ON rr.id = a.request_id
 		WHERE a.id = $1`, askID).Scan(&quotedVersion, &planVersion, &preOccurrence,
-		&preState, &preExpiresAt, &preDriver, &prePassenger)
+		&preState, &preExpiresAt, &preDriver, &prePassenger, &preBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, ErrAskNotFound
 	}
@@ -171,7 +183,7 @@ func (s *Service) accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	// always going to fail, and a declined ask would surface a routing error
 	// instead of the documented ErrAskNotPending. These are all re-checked under
 	// lock below; this is a cheap filter, not the authority.
-	if preDriver != driverID {
+	if preDriver != driverID || preBy != string(by) {
 		return uuid.Nil, ErrNotYours
 	}
 	// Once the sweeper has run the row says 'expired' and nothing else; the
@@ -509,7 +521,16 @@ func (s *Service) accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 
 // Decline records a driver's refusal and frees the request for the next
 // candidate.
+//
+// Like Accept, it is for the matcher's questions only: an offer a driver made
+// is declined by the passenger, through DeclineOffer.
 func (s *Service) Decline(ctx context.Context, askID, driverID uuid.UUID) error {
+	return s.decline(ctx, askID, driverID, byMatcher)
+}
+
+// decline ends an ask made by the given side. who is the driver when the
+// matcher asked, and the passenger when a driver offered.
+func (s *Service) decline(ctx context.Context, askID, who uuid.UUID, by askedBy) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("asks: begin: %w", err)
@@ -534,19 +555,26 @@ func (s *Service) Decline(ctx context.Context, askID, driverID uuid.UUID) error 
 		WHERE o.id = $1 FOR UPDATE OF o`, occurrenceID).Scan(&templateDriver); err != nil {
 		return fmt.Errorf("asks: locking occurrence: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM ride_requests WHERE id = $1 FOR UPDATE`, requestID); err != nil {
+	var passengerID uuid.UUID
+	if err := tx.QueryRow(ctx,
+		`SELECT passenger_id FROM ride_requests WHERE id = $1 FOR UPDATE`, requestID).
+		Scan(&passengerID); err != nil {
 		return fmt.Errorf("asks: locking request: %w", err)
 	}
 
-	var askState string
+	var askState, offeredBy string
 	var expiresAt time.Time
 	if err := tx.QueryRow(ctx,
-		`SELECT status, expires_at FROM asks WHERE id = $1 FOR UPDATE`, askID).
-		Scan(&askState, &expiresAt); err != nil {
+		`SELECT status, expires_at, offered_by FROM asks WHERE id = $1 FOR UPDATE`, askID).
+		Scan(&askState, &expiresAt, &offeredBy); err != nil {
 		return fmt.Errorf("asks: locking ask: %w", err)
 	}
 
-	if templateDriver != driverID {
+	answerer := templateDriver
+	if by == byDriver {
+		answerer = passengerID
+	}
+	if answerer != who || offeredBy != string(by) {
 		return ErrNotYours
 	}
 	if askState == "expired" {

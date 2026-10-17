@@ -84,6 +84,8 @@ type pushPayload struct {
 
 	OccurrenceID *uuid.UUID `json:"occurrence_id"`
 	PlanID       *uuid.UUID `json:"plan_id"`
+	Driver       string     `json:"driver"`
+	Day          string     `json:"day"`
 	Count        int        `json:"count"`
 	// Drive marks an offer on a drive, which is answered from the
 	// notification itself.
@@ -258,13 +260,19 @@ func (p pushPayload) notification() (recipient uuid.UUID, title, body string, er
 	// complete, so that an event nobody has written words for is reported as
 	// exactly that rather than as a missing field.
 	title, body, ok := say(p.Event, p.Count)
+	if ok && p.Event == notices.DriverOffer {
+		// The one notice that names a person: the passenger is being asked
+		// about somebody, and "a driver" would not tell them which.
+		body = fmt.Sprintf("Ο/Η %s μπορεί να σε πάρει %s. Το θέλεις;", p.Driver, p.Day)
+	}
 	if !ok {
 		return uuid.Nil, "", "", fmt.Errorf("nothing to say for event %q", p.Event)
 	}
 	if err := (notices.Payload{
 		Event: p.Event, RecipientID: p.RecipientID,
 		BookingID: p.BookingID, ArrangementID: p.ArrangementID,
-		OccurrenceID: p.OccurrenceID, PlanID: p.PlanID, Count: p.Count,
+		OccurrenceID: p.OccurrenceID, PlanID: p.PlanID, AskID: p.AskID,
+		Driver: p.Driver, Day: p.Day, Count: p.Count,
 	}).Validate(); err != nil {
 		return uuid.Nil, "", "", err
 	}
@@ -289,6 +297,10 @@ func say(event notices.Event, count int) (title, body string, ok bool) {
 	case notices.WeekendAsk:
 		return "Φεύγεις αυτό το Σαββατοκύριακο;",
 			"Πες μας με ένα πάτημα, για να ψάξουμε οδηγό.", true
+	case notices.DriverOffer:
+		// The body names the driver and the day, which only the payload knows:
+		// see notification.
+		return "Βρέθηκε οδηγός για το Σαββατοκύριακο", "", true
 	case notices.DriveNudge:
 		title := "Κάποιος στον δρόμο σου θέλει να πάει τώρα"
 		if count > 1 {
