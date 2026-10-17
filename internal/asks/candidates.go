@@ -621,10 +621,19 @@ func (s *Service) createAsk(
 	}
 	// A driver's offer is read by a passenger who is not looking at the phone:
 	// it lives a day, or until two hours before the car leaves.
+	//
+	// The lead time counts back from the departure itself, not from the pickup
+	// deadline a drive has put in departs; and the offer still ends no later
+	// than that deadline, so it cannot outlive the moment the passenger can no
+	// longer be at the road.
 	if by == byDriver {
-		expiresAt = departs.Add(-OfferLeadTime)
+		cutoff := departs
+		expiresAt = scheduled.Add(-OfferLeadTime)
 		if latest := now.Add(OfferTTL); latest.Before(expiresAt) {
 			expiresAt = latest
+		}
+		if cutoff.Before(expiresAt) {
+			expiresAt = cutoff
 		}
 	}
 

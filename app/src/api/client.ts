@@ -79,7 +79,7 @@ export function setSessionEndedHandler(fn: (() => void) | null) {
  * secondary: the id is a request nonce that grants nothing without the refresh
  * token it accompanies.
  */
-function newAttemptId(): string {
+export function newAttemptId(): string {
   const c = globalThis.crypto;
   if (c && typeof c.randomUUID === 'function') return c.randomUUID();
 

@@ -152,3 +152,34 @@ func TestReconcilerDoesNotQueueTheSameRequestTwiceInOnePass(t *testing.T) {
 		t.Fatalf("%d ask_next messages after the next interval, want a fresh look", got)
 	}
 }
+
+// A weekend request is never asked about by the matcher, so a look at it would
+// only spend the pass's ceiling on a request AskNext skips.
+func TestReconcilerLeavesWeekendRequestsAlone(t *testing.T) {
+	f := newFixture(t)
+	now := time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)
+	c := clock.NewFake(now)
+
+	weekendReq := openRequest(t, f, "open", now.Add(6*time.Hour))
+	var planID uuid.UUID
+	if err := f.pool.QueryRow(context.Background(), `
+		INSERT INTO weekend_plans (passenger_id, origin, destination, depart_dow, depart_time)
+		SELECT passenger_id, origin, destination, 5, '15:00' FROM ride_requests WHERE id = $1
+		RETURNING id`, weekendReq).Scan(&planID); err != nil {
+		t.Fatalf("seeding plan: %v", err)
+	}
+	if _, err := f.pool.Exec(context.Background(), `
+		UPDATE ride_requests SET weekend_plan_id = $2, weekend_of = '2026-07-31', weekend_leg = 'out'
+		WHERE id = $1`, weekendReq, planID); err != nil {
+		t.Fatalf("marking weekend: %v", err)
+	}
+	openRequest(t, f, "open", now.Add(8*time.Hour))
+
+	n, err := jobs.NewReconciler(f.pool, c).Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if n != 1 || queuedAsks(t, f) != 1 {
+		t.Fatalf("Run = %d, queued %d; want only the ordinary request looked at", n, queuedAsks(t, f))
+	}
+}

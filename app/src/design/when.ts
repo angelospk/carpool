@@ -154,3 +154,16 @@ export function departureWindow(picked: Day, band: Band, now: Date): Window {
   const end = athensInstant(date, to);
   return { start: start.getTime() < now.getTime() ? now : start, end };
 }
+
+/**
+ * "0745", "745", "7:45" and "07:45" all mean 07:45; anything else is not a time
+ * of day. Returns HH:MM, or null.
+ */
+export function parseTime(text: string): string | null {
+  const m = /^(\d{1,2}):?(\d{2})(?::\d{2})?$/.exec(text.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  return `${String(h).padStart(2, '0')}:${m[2]}`;
+}

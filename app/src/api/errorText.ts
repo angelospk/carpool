@@ -31,6 +31,10 @@ const known = new Set([
   'duplicate_route',
   'request_closed',
   'day_in_another_group',
+  'invalid_return',
+  'too_late',
+  'cannot_carry',
+  'already_offered',
 ]);
 
 /** A sentence for a refusal this app knows, or null for the caller to decide. */

@@ -85,6 +85,9 @@ func (r *Reconciler) Run(ctx context.Context) (int, error) {
 		rows, err := r.pool.Query(ctx, `
 			SELECT id, created_at FROM ride_requests
 			WHERE status = 'open' AND window_end > $1
+			  -- A weekend request is never asked about by the matcher; looking at
+			  -- it would only use up the pass's ceiling.
+			  AND weekend_plan_id IS NULL
 			  AND ($2::timestamptz IS NULL OR (created_at, id) > ($2, $3))
 			ORDER BY created_at, id
 			LIMIT $4`, now, nullableTime(afterTime), afterID, ReconcileBatch)

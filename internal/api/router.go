@@ -332,6 +332,7 @@ func NewRouter(deps Deps) http.Handler {
 				r.Get("/weekend-plans", deps.handleListWeekendPlans)
 				r.Delete("/weekend-plans/{id}", deps.handleStopWeekendPlan)
 				r.Post("/weekend-plans/{id}/this-week", deps.handleWeekendThisWeek)
+				r.Post("/weekend-plans/{id}/keep", deps.handleWeekendKeep)
 			}
 			if deps.Asks != nil {
 				r.Post("/requests", deps.handleCreateRequest)

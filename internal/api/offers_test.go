@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 )
@@ -504,6 +505,261 @@ func TestOffersNeedASignedInCaller(t *testing.T) {
 	} {
 		if rec := h.do(call.method, call.path, nil, ""); rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s %s: %d, want 401", call.method, call.path, rec.Code)
+		}
+	}
+}
+
+// pinDrive makes the departure a drive that leaves at departs, with the
+// request's pickup half way along the road and its window opening after the
+// car has left the start: the car reaches the pickup inside the window though
+// the departure is before it.
+func (w *offerWorld) pinDrive(departs time.Time) {
+	h := w.h
+	h.mustExec(`UPDATE trip_occurrences SET scheduled_earliest = depart_earliest, scheduled_latest = depart_latest
+		WHERE id = $1::uuid`, w.occurrence)
+	h.mustExec(`UPDATE trip_occurrences
+		SET depart_earliest = $2, depart_latest = $2, drive_set_at = $3,
+		    offers_until = $2::timestamptz + route_min * interval '1 minute'
+		WHERE id = $1::uuid`, w.occurrence, departs, h.clock.Now())
+	h.mustExec(`UPDATE ride_requests
+		SET origin = ST_SetSRID(ST_MakePoint(26.0230, 40.87255), 4326), window_start = $2, window_end = $3
+		WHERE id = $1::uuid`, w.requestID, departs.Add(10*time.Minute), departs.Add(3*time.Hour))
+}
+
+// The list a driver offers from is the same question the offer is judged by.
+// A drive leaves before the window opens and reaches the pickup inside it, and
+// the gross filter lets that pair through; a prefilter that compares the
+// departure with the window would hide the passenger from the one person who
+// could take them.
+func TestADriveSeesAWaitingPassengerItReachesAfterTheWindowOpens(t *testing.T) {
+	w := newOfferWorld(t)
+	w.pinDrive(w.h.clock.Now().Add(3 * time.Hour))
+
+	got := w.waiting(w.driver)
+	if len(got) != 1 || got[0].RequestID != w.requestID {
+		t.Fatalf("waiting = %+v, want the passenger the drive reaches inside their window", got)
+	}
+	if code, body := w.offer(w.driver); code != http.StatusCreated {
+		t.Fatalf("offer: %d %s", code, body)
+	}
+}
+
+// An offer on a drive ends two hours before the car leaves, whatever the
+// pickup's own deadline is: the lead time is counted from the departure, not
+// from when the car reaches this passenger.
+func TestAnOfferOnADriveEndsTwoHoursBeforeTheCarLeaves(t *testing.T) {
+	w := newOfferWorld(t)
+	departs := w.h.clock.Now().Add(3 * time.Hour)
+	w.pinDrive(departs)
+
+	if code, body := w.offer(w.driver); code != http.StatusCreated {
+		t.Fatalf("offer: %d %s", code, body)
+	}
+	var expires time.Time
+	w.h.mustQuery(`SELECT expires_at FROM asks`, &expires)
+	if want := departs.Add(-2 * time.Hour); !expires.Equal(want) {
+		t.Errorf("expires_at = %v, want %v (two hours before the departure)", expires, want)
+	}
+}
+
+// offerAndGetID makes the driver's offer and returns the ask.
+func (w *offerWorld) offerAndGetID() string {
+	w.h.t.Helper()
+	if code, body := w.offer(w.driver); code != http.StatusCreated {
+		w.h.t.Fatalf("offer: %d %s", code, body)
+	}
+	var askID string
+	w.h.mustQuery(`SELECT id::text FROM asks`, &askID)
+	return askID
+}
+
+// bookSeat gives passengerID a confirmed seat on a departure, the way a
+// finished accept leaves it.
+func (h *harness) bookSeat(occurrenceID, passengerID string) {
+	h.t.Helper()
+	var requestID, askID string
+	h.mustQuery(`
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end, kind, status)
+		VALUES ($1::uuid, ST_SetSRID(ST_MakePoint(25.8743, 40.8476), 4326), ST_SetSRID(ST_MakePoint(26.1717, 40.8975), 4326),
+		        $2, $3, 'open', 'matched')
+		RETURNING id::text`, &requestID, passengerID, h.clock.Now().Add(time.Hour), h.clock.Now().Add(40*time.Hour))
+	h.mustQuery(`
+		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
+		                  suggested_price_eur, itinerary_version, status, expires_at)
+		VALUES ($1::uuid, $2::uuid, 4, 3.0, ST_SetSRID(ST_MakePoint(25.8743, 40.8476), 4326),
+		        ST_SetSRID(ST_MakePoint(26.1717, 40.8975), 4326), 2.50, 1, 'accepted', $3)
+		RETURNING id::text`, &askID, requestID, occurrenceID, h.clock.Now().Add(time.Hour))
+	h.mustExec(`INSERT INTO bookings (occurrence_id, request_id, passenger_id, ask_id, seats, price_eur,
+	                                  pickup_point, dropoff_point)
+	            VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, 2.50,
+	                    ST_SetSRID(ST_MakePoint(25.8743, 40.8476), 4326), ST_SetSRID(ST_MakePoint(26.1717, 40.8975), 4326))`,
+		occurrenceID, requestID, passengerID, askID)
+}
+
+// What stops the driver's accept stops the passenger's too, with the same
+// answer: the seat is taken by the same code under the same locks.
+func TestAcceptingAnOfferIsRefusedForTheReasonsADriverAcceptIs(t *testing.T) {
+	cases := map[string]struct {
+		setup    func(w *offerWorld)
+		wantCode string
+	}{
+		"the last seat went": {
+			setup: func(w *offerWorld) {
+				w.h.mustExec(`UPDATE trip_occurrences SET seats_free = 0 WHERE id = $1::uuid`, w.occurrence)
+			},
+			wantCode: "no_seats",
+		},
+		"no room left for the luggage": {
+			setup: func(w *offerWorld) {
+				// The boot holds one suitcase and somebody else has it.
+				w.h.mustExec(`UPDATE trip_occurrences SET luggage = 'suitcase', luggage_capacity = 1 WHERE id = $1::uuid`, w.occurrence)
+				w.h.bookSeat(w.occurrence, w.strangerUserID)
+				w.h.mustExec(`UPDATE bookings SET luggage_count = 1 WHERE occurrence_id = $1::uuid`, w.occurrence)
+				w.h.mustExec(`UPDATE ride_requests SET luggage = 'suitcase', luggage_count = 1 WHERE id = $1::uuid`, w.requestID)
+			},
+			wantCode: "no_luggage_room",
+		},
+		"the car already carries as many groups as it can": {
+			setup: func(w *offerWorld) {
+				w.h.bookSeat(w.occurrence, w.strangerUserID)
+				var third string
+				w.h.mustQuery(`INSERT INTO users (date_of_birth, phone, name, home_region_id)
+					VALUES (DATE '1990-01-01', '+306900001004', 'Τρίτος', (SELECT id FROM regions LIMIT 1))
+					RETURNING id::text`, &third)
+				w.h.bookSeat(w.occurrence, third)
+			},
+			wantCode: "party_cap",
+		},
+		"the passenger holds a seat on another trip at that hour": {
+			setup: func(w *offerWorld) {
+				other := w.h.occurrenceOf("+306900001005", "Άλλος οδηγός")
+				w.h.bookSeat(other, w.passengerID)
+			},
+			wantCode: "ask_closed",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			w := newOfferWorld(t)
+			askID := w.offerAndGetID()
+			tc.setup(w)
+
+			rec := w.h.do(http.MethodPost, "/v1/offers/"+askID+"/accept", nil, w.passenger)
+			if rec.Code != http.StatusConflict || w.h.errorCode(rec) != tc.wantCode {
+				t.Fatalf("accept: %d %s, want 409 %s", rec.Code, rec.Body.String(), tc.wantCode)
+			}
+			var mine int
+			w.h.mustQuery(`SELECT count(*) FROM bookings WHERE passenger_id = $1::uuid AND occurrence_id = $2::uuid`,
+				&mine, w.passengerID, w.occurrence)
+			if mine != 0 {
+				t.Errorf("%d bookings for a refused accept", mine)
+			}
+			var reqStatus string
+			w.h.mustQuery(`SELECT status FROM ride_requests WHERE id = $1::uuid`, &reqStatus, w.requestID)
+			if reqStatus == "matched" {
+				t.Errorf("request %s after a refused accept", reqStatus)
+			}
+		})
+	}
+}
+
+// The passenger says yes at the moment the driver calls the departure off.
+// Whichever the database sees first, the result is one story: a cancelled
+// departure with no seat on it, or a seat that was booked and then cancelled
+// with the departure. Never a seat on a cancelled car, and never a 500.
+func TestAcceptingAnOfferWhileTheDriverCancelsTheDeparture(t *testing.T) {
+	for round := 0; round < 8; round++ {
+		w := newOfferWorld(t)
+		askID := w.offerAndGetID()
+
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		var acceptCode, cancelCode int
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			acceptCode = w.h.do(http.MethodPost, "/v1/offers/"+askID+"/accept", nil, w.passenger).Code
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			cancelCode = w.h.do(http.MethodDelete, "/v1/trips/"+w.occurrence, nil, w.driver).Code
+		}()
+		close(start)
+		wg.Wait()
+
+		if cancelCode != http.StatusNoContent {
+			t.Fatalf("round %d: cancelling the departure: %d, want 204", round, cancelCode)
+		}
+		if acceptCode != http.StatusOK && acceptCode != http.StatusConflict {
+			t.Fatalf("round %d: accepting: %d, want 200 or 409", round, acceptCode)
+		}
+		var status string
+		var live int
+		w.h.mustQuery(`SELECT status FROM trip_occurrences WHERE id = $1::uuid`, &status, w.occurrence)
+		w.h.mustQuery(`SELECT count(*) FROM bookings WHERE occurrence_id = $1::uuid AND status = 'confirmed'`, &live, w.occurrence)
+		if status != "cancelled" || live != 0 {
+			t.Fatalf("round %d: departure %s with %d confirmed seats (accept answered %d)", round, status, live, acceptCode)
+		}
+		var booked int
+		w.h.mustQuery(`SELECT count(*) FROM bookings WHERE occurrence_id = $1::uuid`, &booked, w.occurrence)
+		if (acceptCode == http.StatusOK) != (booked == 1) {
+			t.Fatalf("round %d: accept answered %d but %d bookings exist", round, acceptCode, booked)
+		}
+	}
+}
+
+// Two passengers say yes to the one seat left. One gets it; the other is told
+// it went, and nobody is overbooked.
+func TestTwoOffersAcceptedTogetherForTheLastSeat(t *testing.T) {
+	for round := 0; round < 8; round++ {
+		w := newOfferWorld(t)
+		strangerPlan := w.h.weekendPlan(w.strangerUserID)
+		now := w.h.clock.Now()
+		strangerReq := w.h.weekendRequest(w.strangerUserID, strangerPlan, now.Add(23*time.Hour), now.Add(26*time.Hour), "")
+
+		first := w.offerAndGetID()
+		rec := w.h.do(http.MethodPost, "/v1/trips/"+w.occurrence+"/offers",
+			map[string]any{"request_id": strangerReq}, w.driver)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("second offer: %d %s", rec.Code, rec.Body.String())
+		}
+		var second string
+		w.h.mustQuery(`SELECT id::text FROM asks WHERE request_id = $1::uuid`, &second, strangerReq)
+		// One seat left, two offers out for it.
+		w.h.mustExec(`UPDATE trip_occurrences SET seats_free = 1 WHERE id = $1::uuid`, w.occurrence)
+
+		codes := make([]int, 2)
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for i, c := range []struct{ ask, token string }{{first, w.passenger}, {second, w.stranger}} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				codes[i] = w.h.do(http.MethodPost, "/v1/offers/"+c.ask+"/accept", nil, c.token).Code
+			}()
+		}
+		close(start)
+		wg.Wait()
+
+		ok, refused := 0, 0
+		for _, c := range codes {
+			switch c {
+			case http.StatusOK:
+				ok++
+			case http.StatusConflict:
+				refused++
+			default:
+				t.Fatalf("round %d: an accept answered %d (%v)", round, c, codes)
+			}
+		}
+		var booked, free int
+		w.h.mustQuery(`SELECT count(*) FROM bookings WHERE occurrence_id = $1::uuid AND status = 'confirmed'`, &booked, w.occurrence)
+		w.h.mustQuery(`SELECT seats_free FROM trip_occurrences WHERE id = $1::uuid`, &free, w.occurrence)
+		if ok != 1 || refused != 1 || booked != 1 || free != 0 {
+			t.Fatalf("round %d: codes %v, %d bookings, %d seats free; want one seat, given once", round, codes, booked, free)
 		}
 	}
 }

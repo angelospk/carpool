@@ -55,6 +55,10 @@ func (s *Service) Alternatives(
 	if (req.Status != "open" && req.Status != "asking") || req.PassengerStatus != "active" {
 		return []Alternative{}, nil
 	}
+	// A weekend request is never tried by the matcher: a driver offers first.
+	if req.Weekend {
+		return []Alternative{}, nil
+	}
 
 	candidates, err := match.Gross(ctx, s.pool, s.grossQuery(req))
 	if err != nil {

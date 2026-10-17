@@ -522,6 +522,90 @@ export type RouteBody = {
   pricing_mode?: PricingMode;
 };
 
+/**
+ * What a passenger who leaves town most weekends said once. Days are the
+ * server's: 5 is Friday, 6 Saturday, 0 Sunday; times are Athens «HH:MM».
+ */
+export type WeekendPlan = {
+  id: string;
+  origin_lon: number;
+  origin_lat: number;
+  destination_lon: number;
+  destination_lat: number;
+  origin_label: string;
+  destination_label: string;
+  depart_dow: number;
+  depart_time: string;
+  return_dow: number | null;
+  return_time: string | null;
+  seats: number;
+  luggage: LuggageSize;
+  luggage_count: number;
+  every_week: boolean;
+  declines_in_row: number;
+  /** How the coming weekend stands. There is no «awaiting an answer» state:
+      the Thursday question is worked out from the clock and `open`. */
+  this_week: 'none' | 'open' | 'matched' | 'cancelled';
+  /** Three weekends in a row answered «no»: offer to stop the plan. */
+  ask_to_stop: boolean;
+  /** The Thursday question has been answered, yes or no, for the coming
+      weekend: the server keeps it, so a restart does not ask again. */
+  answered_this_week: boolean;
+};
+
+/** An open weekend request a departure could carry, as its driver sees it. */
+export type WaitingPassenger = {
+  request_id: string;
+  passenger_name: string;
+  seats: number;
+  luggage: LuggageSize;
+  luggage_count: number;
+  window_start: string;
+  window_end: string;
+  origin_label: string;
+  destination_label: string;
+};
+
+/** A seat a driver offered the caller, to answer yes or no. */
+export type DriverOffer = {
+  id: string;
+  request_id: string;
+  occurrence_id: string;
+  driver_name: string;
+  driver_photo_url: string | null;
+  driver_rating: number | null;
+  driver_rating_count: number;
+  car: { make: string; model: string; colour: string };
+  depart_earliest: string;
+  /** Per seat. */
+  price_eur: number;
+  seats: number;
+  detour_min: number;
+  detour_km: number;
+  origin_label: string;
+  destination_label: string;
+  expires_at: string;
+};
+
+export type WeekendPlanBody = {
+  origin_lon: number;
+  origin_lat: number;
+  destination_lon: number;
+  destination_lat: number;
+  origin_label: string;
+  destination_label: string;
+  depart_dow: number;
+  depart_time: string;
+  return_dow?: number;
+  return_time?: string;
+  seats: number;
+  luggage: LuggageSize;
+  luggage_count: number;
+  every_week: boolean;
+  /** The client's own key for this create, so a retry is the plan already made. */
+  client_key?: string;
+};
+
 export const api = {
   regions: () => request<{ regions: Region[] }>('/v1/regions', { anonymous: true }),
 
@@ -796,6 +880,32 @@ export const api = {
   acceptAsk: (id: string) =>
     request<{ booking_id: string }>(`/v1/asks/${id}/accept`, { method: 'POST' }),
   declineAsk: (id: string) => request<void>(`/v1/asks/${id}/decline`, { method: 'POST' }),
+
+  weekendPlans: () => request<{ plans: WeekendPlan[] }>('/v1/weekend-plans'),
+  createWeekendPlan: (body: WeekendPlanBody) =>
+    request<WeekendPlan>('/v1/weekend-plans', { method: 'POST', body }),
+  stopWeekendPlan: (id: string) => request<void>(`/v1/weekend-plans/${id}`, { method: 'DELETE' }),
+  /** The Thursday answer: going this weekend or not. */
+  weekendThisWeek: (id: string, going: boolean) =>
+    request<WeekendPlan>(`/v1/weekend-plans/${id}/this-week`, { method: 'POST', body: { going } }),
+  /** «Όχι» to «Να το σταματήσω;»: the plan stays and the count of «όχι» starts over. */
+  keepWeekendPlan: (id: string) =>
+    request<WeekendPlan>(`/v1/weekend-plans/${id}/keep`, { method: 'POST' }),
+
+  /** Who waits on the road of one of the caller's departures. Driver only. */
+  waiting: (occurrenceId: string) =>
+    request<{ waiting: WaitingPassenger[] }>(`/v1/trips/${occurrenceId}/waiting`),
+  /** «Ναι» to one waiting passenger: the seat is offered, the passenger decides. */
+  offerSeat: (occurrenceId: string, requestId: string) =>
+    request<{ ask_id: string }>(`/v1/trips/${occurrenceId}/offers`, {
+      method: 'POST',
+      body: { request_id: requestId },
+    }),
+  /** The seats drivers have offered the caller. */
+  offers: () => request<{ offers: DriverOffer[] }>('/v1/offers'),
+  acceptOffer: (askId: string) =>
+    request<{ booking_id: string }>(`/v1/offers/${askId}/accept`, { method: 'POST' }),
+  declineOffer: (askId: string) => request<void>(`/v1/offers/${askId}/decline`, { method: 'POST' }),
 
   upcomingTrips: () => request<{ trips: TripSummary[] }>('/v1/trips/upcoming'),
   trip: (id: string) => request<TripDetail>(`/v1/trips/${id}`),

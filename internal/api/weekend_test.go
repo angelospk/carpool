@@ -34,6 +34,7 @@ type planJSON struct {
 	ThisWeek      string    `json:"this_week"`
 	AskToStop     bool      `json:"ask_to_stop"`
 	DeclinesInRow int       `json:"declines_in_row"`
+	Answered      bool      `json:"answered_this_week"`
 }
 
 func TestCreatingAndListingAWeekendPlan(t *testing.T) {
@@ -142,6 +143,7 @@ func TestWeekendPlansNeedASignedInCaller(t *testing.T) {
 		{http.MethodGet, "/v1/weekend-plans"},
 		{http.MethodDelete, "/v1/weekend-plans/" + uuid.NewString()},
 		{http.MethodPost, "/v1/weekend-plans/" + uuid.NewString() + "/this-week"},
+		{http.MethodPost, "/v1/weekend-plans/" + uuid.NewString() + "/keep"},
 	} {
 		if rec := h.do(call.method, call.path, map[string]any{}, ""); rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s %s without a token: %d", call.method, call.path, rec.Code)
@@ -183,10 +185,12 @@ func TestSomebodyElsesWeekendPlanIsNotFound(t *testing.T) {
 	paths := []struct{ method, path string }{
 		{http.MethodDelete, "/v1/weekend-plans/" + plan.ID.String()},
 		{http.MethodPost, "/v1/weekend-plans/" + plan.ID.String() + "/this-week"},
+		{http.MethodPost, "/v1/weekend-plans/" + plan.ID.String() + "/keep"},
 	}
 	missing := []struct{ method, path string }{
 		{http.MethodDelete, "/v1/weekend-plans/" + uuid.NewString()},
 		{http.MethodPost, "/v1/weekend-plans/" + uuid.NewString() + "/this-week"},
+		{http.MethodPost, "/v1/weekend-plans/" + uuid.NewString() + "/keep"},
 	}
 	for i, call := range paths {
 		theirs := h.do(call.method, call.path, map[string]any{"going": false}, stranger)
@@ -272,5 +276,98 @@ func TestThisWeekNeedsAnAnswer(t *testing.T) {
 	}
 	if rec := h.do(http.MethodPost, "/v1/weekend-plans/not-a-uuid/this-week", map[string]any{"going": true}, token); rec.Code != http.StatusNotFound {
 		t.Errorf("a malformed id: status %d, want 404", rec.Code)
+	}
+}
+
+// A request that timed out and is sent again with the same client_key is the
+// same plan, not a second one with its own requests and Thursday question.
+func TestRetryingCreateWithTheSameKeyReturnsTheExistingPlan(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000061", "Επιβάτης")
+	other, _ := h.signUp("+306900000062", "Άλλος")
+
+	body := weekendBody()
+	body["client_key"] = uuid.NewString()
+
+	rec := h.do(http.MethodPost, "/v1/weekend-plans", body, token)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("first create: status %d: %s", rec.Code, rec.Body.String())
+	}
+	var first planJSON
+	h.decode(rec, &first)
+
+	rec = h.do(http.MethodPost, "/v1/weekend-plans", body, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("retry: status %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var again planJSON
+	h.decode(rec, &again)
+	if again.ID != first.ID {
+		t.Fatalf("retry made plan %s, want the first, %s", again.ID, first.ID)
+	}
+
+	var plans, requests int
+	h.mustQuery(`SELECT count(*) FROM weekend_plans`, &plans)
+	h.mustQuery(`SELECT count(*) FROM ride_requests WHERE weekend_plan_id IS NOT NULL`, &requests)
+	if plans != 1 || requests != 4 {
+		t.Errorf("%d plans and %d requests after a retry, want 1 and 4", plans, requests)
+	}
+
+	// The key is the caller's own: somebody else using it makes their own plan.
+	rec = h.do(http.MethodPost, "/v1/weekend-plans", body, other)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("another caller with the same key: status %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// A key that is not a uuid is refused rather than ignored, or a retry
+	// would silently not be one.
+	body["client_key"] = "not-a-uuid"
+	if rec = h.do(http.MethodPost, "/v1/weekend-plans", body, token); rec.Code != http.StatusBadRequest {
+		t.Errorf("a malformed client_key: status %d, want 400", rec.Code)
+	}
+}
+
+func TestThisWeekAnswerIsKeptAndKeepStartsTheCountOver(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000058", "Επιβάτης")
+	var plan planJSON
+	h.decode(h.do(http.MethodPost, "/v1/weekend-plans", weekendBody(), token), &plan)
+	list := func() planJSON {
+		var l struct {
+			Plans []planJSON `json:"plans"`
+		}
+		h.decode(h.do(http.MethodGet, "/v1/weekend-plans", nil, token), &l)
+		if len(l.Plans) != 1 {
+			t.Fatalf("%d plans", len(l.Plans))
+		}
+		return l.Plans[0]
+	}
+	if list().Answered {
+		t.Error("answered before any answer")
+	}
+	rec := h.do(http.MethodPost, "/v1/weekend-plans/"+plan.ID.String()+"/this-week", map[string]any{"going": true}, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("yes: %d: %s", rec.Code, rec.Body.String())
+	}
+	if !list().Answered {
+		t.Error("the yes was not kept")
+	}
+
+	if _, err := h.pool.Exec(context.Background(), `UPDATE weekend_plans SET declines_in_row = 3`); err != nil {
+		t.Fatal(err)
+	}
+	rec = h.do(http.MethodPost, "/v1/weekend-plans/"+plan.ID.String()+"/keep", nil, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("keep: %d: %s", rec.Code, rec.Body.String())
+	}
+	var got planJSON
+	h.decode(rec, &got)
+	if got.DeclinesInRow != 0 || got.AskToStop {
+		t.Errorf("after keep: %+v", got)
+	}
+	var live int
+	h.mustQuery(`SELECT count(*) FROM ride_requests WHERE weekend_plan_id = $1 AND status = 'open'`, &live, plan.ID)
+	if live != 4 {
+		t.Errorf("keep changed the requests: %d open", live)
 	}
 }

@@ -33,6 +33,8 @@ import {
 import { RouteGlyph, decodeRoute } from '../../src/components/RouteGlyph';
 import { RepeatCard } from '../../src/components/RepeatCard';
 import { PendingAsks } from '../../src/components/PendingAsks';
+import { WaitingPassengers } from '../../src/components/WaitingPassengers';
+import { isWeekendDay } from '../../src/design/weekend';
 import { RatingRow } from '../../src/components/RatingRow';
 import { SocialLinks } from '../../src/components/SocialLink';
 import { CallButton } from '../../src/components/CallButton';
@@ -603,6 +605,14 @@ export default function TripScreen() {
                 {/* A driver is told here too: the question lapses, and the home
                     screen is not where they are looking. */}
                 {trip.data.role === 'driver' ? <PendingAsks occurrenceId={trip.data.id} /> : null}
+
+                {/* The weekend's waiting passengers, for a departure still to
+                    come: reachable later than the publish screen. */}
+                {trip.data.role === 'driver' &&
+                phase === 'before' &&
+                isWeekendDay(new Date(trip.data.depart_earliest)) ? (
+                  <WaitingPassengers occurrenceId={trip.data.id} departs={trip.data.depart_earliest} />
+                ) : null}
 
                 {notice ? (
                   <Text testID="trip-notice" style={styles.notice}>

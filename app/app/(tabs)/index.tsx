@@ -8,6 +8,8 @@ import { PastTrips } from '../../src/components/PastTrips';
 import { OpenRequests, useOpenRequests } from '../../src/components/OpenRequests';
 import { Suggestions } from '../../src/components/Suggestions';
 import { PendingAsks } from '../../src/components/PendingAsks';
+import { SeatOffers } from '../../src/components/SeatOffers';
+import { WeekendPlans, useWeekendPlans } from '../../src/components/WeekendPlans';
 import { DrivingPrompt } from '../../src/components/DrivingPrompt';
 import { useSession } from '../../src/state/session';
 import {
@@ -61,6 +63,9 @@ export default function HomeScreen() {
   // The same hook as the card, so it is the same one query either way — and the
   // signed-in guard and the poll interval live in one place rather than two.
   const requests = useOpenRequests();
+  // The same for a weekend plan: until the hourly job makes its requests, the
+  // plan is all there is, and it must not be hidden behind «δεν έχεις».
+  const plans = useWeekendPlans();
 
   const all = trips.data?.trips ?? [];
   const [next, ...upcoming] = all;
@@ -74,6 +79,8 @@ export default function HomeScreen() {
     !all.length &&
     !(past.data?.trips.length ?? 0) &&
     !(requests.data?.requests.length ?? 0) &&
+    !(plans.data?.plans.length ?? 0) &&
+    !plans.isLoading &&
     // Neither still asking nor having failed to ask. A query that broke
     // knows nothing about whether there is anything there, and "δεν έχεις
     // επόμενες διαδρομές" is a claim rather than a shrug.
@@ -101,7 +108,12 @@ export default function HomeScreen() {
       ListHeaderComponent={
         <View style={styles.listHeader}>
           {next ? <NextTrip trip={next} onPress={() => router.push(`/trip/${next.id}`)} /> : null}
-          {wide ? null : <OpenRequests />}
+          {wide ? null : (
+            <>
+              <OpenRequests />
+              <WeekendPlans />
+            </>
+          )}
           {rest.length ? <SectionHeader title={t('home.upcoming')} /> : null}
         </View>
       }
@@ -144,6 +156,8 @@ export default function HomeScreen() {
       {/* A question waiting on this driver comes before anything else here:
           it lapses, and everything below it will still be there later. */}
       <PendingAsks />
+      {/* A seat a driver offered is a question too, and it lapses. */}
+      <SeatOffers />
       <DrivingPrompt trips={all} />
 
       <AsyncState
@@ -151,7 +165,13 @@ export default function HomeScreen() {
         error={trips.error}
         onRetry={() => void trips.refetch()}
         empty={empty}
-        emptySlot={<FirstRun onAsk={() => router.push('/search')} onOffer={() => router.push('/publish')} />}
+        emptySlot={
+          <FirstRun
+            onAsk={() => router.push('/search')}
+            onOffer={() => router.push('/publish')}
+            onWeekend={() => router.push('/weekend/new')}
+          />
+        }
       >
         {wide ? (
           // A laptop has the room for what a phone scrolls past: the trips on
@@ -165,6 +185,7 @@ export default function HomeScreen() {
             >
               <AtAGlance trips={all} />
               <OpenRequests />
+              <WeekendPlans />
               <PastTrips />
               <Suggestions />
             </ScrollView>
@@ -378,7 +399,15 @@ function NextTrip({ trip, onPress }: { trip: TripSummary; onPress: () => void })
  * not turn up straight away, and offer both sides of the deal, because whoever
  * is reading this is as likely to have a car as to need one.
  */
-function FirstRun({ onAsk, onOffer }: { onAsk: () => void; onOffer: () => void }) {
+function FirstRun({
+  onAsk,
+  onOffer,
+  onWeekend,
+}: {
+  onAsk: () => void;
+  onOffer: () => void;
+  onWeekend: () => void;
+}) {
   const { t } = useTranslation();
   return (
     <View testID="empty" style={styles.firstRun}>
@@ -391,6 +420,12 @@ function FirstRun({ onAsk, onOffer }: { onAsk: () => void; onOffer: () => void }
           label={t('home.emptyOfferSeat')}
           variant="secondary"
           onPress={onOffer}
+        />
+        <Button
+          testID="empty-weekend"
+          label={t('weekend.entry')}
+          variant="secondary"
+          onPress={onWeekend}
         />
       </View>
     </View>

@@ -92,7 +92,8 @@ func (s *Service) Waiting(ctx context.Context, occurrenceID, driverID uuid.UUID)
 
 	// Cheap and conservative first, so the filter is run for the requests this
 	// departure could possibly meet and not for every weekend request there is:
-	// open, not spoken for, hours that meet the departure's, and both ends
+	// open, not spoken for, hours that meet the departure's (or a drive, which the
+	// filter holds to when the car reaches them), and both ends
 	// within the driver's radius of the road, as the filter itself requires.
 	rows, err := s.pool.Query(ctx, `
 		SELECT rr.id
@@ -102,7 +103,11 @@ func (s *Service) Waiting(ctx context.Context, occurrenceID, driverID uuid.UUID)
 		  JOIN ride_requests rr ON rr.weekend_plan_id IS NOT NULL AND rr.status = 'open'
 		  JOIN users u ON u.id = rr.passenger_id AND u.status = 'active'
 		 WHERE o.id = $1
-		   AND rr.window_start <= o.depart_latest AND rr.window_end >= o.depart_earliest
+		   -- A drive is held to DriveReady by the filter below, as in Gross: the car
+		   -- reaches a later pickup after it has left, and comparing the window
+		   -- with the departure would hide that passenger.
+		   AND (o.drive_set_at IS NOT NULL
+		        OR (rr.window_start <= o.depart_latest AND rr.window_end >= o.depart_earliest))
 		   AND rr.passenger_id <> t.driver_id
 		   AND NOT EXISTS (SELECT 1 FROM asks a WHERE a.request_id = rr.id AND a.status = 'pending')
 		   AND ST_DWithin(o.route_geom::geography, rr.origin::geography, d.notify_radius_km * 1000)

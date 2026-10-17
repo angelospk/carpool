@@ -36,10 +36,19 @@ CREATE TABLE weekend_plans (
     -- The Friday of the weekend the Thursday question was last sent for, so
     -- the hourly job asks once per plan per weekend.
     last_asked_for    date,
+    -- The Friday of the weekend the passenger last answered the Thursday
+    -- question for, yes or no, so the app does not ask again after a restart.
+    answered_for      date,
+
+    -- The client's own key for the create, so a request sent again after a
+    -- timeout is the plan it already made and not a second one. Optional: a
+    -- client without one gets a plan every time.
+    client_key        uuid,
 
     created_at        timestamptz NOT NULL DEFAULT now(),
     updated_at        timestamptz NOT NULL DEFAULT now(),
 
+    CONSTRAINT weekend_plans_client_key_once UNIQUE (passenger_id, client_key),
     CONSTRAINT weekend_plans_return_both CHECK ((return_dow IS NULL) = (return_time IS NULL)),
     CONSTRAINT weekend_plans_srid CHECK (ST_SRID(origin) = 4326 AND ST_SRID(destination) = 4326),
     CONSTRAINT weekend_plans_luggage_count_sane CHECK (

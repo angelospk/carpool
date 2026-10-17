@@ -11,24 +11,25 @@ import (
 
 func planJSON(p weekend.Plan) map[string]any {
 	return map[string]any{
-		"id":                p.ID,
-		"origin_lon":        p.OriginLon,
-		"origin_lat":        p.OriginLat,
-		"destination_lon":   p.DestinationLon,
-		"destination_lat":   p.DestinationLat,
-		"origin_label":      p.OriginLabel,
-		"destination_label": p.DestinationLabel,
-		"depart_dow":        p.DepartDow,
-		"depart_time":       p.DepartTime,
-		"return_dow":        p.ReturnDow,
-		"return_time":       p.ReturnTime,
-		"seats":             p.Seats,
-		"luggage":           p.Luggage,
-		"luggage_count":     p.LuggageCount,
-		"every_week":        p.EveryWeek,
-		"declines_in_row":   p.DeclinesInRow,
-		"this_week":         p.ThisWeek,
-		"ask_to_stop":       p.AskToStop,
+		"id":                 p.ID,
+		"origin_lon":         p.OriginLon,
+		"origin_lat":         p.OriginLat,
+		"destination_lon":    p.DestinationLon,
+		"destination_lat":    p.DestinationLat,
+		"origin_label":       p.OriginLabel,
+		"destination_label":  p.DestinationLabel,
+		"depart_dow":         p.DepartDow,
+		"depart_time":        p.DepartTime,
+		"return_dow":         p.ReturnDow,
+		"return_time":        p.ReturnTime,
+		"seats":              p.Seats,
+		"luggage":            p.Luggage,
+		"luggage_count":      p.LuggageCount,
+		"every_week":         p.EveryWeek,
+		"declines_in_row":    p.DeclinesInRow,
+		"this_week":          p.ThisWeek,
+		"ask_to_stop":        p.AskToStop,
+		"answered_this_week": p.AnsweredThisWeek,
 	}
 }
 
@@ -56,6 +57,9 @@ func (d Deps) handleCreateWeekendPlan(w http.ResponseWriter, r *http.Request) {
 		Luggage          string  `json:"luggage"`
 		LuggageCount     *int    `json:"luggage_count"`
 		EveryWeek        *bool   `json:"every_week"`
+		// ClientKey makes a create safe to send again: the same key from the
+		// same caller answers the plan it already made.
+		ClientKey *string `json:"client_key"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -88,6 +92,15 @@ func (d Deps) handleCreateWeekendPlan(w http.ResponseWriter, r *http.Request) {
 		plan.EveryWeek = *body.EveryWeek
 	}
 
+	if body.ClientKey != nil {
+		key, err := uuid.Parse(*body.ClientKey)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "client_key has to be a uuid")
+			return
+		}
+		plan.ClientKey = &key
+	}
+
 	if problem := distanceProblem(body.OriginLon, body.OriginLat, body.DestinationLon, body.DestinationLat); problem != nil {
 		writeError(w, http.StatusBadRequest, problem.code, problem.message)
 		return
@@ -103,7 +116,12 @@ func (d Deps) handleCreateWeekendPlan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not save the plan")
 		return
 	}
-	writeJSON(w, http.StatusCreated, planJSON(created))
+	// A create sent again is answered with the plan it made, and says so.
+	status := http.StatusCreated
+	if created.Replayed {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, planJSON(created))
 }
 
 func (d Deps) handleListWeekendPlans(w http.ResponseWriter, r *http.Request) {
@@ -176,6 +194,30 @@ func (d Deps) handleWeekendThisWeek(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "could not save your answer")
+		return
+	}
+	writeJSON(w, http.StatusOK, planJSON(plan))
+}
+
+// handleWeekendKeep is «όχι» to «Να το σταματήσω;»: the plan stays.
+func (d Deps) handleWeekendKeep(w http.ResponseWriter, r *http.Request) {
+	userID, ok := callerID(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
+		return
+	}
+	id, err := uuid.Parse(chiURLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "no such plan")
+		return
+	}
+	plan, err := d.Weekend.Keep(r.Context(), userID, id)
+	if errors.Is(err, weekend.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "no such plan")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not keep the plan")
 		return
 	}
 	writeJSON(w, http.StatusOK, planJSON(plan))

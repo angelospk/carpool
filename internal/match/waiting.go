@@ -75,6 +75,10 @@ JOIN trip ON true
 -- app to agree a meeting point, answer a message, or say they are not coming.
 JOIN users pu ON pu.id = rr.passenger_id AND pu.status = 'active'
 WHERE rr.status IN (` + waitingStatuses + `)
+  -- A weekend request is never asked about: the driver offers first, from the
+  -- publish screen. Left in, it would be woken and counted for a nudge, and it
+  -- would use up the wake's few slots before the requests AskNext does ask.
+  AND rr.weekend_plan_id IS NULL
   -- Read from the window rather than the status. A request whose time has
   -- passed is only marked expired when the sweeper next runs, and waking it in
   -- between would offer somebody a lift to a journey they have already made or

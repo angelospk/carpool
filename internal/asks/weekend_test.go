@@ -46,3 +46,34 @@ func TestTheMatcherLeavesWeekendRequestsAlone(t *testing.T) {
 		t.Fatalf("AskNext for the control request: %v", err)
 	}
 }
+
+// «Άλλα δρομολόγια» lists the departures the matcher would try next. For a
+// weekend request that is none: the matcher never tries it.
+func TestAlternativesAreNoneForAWeekendRequest(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	mustExec(t, f, `DELETE FROM asks`)
+	mustExec(t, f, `UPDATE ride_requests SET status = 'open' WHERE id = $1`, f.requestID)
+
+	got, err := f.service().WithRouter(straightLineRouter{}).Alternatives(ctx, f.requestID, f.passengerID, 5)
+	if err != nil || len(got) == 0 {
+		t.Fatalf("control: Alternatives = %v, %v; want a car for the ordinary request", got, err)
+	}
+
+	var planID string
+	must(t, f.pool.QueryRow(ctx, `
+		INSERT INTO weekend_plans (passenger_id, origin, destination, depart_dow, depart_time)
+		VALUES ($1, ST_SetSRID(ST_MakePoint(25.82,40.85),4326), ST_SetSRID(ST_MakePoint(25.98,40.85),4326),
+		        5, '15:00')
+		RETURNING id::text`, f.passengerID).Scan(&planID), "plan")
+	mustExec(t, f, `UPDATE ride_requests SET weekend_plan_id = $2, weekend_of = '2026-07-31', weekend_leg = 'out'
+		WHERE id = $1`, f.requestID, planID)
+
+	got, err = f.service().WithRouter(straightLineRouter{}).Alternatives(ctx, f.requestID, f.passengerID, 5)
+	if err != nil {
+		t.Fatalf("Alternatives: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("%d alternatives listed for a weekend request, want none", len(got))
+	}
+}

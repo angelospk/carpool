@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"carpool/internal/clock"
+	"carpool/internal/match"
 	"carpool/internal/notices"
 	"carpool/internal/store"
 	"carpool/internal/store/testdb"
@@ -683,4 +684,196 @@ func TestThursdayQuestionIsNotAskedWhenItHasNoPoint(t *testing.T) {
 			t.Errorf("AskThursday = %d, %v", n, err)
 		}
 	})
+}
+
+// The cutoff is the outbound day and time of the plan, not the earliest window
+// of whatever is still live: after Friday's request lapses Saturday's is the
+// earliest, and a late job would ask a question about a weekend that has
+// started.
+func TestThursdayQuestionIsNotAskedOnceTheOutboundHasPassedEvenIfLaterDaysAreOpen(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	plan := w.create(t, fridayToSunday())
+	_, _ = w.svc.Generate(ctx, w.clock.Now())
+
+	// Friday's request has run out; Saturday's and Sunday's are still open.
+	_, err := w.pool.Exec(ctx, `UPDATE ride_requests SET status = 'expired'
+		WHERE weekend_plan_id = $1 AND weekend_leg = 'out' AND window_start < $2`,
+		plan, time.Date(2026, time.July, 31, 23, 0, 0, 0, athens))
+	must(t, err)
+
+	late := time.Date(2026, time.July, 31, 20, 0, 0, 0, athens)
+	if n, err := w.svc.AskThursday(ctx, late); err != nil || n != 0 || len(w.pushes(t)) != 0 {
+		t.Fatalf("AskThursday on Friday evening = %d, %v, %d pushes; want no question", n, err, len(w.pushes(t)))
+	}
+}
+
+// A job that has read the plan as eligible and then waits behind the
+// passenger's lock must read it again: an answer given in between ("not this
+// week", or a seat taken) has made the question unwanted.
+func TestThursdayQuestionIsCheckedAgainUnderThePassengersLock(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	plan := w.create(t, fridayToSunday())
+	_, _ = w.svc.Generate(ctx, w.clock.Now())
+
+	holder, err := w.pool.Begin(ctx)
+	must(t, err)
+	defer func() { _ = holder.Rollback(ctx) }()
+	_, err = holder.Exec(ctx, match.PassengerLockSQL, w.passenger)
+	must(t, err)
+
+	type result struct {
+		n   int
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		n, err := w.svc.AskThursday(ctx, time.Date(2026, time.July, 30, 18, 30, 0, 0, athens))
+		done <- result{n, err}
+	}()
+
+	// Wait until the job is parked behind the lock.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		must(t, w.pool.QueryRow(ctx,
+			`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+			   AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`).Scan(&waiting))
+		if waiting > 0 {
+			break
+		}
+		select {
+		case r := <-done:
+			t.Fatalf("AskThursday finished without waiting for the passenger's lock: %+v", r)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("AskThursday never waited for the passenger's lock")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// The answer "not this week" lands first.
+	_, err = holder.Exec(ctx, `UPDATE ride_requests SET status = 'cancelled' WHERE weekend_plan_id = $1`, plan)
+	must(t, err)
+	must(t, holder.Commit(ctx))
+
+	r := <-done
+	if r.err != nil || r.n != 0 || len(w.pushes(t)) != 0 {
+		t.Fatalf("AskThursday = %d, %v with %d pushes; want no question after the answer", r.n, r.err, len(w.pushes(t)))
+	}
+}
+
+// Two sends of one create, as a client that timed out makes them, are one plan
+// with one set of requests.
+func TestConcurrentCreatesWithOneKeyMakeOnePlan(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	key := uuid.New()
+
+	type result struct {
+		plan weekend.Plan
+		err  error
+	}
+	start := make(chan struct{})
+	out := make(chan result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			p := fridayToSunday()
+			p.ClientKey = &key
+			<-start
+			got, err := w.svc.Create(ctx, w.passenger, p)
+			out <- result{got, err}
+		}()
+	}
+	close(start)
+	a, b := <-out, <-out
+	must(t, a.err)
+	must(t, b.err)
+	if a.plan.ID != b.plan.ID {
+		t.Fatalf("two plans, %s and %s, for one key", a.plan.ID, b.plan.ID)
+	}
+	if a.plan.Replayed == b.plan.Replayed {
+		t.Errorf("replayed = %v and %v; exactly one of the two is the retry", a.plan.Replayed, b.plan.Replayed)
+	}
+
+	var plans, requests int
+	must(t, w.pool.QueryRow(ctx, `SELECT count(*) FROM weekend_plans`).Scan(&plans))
+	must(t, w.pool.QueryRow(ctx, `SELECT count(*) FROM ride_requests WHERE weekend_plan_id = $1`, a.plan.ID).Scan(&requests))
+	if plans != 1 || requests != 4 {
+		t.Errorf("%d plans and %d requests, want 1 and 4", plans, requests)
+	}
+
+	// Without a key every create is a new plan, as before.
+	w.create(t, fridayToSunday())
+	w.create(t, fridayToSunday())
+	must(t, w.pool.QueryRow(ctx, `SELECT count(*) FROM weekend_plans`).Scan(&plans))
+	if plans != 3 {
+		t.Errorf("%d plans after two creates without a key, want 3", plans)
+	}
+}
+
+func TestThisWeekKeepsTheAnswerForTheWeekend(t *testing.T) {
+	for _, going := range []bool{true, false} {
+		w := newWorld(t)
+		ctx := context.Background()
+		plan := w.create(t, fridayToSunday())
+		if _, err := w.svc.Generate(ctx, w.clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+		list, err := w.svc.List(ctx, w.passenger)
+		must(t, err)
+		if list[0].AnsweredThisWeek {
+			t.Errorf("going=%v: answered before any answer", going)
+		}
+		got, err := w.svc.ThisWeek(ctx, w.passenger, plan, going)
+		must(t, err)
+		if !got.AnsweredThisWeek {
+			t.Errorf("going=%v: the answer is not kept", going)
+		}
+		list, err = w.svc.List(ctx, w.passenger)
+		must(t, err)
+		if !list[0].AnsweredThisWeek {
+			t.Errorf("going=%v: List forgot the answer", going)
+		}
+		// The next weekend asks again.
+		w.clock.Set(time.Date(2026, time.August, 3, 12, 0, 0, 0, athens))
+		list, err = w.svc.List(ctx, w.passenger)
+		must(t, err)
+		if list[0].AnsweredThisWeek {
+			t.Errorf("going=%v: last weekend's answer counts for the next", going)
+		}
+	}
+}
+
+func TestKeepStartsTheCountOverAndTouchesNothingElse(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	plan := w.create(t, fridayToSunday())
+	if _, err := w.svc.Generate(ctx, w.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.pool.Exec(ctx, `UPDATE weekend_plans SET declines_in_row = 3`); err != nil {
+		t.Fatal(err)
+	}
+	got, err := w.svc.Keep(ctx, w.passenger, plan)
+	must(t, err)
+	if got.DeclinesInRow != 0 || got.AskToStop {
+		t.Errorf("after keep: %d in a row, ask_to_stop %v", got.DeclinesInRow, got.AskToStop)
+	}
+	if got.ThisWeek != "open" || got.AnsweredThisWeek {
+		t.Errorf("keep changed the weekend: %q, answered %v", got.ThisWeek, got.AnsweredThisWeek)
+	}
+	if !w.active(t, plan) {
+		t.Error("keep stopped the plan")
+	}
+
+	stranger := w.user(t, "+306900000003", uuid.Nil)
+	if _, err := w.svc.Keep(ctx, stranger, plan); !errors.Is(err, weekend.ErrNotFound) {
+		t.Errorf("Keep by a stranger = %v, want ErrNotFound", err)
+	}
+	if _, err := w.svc.Keep(ctx, w.passenger, uuid.New()); !errors.Is(err, weekend.ErrNotFound) {
+		t.Errorf("Keep of nothing = %v, want ErrNotFound", err)
+	}
 }

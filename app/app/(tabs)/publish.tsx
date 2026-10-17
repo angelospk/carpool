@@ -36,8 +36,9 @@ import { PlaceField } from '../../src/components/PlaceField';
 import { MeetingPointField } from '../../src/components/MeetingPointField';
 import { ShareRouteButton } from '../../src/components/ShareRouteButton';
 import { Demand } from '../../src/components/Demand';
+import { WeekendDepartures } from '../../src/components/WaitingPassengers';
 import type { ShareableRoute } from '../../src/design/shareRoute';
-import { athensDate, nextDate } from '../../src/design/when';
+import { athensDate, nextDate, parseTime } from '../../src/design/when';
 import { athensTime, km } from '../../src/design/format';
 import { calendarDay } from '../../src/design/format';
 
@@ -672,6 +673,11 @@ export default function PublishScreen() {
           <Card testID="publish-done">
             <Text style={styles.doneTitle}>{done.title}</Text>
             {done.detail ? <Text style={styles.hint}>{done.detail}</Text> : null}
+            {/* People waiting for a weekend on this road, now that there is a
+                car for them: the driver says yes first. */}
+            {published !== null ? (
+              <WeekendDepartures from={published.origin_label} to={published.destination_label} />
+            ) : null}
             {published !== null ? (
               <ShareRouteButton
                 route={published}
@@ -777,19 +783,6 @@ function first(value: string | string[] | undefined): string | undefined {
 // sorted, but a preset is a set either way.
 function sameDays(chosen: number[], preset: readonly number[]): boolean {
   return chosen.length === preset.length && preset.every((d) => chosen.includes(d));
-}
-
-/**
- * "0745", "745", "7:45" and "07:45" all mean 07:45; anything else is not a time
- * of day. Returns HH:MM, or null.
- */
-function parseTime(text: string): string | null {
-  const m = /^(\d{1,2}):?(\d{2})(?::\d{2})?$/.exec(text.trim());
-  if (!m) return null;
-  const h = Number(m[1]);
-  const min = Number(m[2]);
-  if (h > 23 || min > 59) return null;
-  return `${String(h).padStart(2, '0')}:${m[2]}`;
 }
 
 /**

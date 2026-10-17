@@ -63,12 +63,23 @@ type Plan struct {
 	LuggageCount int
 	EveryWeek    bool
 
+	// ClientKey is the client's own key for this create. A create sent again
+	// with the key of one already made, by the same passenger, answers that
+	// plan. Nil means no key: every create is a new plan.
+	ClientKey *uuid.UUID
+
 	// Read back only.
+	// Replayed is set on the answer to a create whose key had been used
+	// already: the plan is the earlier one, not new.
+	Replayed      bool
 	DeclinesInRow int
 	// ThisWeek is how the coming weekend stands: none, open, matched or
 	// cancelled.
 	ThisWeek  string
 	AskToStop bool
+	// AnsweredThisWeek is true once the Thursday question has been answered,
+	// yes or no, for the coming weekend.
+	AnsweredThisWeek bool
 }
 
 // Service keeps weekend plans.
@@ -168,18 +179,20 @@ func (s *Service) Create(ctx context.Context, passenger uuid.UUID, p Plan) (Plan
 	}
 
 	now := s.clock.Now()
-	err = s.pool.QueryRow(ctx, `
-		INSERT INTO weekend_plans (passenger_id, origin, destination, origin_label, destination_label,
-		                           depart_dow, depart_time, return_dow, return_time,
-		                           seats, luggage, luggage_count, every_week, created_at, updated_at)
-		VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), ST_SetSRID(ST_MakePoint($4, $5), 4326),
-		        $6, $7, $8, $9::time, $10, $11::time, $12, $13::luggage_size, $14, $15, $16, $16)
-		RETURNING id`,
-		passenger, p.OriginLon, p.OriginLat, p.DestinationLon, p.DestinationLat,
-		p.OriginLabel, p.DestinationLabel, p.DepartDow, p.DepartTime, p.ReturnDow, p.ReturnTime,
-		p.Seats, p.Luggage, p.LuggageCount, p.EveryWeek, now).Scan(&p.ID)
+	replayed, err := s.insert(ctx, passenger, &p, now)
 	if err != nil {
-		return Plan{}, fmt.Errorf("weekend: saving the plan: %w", err)
+		return Plan{}, err
+	}
+	if replayed {
+		views, err := s.read(ctx, s.pool, passenger, &p.ID, now)
+		if err != nil {
+			return Plan{}, fmt.Errorf("weekend: reading the plan back: %w", err)
+		}
+		if len(views) != 1 {
+			return Plan{}, invalid("client_key_used", "that plan was made already and has since been stopped")
+		}
+		views[0].Replayed = true
+		return views[0], nil
 	}
 	if _, err := s.generateFor(ctx, p.ID, now); err != nil {
 		// The plan stands and the hourly job will make the requests.
@@ -190,6 +203,49 @@ func (s *Service) Create(ctx context.Context, passenger uuid.UUID, p Plan) (Plan
 		return Plan{}, fmt.Errorf("weekend: reading the plan back: %w", err)
 	}
 	return views[0], nil
+}
+
+// insert stores the plan under the passenger's matching lock, which every other
+// thing that changes their plans takes, so two sends of one create are
+// serialised and the second finds the first. It sets p.ID, and reports whether
+// that is a plan made earlier under the same client key.
+func (s *Service) insert(ctx context.Context, passenger uuid.UUID, p *Plan, now time.Time) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("weekend: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, match.PassengerLockSQL, passenger); err != nil {
+		return false, fmt.Errorf("weekend: locking the passenger: %w", err)
+	}
+	if p.ClientKey != nil {
+		err := tx.QueryRow(ctx,
+			`SELECT id FROM weekend_plans WHERE passenger_id = $1 AND client_key = $2`,
+			passenger, p.ClientKey).Scan(&p.ID)
+		if err == nil {
+			return true, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return false, fmt.Errorf("weekend: looking for the plan under its key: %w", err)
+		}
+	}
+	err = tx.QueryRow(ctx, `
+		INSERT INTO weekend_plans (passenger_id, origin, destination, origin_label, destination_label,
+		                           depart_dow, depart_time, return_dow, return_time,
+		                           seats, luggage, luggage_count, every_week, client_key, created_at, updated_at)
+		VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), ST_SetSRID(ST_MakePoint($4, $5), 4326),
+		        $6, $7, $8, $9::time, $10, $11::time, $12, $13::luggage_size, $14, $15, $16, $17, $17)
+		RETURNING id`,
+		passenger, p.OriginLon, p.OriginLat, p.DestinationLon, p.DestinationLat,
+		p.OriginLabel, p.DestinationLabel, p.DepartDow, p.DepartTime, p.ReturnDow, p.ReturnTime,
+		p.Seats, p.Luggage, p.LuggageCount, p.EveryWeek, p.ClientKey, now).Scan(&p.ID)
+	if err != nil {
+		return false, fmt.Errorf("weekend: saving the plan: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("weekend: commit: %w", err)
+	}
+	return false, nil
 }
 
 // List is the caller's plans that are still on, with how the coming weekend
@@ -209,6 +265,7 @@ func (s *Service) read(ctx context.Context, q querier, passenger uuid.UUID, id *
 		       p.depart_dow, to_char(p.depart_time, 'HH24:MI'),
 		       p.return_dow, to_char(p.return_time, 'HH24:MI'),
 		       p.seats, p.luggage::text, p.luggage_count, p.every_week, p.declines_in_row,
+		       p.answered_for IS NOT DISTINCT FROM $3::date,
 		       (SELECT CASE WHEN bool_or(r.status = 'matched') THEN 'matched'
 		                    WHEN bool_or(r.status IN ('open', 'asking')) THEN 'open'
 		                    WHEN bool_or(r.status = 'cancelled') THEN 'cancelled'
@@ -228,7 +285,7 @@ func (s *Service) read(ctx context.Context, q querier, passenger uuid.UUID, id *
 		var p Plan
 		if err := rows.Scan(&p.ID, &p.OriginLon, &p.OriginLat, &p.DestinationLon, &p.DestinationLat,
 			&p.OriginLabel, &p.DestinationLabel, &p.DepartDow, &p.DepartTime, &p.ReturnDow, &p.ReturnTime,
-			&p.Seats, &p.Luggage, &p.LuggageCount, &p.EveryWeek, &p.DeclinesInRow, &p.ThisWeek); err != nil {
+			&p.Seats, &p.Luggage, &p.LuggageCount, &p.EveryWeek, &p.DeclinesInRow, &p.AnsweredThisWeek, &p.ThisWeek); err != nil {
 			return nil, fmt.Errorf("weekend: reading a plan: %w", err)
 		}
 		p.AskToStop = p.DeclinesInRow >= stopAfterDeclines
@@ -299,7 +356,8 @@ func (s *Service) cancelLooking(ctx context.Context, tx pgx.Tx, plan uuid.UUID, 
 
 // ThisWeek is the Thursday answer. Going leaves things as they are and starts
 // the count of «όχι» over. Not going calls off this weekend's requests, with
-// any live offers on them, and counts one more «όχι».
+// any live offers on them, and counts one more «όχι». Either answer is kept
+// for the weekend, so the question is not asked again.
 //
 // The count rises only when there was something to call off, so the same
 // answer sent twice, by a double tap or a retry, is one answer.
@@ -325,9 +383,9 @@ func (s *Service) ThisWeek(ctx context.Context, passenger, id uuid.UUID, going b
 		return Plan{}, fmt.Errorf("weekend: reading the plan: %w", err)
 	}
 
+	friday := s.comingFriday(now)
 	declines := 0
 	if !going {
-		friday := s.comingFriday(now)
 		n, err := s.cancelLooking(ctx, tx, id, &friday)
 		if err != nil {
 			return Plan{}, err
@@ -336,15 +394,45 @@ func (s *Service) ThisWeek(ctx context.Context, passenger, id uuid.UUID, going b
 			declines = 1
 		}
 		if _, err := tx.Exec(ctx, `
-			UPDATE weekend_plans SET declines_in_row = declines_in_row + $2, updated_at = $3 WHERE id = $1`,
-			id, declines, now); err != nil {
+			UPDATE weekend_plans SET declines_in_row = declines_in_row + $2, answered_for = $4, updated_at = $3 WHERE id = $1`,
+			id, declines, now, friday); err != nil {
 			return Plan{}, fmt.Errorf("weekend: counting the answer: %w", err)
 		}
 	} else if _, err := tx.Exec(ctx,
-		`UPDATE weekend_plans SET declines_in_row = 0, updated_at = $2 WHERE id = $1`, id, now); err != nil {
+		`UPDATE weekend_plans SET declines_in_row = 0, answered_for = $3, updated_at = $2 WHERE id = $1`,
+		id, now, friday); err != nil {
 		return Plan{}, fmt.Errorf("weekend: counting the answer: %w", err)
 	}
 
+	views, err := s.read(ctx, tx, passenger, &id, now)
+	if err != nil || len(views) != 1 {
+		return Plan{}, fmt.Errorf("weekend: reading the plan back: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Plan{}, fmt.Errorf("weekend: commit: %w", err)
+	}
+	return views[0], nil
+}
+
+// Keep is «όχι» to «Να το σταματήσω;»: the plan goes on, and the count of
+// «όχι» starts over. It does not touch this weekend's requests.
+func (s *Service) Keep(ctx context.Context, passenger, id uuid.UUID) (Plan, error) {
+	now := s.clock.Now()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Plan{}, fmt.Errorf("weekend: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `
+		UPDATE weekend_plans SET declines_in_row = 0, updated_at = $3
+		 WHERE id = $1 AND passenger_id = $2 AND active`, id, passenger, now)
+	if err != nil {
+		return Plan{}, fmt.Errorf("weekend: keeping the plan: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return Plan{}, ErrNotFound
+	}
 	views, err := s.read(ctx, tx, passenger, &id, now)
 	if err != nil || len(views) != 1 {
 		return Plan{}, fmt.Errorf("weekend: reading the plan back: %w", err)
@@ -563,8 +651,8 @@ func (s *Service) generateFor(ctx context.Context, plan uuid.UUID, now time.Time
 
 // AskThursday sends «Φεύγεις αυτό το Σαββατοκύριακο;» to every active plan that
 // still has a request looking for a driver this weekend, once per plan and
-// weekend, from Thursday 18:00 until the outbound window opens. It returns how
-// many it asked.
+// weekend, from Thursday 18:00 until the plan's outbound time on its day. It
+// returns how many it asked.
 //
 // A plan made after Thursday 18:00 is not asked: the passenger has only just
 // said they are going. One with a seat already booked is not asked either.
@@ -574,19 +662,14 @@ func (s *Service) AskThursday(ctx context.Context, now time.Time) (int, error) {
 	if now.Before(thursday) {
 		return 0, nil
 	}
+	// Read without a lock, to know whom to look at. Each plan is read again
+	// under its passenger's lock before anything is sent.
 	rows, err := s.pool.Query(ctx, `
 		SELECT p.id, p.passenger_id
 		  FROM weekend_plans p
 		  JOIN users u ON u.id = p.passenger_id
-		 WHERE p.active AND u.status = 'active'
-		   AND p.created_at <= $2
-		   AND p.last_asked_for IS DISTINCT FROM $1::date
-		   AND NOT EXISTS (SELECT 1 FROM ride_requests r
-		                    WHERE r.weekend_plan_id = p.id AND r.weekend_of = $1 AND r.status = 'matched')
-		   AND (SELECT min(r.window_start) FROM ride_requests r
-		         WHERE r.weekend_plan_id = p.id AND r.weekend_of = $1 AND r.weekend_leg = 'out'
-		           AND r.status IN ('open', 'asking')) > $3
-		 ORDER BY p.created_at, p.id`, friday, thursday, now)
+		 WHERE `+askable+`
+		 ORDER BY p.created_at, p.id`, friday, thursday)
 	if err != nil {
 		return 0, fmt.Errorf("weekend: finding plans to ask: %w", err)
 	}
@@ -608,7 +691,7 @@ func (s *Service) AskThursday(ctx context.Context, now time.Time) (int, error) {
 	asked := 0
 	var failed error
 	for _, t := range targets {
-		ok, err := s.ask(ctx, t.plan, t.passenger, friday, now)
+		ok, err := s.ask(ctx, t.plan, t.passenger, friday, thursday, now)
 		if err != nil {
 			failed = errors.Join(failed, err)
 		}
@@ -619,24 +702,62 @@ func (s *Service) AskThursday(ctx context.Context, now time.Time) (int, error) {
 	return asked, failed
 }
 
-// ask marks the plan asked for this weekend and queues the push in one
-// transaction, so a crash between the two neither loses the question nor sends
-// it twice.
-func (s *Service) ask(ctx context.Context, plan, passenger uuid.UUID, friday, now time.Time) (bool, error) {
+// askable is what makes a plan worth the Thursday question, with the Friday of
+// the weekend as $1 and Thursday 18:00 as $2. The plan is p and its passenger
+// u. The outbound time is not in it: that is a wall time on a day, worked out
+// in Go from the plan's own day and time.
+const askable = `p.active AND u.status = 'active'
+		   AND p.created_at <= $2
+		   AND p.last_asked_for IS DISTINCT FROM $1::date
+		   AND NOT EXISTS (SELECT 1 FROM ride_requests r
+		                    WHERE r.weekend_plan_id = p.id AND r.weekend_of = $1 AND r.status = 'matched')
+		   AND EXISTS (SELECT 1 FROM ride_requests r
+		                WHERE r.weekend_plan_id = p.id AND r.weekend_of = $1 AND r.weekend_leg = 'out'
+		                  AND r.status IN ('open', 'asking'))`
+
+// ask queues the question for a plan and marks it asked for this weekend, in
+// one transaction, so a crash between the two neither loses the question nor
+// sends it twice.
+//
+// Whether the plan should still be asked is decided in that transaction, under
+// the passenger's matching lock, which the Thursday answer and a seat taken
+// also hold: an answer that landed between the list and here has made the
+// question unwanted.
+func (s *Service) ask(ctx context.Context, plan, passenger uuid.UUID, friday, thursday, now time.Time) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("weekend: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	tag, err := tx.Exec(ctx, `
-		UPDATE weekend_plans SET last_asked_for = $2
-		 WHERE id = $1 AND active AND last_asked_for IS DISTINCT FROM $2::date`, plan, friday)
-	if err != nil {
-		return false, fmt.Errorf("weekend: marking the plan asked: %w", err)
+	if _, err := tx.Exec(ctx, match.PassengerLockSQL, passenger); err != nil {
+		return false, fmt.Errorf("weekend: locking the passenger: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	var departDow int
+	var departTime string
+	err = tx.QueryRow(ctx, `
+		SELECT p.depart_dow, to_char(p.depart_time, 'HH24:MI')
+		  FROM weekend_plans p
+		  JOIN users u ON u.id = p.passenger_id
+		 WHERE p.id = $3 AND `+askable+`
+		   FOR UPDATE OF p`, friday, thursday, plan).Scan(&departDow, &departTime)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("weekend: reading the plan: %w", err)
+	}
+	// Until the outbound time on the plan's own day, not until the earliest
+	// window still live: once Friday's request has lapsed Saturday's is the
+	// earliest, and a late job would ask about a weekend that has begun.
+	day, _ := offset(departDow)
+	hh, mm := parseClockParts(departTime)
+	if !now.Before(s.at(friday.AddDate(0, 0, day), hh, mm)) {
+		return false, nil
+	}
+
+	if _, err := tx.Exec(ctx, `UPDATE weekend_plans SET last_asked_for = $2 WHERE id = $1`, plan, friday); err != nil {
+		return false, fmt.Errorf("weekend: marking the plan asked: %w", err)
 	}
 	msg, err := notices.WeekendQuestion(passenger, plan, friday)
 	if err != nil {
@@ -649,4 +770,9 @@ func (s *Service) ask(ctx context.Context, plan, passenger uuid.UUID, friday, no
 		return false, fmt.Errorf("weekend: commit: %w", err)
 	}
 	return true, nil
+}
+
+func parseClockParts(in string) (int, int) {
+	t, _ := parseClock(in)
+	return t.Hour(), t.Minute()
 }
