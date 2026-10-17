@@ -168,6 +168,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 			"can_rate":      trip.Driver.CanRate, "rated": trip.Driver.Rated,
 		},
 		"passengers": passengers,
+		"stops":      stopsJSON(trip.Stops),
 	}
 
 	// Why this seat costs what it costs, for the person paying for it.
@@ -454,4 +455,16 @@ func (d Deps) handleCancelTrip(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+func stopsJSON(stops []store.TripStop) []map[string]any {
+	out := make([]map[string]any, 0, len(stops))
+	for _, s := range stops {
+		out = append(out, map[string]any{
+			"kind": s.Kind, "mine": s.Mine, "passenger_id": s.PassengerID, "name": s.Name,
+			"label": s.Label, "point": s.Point, "at": s.At,
+			"seats": s.Seats, "luggage": s.Luggage, "luggage_count": s.LuggageCount,
+		})
+	}
+	return out
 }

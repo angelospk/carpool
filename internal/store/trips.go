@@ -185,6 +185,27 @@ type TripDetail struct {
 	// Destination is the end of the driver's road, [lon, lat], for the
 	// driver only: it is what their maps app is pointed at after a pickup.
 	Destination *[2]float64
+	// Stops is every pickup and drop-off in the order the road reaches them.
+	Stops []TripStop
+}
+
+// TripStop is one pickup or drop-off on the trip, placed along the road.
+//
+// The driver sees all of it. A passenger sees their own stops in full and only
+// the kind of everybody else's, which is enough to know "one stop before you"
+// and not enough to know where somebody else lives (QA 2026-10-17 U F3).
+type TripStop struct {
+	Kind string // pickup or dropoff
+	Mine bool
+	// The rest is nil on another passenger's stop seen by a passenger.
+	PassengerID  *uuid.UUID
+	Name         *string
+	Label        *string
+	Point        *[2]float64
+	At           *time.Time
+	Seats        *int
+	Luggage      *string
+	LuggageCount *int
 }
 
 var pickupFrom, pickupFromF = match.DriveFrom("o", "$3::timestamptz")
@@ -326,9 +347,71 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 				// shown, not a trip that cannot be loaded.
 			}
 		}
+		// What somebody else pays, and how many seats they took, is between
+		// them and the driver (QA 2026-10-17 A 6).
+		if role != RoleDriver && p.UserID != userID {
+			p.PriceEUR, p.Seats = nil, nil
+		}
 		d.Passengers = append(d.Passengers, p)
 	}
-	return d, rows.Err()
+	if err := rows.Err(); err != nil {
+		return TripDetail{}, err
+	}
+	rows.Close()
+	d.Stops, err = tripStops(ctx, pool, occurrenceID, userID, role)
+	return d, err
+}
+
+// tripStops lists the trip's pickups and drop-offs along the road, each timed
+// at the departure plus its share of the route's minutes. A drop-off and a
+// pickup at the same place are in that order: somebody gets out first.
+func tripStops(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.UUID, role TripRole) ([]TripStop, error) {
+	rows, err := pool.Query(ctx, `
+		WITH s AS (
+			SELECT 'pickup' AS kind, b.passenger_id, u.name, rr.origin_label AS label, b.pickup_point AS pt,
+			       b.seats, rr.luggage::text AS luggage, b.luggage_count
+			  FROM bookings b JOIN users u ON u.id = b.passenger_id
+			  LEFT JOIN ride_requests rr ON rr.id = b.request_id
+			 WHERE b.occurrence_id = $1 AND b.status IN ('confirmed','completed')
+			UNION ALL
+			SELECT 'dropoff', b.passenger_id, u.name, rr.destination_label, b.dropoff_point,
+			       b.seats, rr.luggage::text, b.luggage_count
+			  FROM bookings b JOIN users u ON u.id = b.passenger_id
+			  LEFT JOIN ride_requests rr ON rr.id = b.request_id
+			 WHERE b.occurrence_id = $1 AND b.status IN ('confirmed','completed')
+		)
+		SELECT s.kind, s.passenger_id, s.name, s.label, ST_X(s.pt), ST_Y(s.pt),
+		       o.depart_earliest + ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, s.pt))
+		                           * o.route_min * interval '1 minute',
+		       s.seats, s.luggage, s.luggage_count
+		  FROM s JOIN trip_occurrences o ON o.id = $1
+		 ORDER BY ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, s.pt)),
+		          s.kind = 'pickup', s.passenger_id`, occurrenceID)
+	if err != nil {
+		return nil, fmt.Errorf("store: loading stops: %w", err)
+	}
+	defer rows.Close()
+	out := []TripStop{}
+	for rows.Next() {
+		var st TripStop
+		var pid uuid.UUID
+		var name string
+		var label, luggage *string
+		var lon, lat float64
+		var at time.Time
+		var seats, count int
+		if err := rows.Scan(&st.Kind, &pid, &name, &label, &lon, &lat, &at, &seats, &luggage, &count); err != nil {
+			return nil, fmt.Errorf("store: scanning a stop: %w", err)
+		}
+		st.Mine = pid == userID
+		if role == RoleDriver || st.Mine {
+			st.PassengerID, st.Name, st.Label = &pid, &name, label
+			st.Point, st.At = &[2]float64{lon, lat}, &at
+			st.Seats, st.Luggage, st.LuggageCount = &seats, luggage, &count
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
 }
 
 // ParticipantRole reports how a user is attached to an occurrence, and is the
