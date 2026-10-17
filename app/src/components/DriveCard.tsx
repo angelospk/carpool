@@ -53,6 +53,8 @@ export function DriveCard({
 
   const go = useMutation({
     mutationFn: (v: { departsAt: string; detour: number }) => api.startDrive(trip.id, v.departsAt, v.detour),
+    // A warning from an earlier attempt does not belong beside this one's.
+    onMutate: () => onTrackingWarning?.(null),
     onSuccess: async () => {
       setError(null);
       // Sharing the car starts with «Φεύγω», so that once it has left the

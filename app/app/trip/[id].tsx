@@ -96,13 +96,16 @@ export default function TripScreen() {
   };
   const scrollToEnd = () => requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   // The opening fetch is not a «new» message, so nothing above scrolls to it:
-  // a long history would open on its oldest messages. Once, after the first
-  // layout that has messages in it.
-  const openedAtEnd = useRef(false);
+  // a long history would open on its oldest messages. The list stays pinned to
+  // its end until the reader scrolls away: bubbles of different heights are
+  // measured after the first layout and the content keeps growing, so one
+  // scroll after the first layout left the newest message off-screen.
+  const pinnedToEnd = useRef(true);
   const onListScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
     metrics.current = { y: contentOffset.y, view: layoutMeasurement.height, content: contentSize.height };
-    if (nearBottom()) setHasNew(false);
+    pinnedToEnd.current = nearBottom();
+    if (pinnedToEnd.current) setHasNew(false);
   };
   // undefined until the first load: the opening fetch is not a «new» message.
   const lastSeen = useRef<string | null | undefined>(undefined);
@@ -132,8 +135,7 @@ export default function TripScreen() {
     },
     onContentSizeChange: (_w: number, h: number) => {
       metrics.current.content = h;
-      if (!openedAtEnd.current && messages.data?.messages.length) {
-        openedAtEnd.current = true;
+      if (pinnedToEnd.current && messages.data?.messages.length) {
         requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
       }
     },

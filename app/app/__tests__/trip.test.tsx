@@ -732,8 +732,21 @@ test('the chat opens at the newest message', async () => {
   grow(4000);
   await waitFor(() => expect(scrollEnd).toHaveBeenCalledTimes(1));
 
-  // Only the first layout: later growth is the new-message logic's business.
-  grow(4100);
-  expect(scrollEnd).toHaveBeenCalledTimes(1);
+  // Variable-height bubbles are measured after the first layout and the list
+  // grows: still at the end, it follows, or the newest lands off-screen.
+  grow(7600);
+  await waitFor(() => expect(scrollEnd).toHaveBeenCalledTimes(2));
+
+  // Once the reader has scrolled up, growth no longer moves them.
+  fireEvent.scroll(screen.getByTestId('message-list'), {
+    nativeEvent: {
+      contentOffset: { x: 0, y: 100 },
+      layoutMeasurement: { width: 300, height: 600 },
+      contentSize: { width: 300, height: 7600 },
+    },
+  });
+  grow(7700);
+  await new Promise((r) => setTimeout(r, 50));
+  expect(scrollEnd).toHaveBeenCalledTimes(2);
   scrollEnd.mockRestore();
 });

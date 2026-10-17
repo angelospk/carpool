@@ -96,7 +96,10 @@ export default function PublishScreen() {
   const [leftEarliest, setLeftEarliest] = useState(false);
   const [leftLatest, setLeftLatest] = useState(false);
   const earliestBad = parseTime(earliest) === null;
-  const latestBad = parseTime(latest) === null;
+  // A window that does not end after it starts is refused by the server
+  // (invalid_window), so it is flagged here. HH:MM strings compare in time order.
+  const latestBad =
+    parseTime(latest) === null || (!earliestBad && (parseTime(latest) as string) <= (parseTime(earliest) as string));
   // «Φεύγω τώρα»: a trip for the next quarter of an hour, published and
   // opened at once, where «Φεύγω» is. A one-off for today whose window is
   // worked out when the button is pressed, so it never goes out in the past.

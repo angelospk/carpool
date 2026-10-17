@@ -393,6 +393,8 @@ func tripStops(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uui
 			  LEFT JOIN ride_requests rr ON rr.id = b.request_id
 			 WHERE b.occurrence_id = $1 AND b.status IN ('confirmed','completed')
 		)
+		-- The scheduled time at each stop: the departure plus its share of the
+		-- route. Not the live estimate a drive's car fix gives; pickup_at is that.
 		SELECT s.kind, s.passenger_id, s.name, s.label, ST_X(s.pt), ST_Y(s.pt),
 		       o.depart_earliest + ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, s.pt))
 		                           * o.route_min * interval '1 minute',
