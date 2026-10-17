@@ -3,7 +3,7 @@ import el from '../../src/i18n/el.json';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 
-import { FlatList, StyleSheet } from 'react-native';
+import { FlatList, Linking, StyleSheet } from 'react-native';
 import TripScreen from '../trip/[id]';
 import { colors } from '../../src/design/tokens';
 import { api, type TripDetail } from '../../src/api/endpoints';
@@ -803,4 +803,84 @@ test('the chat opens at the newest message', async () => {
   await new Promise((r) => setTimeout(r, 50));
   expect(scrollEnd).toHaveBeenCalledTimes(2);
   scrollEnd.mockRestore();
+});
+
+describe('reaching the other person', () => {
+  const asDriver = (passenger: Record<string, unknown>) =>
+    tripOf({
+      role: 'driver',
+      booking_id: null,
+      driver: person('me', 'Εγώ'),
+      passengers: [person('p-a', 'Άννα', passenger)],
+    });
+
+  it('lets the driver call a passenger, and never prints the number', async () => {
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    (api.trip as jest.Mock).mockResolvedValue(asDriver({ phone: '+306911112222' }));
+    render(<TripScreen />);
+
+    fireEvent.press(await screen.findByTestId('call-p-a'));
+    expect(open).toHaveBeenCalledWith('tel:+306911112222');
+    expect(screen.queryByText(/6911112222/)).toBeNull();
+    open.mockRestore();
+  });
+
+  it('offers no call without a phone from the server', async () => {
+    (api.trip as jest.Mock).mockResolvedValue(asDriver({}));
+    render(<TripScreen />);
+
+    await screen.findByTestId('passenger-p-a');
+    expect(screen.queryByTestId('call-p-a')).toBeNull();
+  });
+
+  it('lets a passenger call the driver, and never prints the number', async () => {
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    (api.trip as jest.Mock).mockResolvedValue(
+      tripOf({ driver: person('drv', 'Γιώργος', { phone: '+306933334444' }) }),
+    );
+    render(<TripScreen />);
+
+    fireEvent.press(await screen.findByTestId('call'));
+    expect(open).toHaveBeenCalledWith('tel:+306933334444');
+    expect(screen.queryByText(/6933334444/)).toBeNull();
+    open.mockRestore();
+  });
+
+  it('offers a passenger no call when the driver has no phone to give', async () => {
+    (api.trip as jest.Mock).mockResolvedValue(tripOf());
+    render(<TripScreen />);
+
+    await screen.findByTestId('passenger-me');
+    expect(screen.queryByTestId('call')).toBeNull();
+  });
+
+  it('shows the driver a passenger\'s profiles and message buttons', async () => {
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    (api.trip as jest.Mock).mockResolvedValue(
+      asDriver({
+        facebook_url: 'https://facebook.com/anna.k',
+        instagram_url: 'https://instagram.com/anna.k',
+      }),
+    );
+    render(<TripScreen />);
+
+    expect(await screen.findByTestId('social-links-p-a')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('social-messenger-message'));
+    fireEvent.press(screen.getByTestId('social-instagram-message'));
+    expect(open).toHaveBeenCalledWith('https://m.me/anna.k');
+    expect(open).toHaveBeenCalledWith('https://ig.me/m/anna.k');
+    open.mockRestore();
+  });
+
+  it('does not show a passenger their co-passengers\' profiles', async () => {
+    (api.trip as jest.Mock).mockResolvedValue(
+      tripOf({
+        passengers: [person('me', 'Εγώ'), person('p-b', 'Βασίλης', { facebook_url: 'https://facebook.com/v' })],
+      }),
+    );
+    render(<TripScreen />);
+
+    await screen.findByTestId('passenger-p-b');
+    expect(screen.queryByTestId('social-links-p-b')).toBeNull();
+  });
 });

@@ -116,7 +116,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		passengers = append(passengers, map[string]any{
+		person := map[string]any{
 			"id": p.UserID, "name": p.Name, "photo_url": avatarURL(p.UserID, p.PhotoVersion),
 			"facebook_url":  socialURL(domain.FacebookURL, p.FacebookHandle),
 			"instagram_url": socialURL(domain.InstagramURL, p.InstagramHandle),
@@ -126,11 +126,35 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 			"can_rate":      p.CanRate, "rated": p.Rated,
 			"arrived_at": p.ArrivedAt, "pickup": p.Pickup, "dropoff": p.Dropoff,
 			"booking_id": p.BookingID,
-		})
+		}
+		// Absent, not null, outside the call window or without a booking.
+		if p.Phone != nil {
+			person["phone"] = *p.Phone
+		}
+		passengers = append(passengers, person)
 	}
 	driverGroups, ok := shared(trip.Driver.UserID)
 	if !ok {
 		return
+	}
+
+	driver := map[string]any{
+		"id": trip.Driver.UserID, "name": trip.Driver.Name,
+		"photo_url": avatarURL(trip.Driver.UserID, trip.Driver.PhotoVersion), "rating": trip.Driver.Rating,
+		"facebook_url":  socialURL(domain.FacebookURL, trip.Driver.FacebookHandle),
+		"instagram_url": socialURL(domain.InstagramURL, trip.Driver.InstagramHandle),
+		"bio":           trip.Driver.Bio,
+		"preferences":   nonNil(trip.Driver.Preferences),
+		"car_model":     trip.Driver.CarModel, "car_color": trip.Driver.CarColor,
+		// Revealed only here, and only to people already on the trip.
+		"car_plate":     trip.Driver.CarPlate,
+		"shared_groups": driverGroups,
+		"can_rate":      trip.Driver.CanRate, "rated": trip.Driver.Rated,
+	}
+	// A passenger with a seat, on the day of the trip; the key is absent
+	// otherwise (the same convention as on each passenger).
+	if trip.Driver.Phone != nil {
+		driver["phone"] = *trip.Driver.Phone
 	}
 
 	out := map[string]any{
@@ -162,21 +186,9 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		"drive_ended_at":     trip.DriveEndedAt,
 		"offers_until":       trip.OffersUntil,
 		"destination":        trip.Destination,
-		"driver": map[string]any{
-			"id": trip.Driver.UserID, "name": trip.Driver.Name,
-			"photo_url": avatarURL(trip.Driver.UserID, trip.Driver.PhotoVersion), "rating": trip.Driver.Rating,
-			"facebook_url":  socialURL(domain.FacebookURL, trip.Driver.FacebookHandle),
-			"instagram_url": socialURL(domain.InstagramURL, trip.Driver.InstagramHandle),
-			"bio":           trip.Driver.Bio,
-			"preferences":   nonNil(trip.Driver.Preferences),
-			"car_model":     trip.Driver.CarModel, "car_color": trip.Driver.CarColor,
-			// Revealed only here, and only to people already on the trip.
-			"car_plate":     trip.Driver.CarPlate,
-			"shared_groups": driverGroups,
-			"can_rate":      trip.Driver.CanRate, "rated": trip.Driver.Rated,
-		},
-		"passengers": passengers,
-		"stops":      stopsJSON(trip.Stops),
+		"driver":             driver,
+		"passengers":         passengers,
+		"stops":              stopsJSON(trip.Stops),
 	}
 
 	// Why this seat costs what it costs, for the person paying for it.

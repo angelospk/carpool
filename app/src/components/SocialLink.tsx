@@ -32,8 +32,38 @@ export function SocialLinks({
     <View testID={testID ?? 'social-links'} style={styles.rows}>
       {facebook ? <Link url={facebook} icon={<FacebookMark />} testID="social-facebook" /> : null}
       {instagram ? <Link url={instagram} icon={<InstagramMark />} testID="social-instagram" /> : null}
+      {/* A message rather than a profile page: the handle is the same one. */}
+      {facebook ? (
+        <MessageButton
+          url={`https://m.me/${handleOf(facebook)}`}
+          label={t('trip.messageMessenger')}
+          testID="social-messenger-message"
+        />
+      ) : null}
+      {instagram ? (
+        <MessageButton
+          url={`https://ig.me/m/${handleOf(instagram)}`}
+          label={t('trip.messageInstagram')}
+          testID="social-instagram-message"
+        />
+      ) : null}
       <Text style={styles.caveat}>{t('trip.socialSelfDeclared')}</Text>
     </View>
+  );
+}
+
+const handleOf = (url: string) => url.replace(/^https:\/\/[^/]+\//, '');
+
+function MessageButton({ url, label, testID }: { url: string; label: string; testID: string }) {
+  return (
+    <TouchableOpacity
+      testID={testID}
+      accessibilityRole="button"
+      style={styles.message}
+      onPress={() => void Linking.openURL(url)}
+    >
+      <Text style={styles.messageText}>{label}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -96,5 +126,7 @@ const styles = StyleSheet.create({
   rows: { marginTop: space.xs, gap: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
   link: { ...type.caption, color: colors.ink, textDecorationLine: 'underline', flexShrink: 1 },
+  message: { paddingVertical: space.xs, alignSelf: 'flex-start' },
+  messageText: { ...type.caption, color: colors.ink, fontWeight: '600' },
   caveat: { ...type.caption, color: colors.muted, fontSize: 11 },
 });

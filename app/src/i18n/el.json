@@ -426,6 +426,9 @@
   },
   "trip": {
     "you": "εσύ",
+    "call": "Κλήση",
+    "messageMessenger": "Μήνυμα στο Messenger",
+    "messageInstagram": "Μήνυμα στο Instagram",
     "inTheCar": "Στο αυτοκίνητο",
     "stops": "Στάσεις",
     "stopPickup": "Παραλαβή",

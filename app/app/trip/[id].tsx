@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   FlatList,
   Platform,
@@ -35,6 +35,7 @@ import { RepeatCard } from '../../src/components/RepeatCard';
 import { PendingAsks } from '../../src/components/PendingAsks';
 import { RatingRow } from '../../src/components/RatingRow';
 import { SocialLinks } from '../../src/components/SocialLink';
+import { CallButton } from '../../src/components/CallButton';
 import { PortNotice } from '../../src/components/PortNotice';
 import { PriceBreakdown } from '../../src/components/PriceBreakdown';
 import { PreferenceChips } from '../../src/components/Preferences';
@@ -457,6 +458,7 @@ export default function TripScreen() {
                     facebook={trip.data.driver.facebook_url}
                     instagram={trip.data.driver.instagram_url}
                   />
+                  <CallButton phone={trip.data.driver.phone} />
 
                   {/* What the two hours will be like, which the photo and the
                       rating do not say. */}
@@ -476,8 +478,8 @@ export default function TripScreen() {
                   <Card>
                     <Text style={styles.label}>{t('trip.inTheCar')}</Text>
                     {trip.data.passengers.map((p) => (
+                      <Fragment key={p.id}>
                       <PersonLink
-                        key={p.id}
                         testID={`person-${p.id}`}
                         self={p.id === me?.id}
                         label={t('trip.openProfile', { name: p.name })}
@@ -498,6 +500,19 @@ export default function TripScreen() {
                         ) : null}
                       </View>
                       </PersonLink>
+                      {/* The driver reaches each passenger as a passenger reaches
+                          the driver; passengers do not reach each other. */}
+                      {trip.data.role === 'driver' && p.id !== me?.id ? (
+                        <>
+                          <SocialLinks
+                            testID={`social-links-${p.id}`}
+                            facebook={p.facebook_url}
+                            instagram={p.instagram_url}
+                          />
+                          <CallButton phone={p.phone} testID={`call-${p.id}`} />
+                        </>
+                      ) : null}
+                      </Fragment>
                     ))}
                   </Card>
                 ) : null}

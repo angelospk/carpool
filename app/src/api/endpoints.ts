@@ -207,6 +207,11 @@ export type Participant = {
   /** Where they say they can also be found. Self-declared, never verified. */
   facebook_url: string | null;
   instagram_url: string | null;
+  /**
+   * To call: present only for a confirmed booking, from two hours before the
+   * trip to two hours after. Never shown as text, only dialled by the button.
+   */
+  phone?: string;
   car_model?: string | null;
   car_color?: string | null;
   car_plate?: string | null;
