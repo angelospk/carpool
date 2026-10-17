@@ -75,16 +75,19 @@ function PlanCard({ plan, now }: { plan: WeekendPlan; now: Date }) {
   };
   const stop = useMutation({
     mutationFn: () => api.stopWeekendPlan(plan.id),
+    onMutate: () => setFailed(false),
     onSuccess: refresh,
     onError: () => setFailed(true),
   });
   const going = useMutation({
     mutationFn: (yes: boolean) => api.weekendThisWeek(plan.id, yes),
+    onMutate: () => setFailed(false),
     onSuccess: refresh,
     onError: () => setFailed(true),
   });
   const keep = useMutation({
     mutationFn: () => api.keepWeekendPlan(plan.id),
+    onMutate: () => setFailed(false),
     onSuccess: refresh,
     onError: () => setFailed(true),
   });

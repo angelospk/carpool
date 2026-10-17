@@ -328,7 +328,7 @@ func NewRouter(deps Deps) http.Handler {
 				r.With(estimates.perUser).Post("/estimates", deps.handleEstimate)
 			}
 			if deps.Weekend != nil {
-				r.Post("/weekend-plans", deps.handleCreateWeekendPlan)
+				r.With(publishing.perUser).Post("/weekend-plans", deps.handleCreateWeekendPlan)
 				r.Get("/weekend-plans", deps.handleListWeekendPlans)
 				r.Delete("/weekend-plans/{id}", deps.handleStopWeekendPlan)
 				r.Post("/weekend-plans/{id}/this-week", deps.handleWeekendThisWeek)
