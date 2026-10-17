@@ -291,7 +291,8 @@ export type LivePosition = {
   lat: number;
   lon: number;
   updated_at: string;
-  observed_at: string;
+  /** Absent from a server older than this field: updated_at stands in. */
+  observed_at?: string;
 };
 
 /** A group the caller belongs to. */

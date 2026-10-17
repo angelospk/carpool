@@ -94,7 +94,7 @@ export function LiveCard({
   });
   useEffect(() => {
     if (!driverPosition) return;
-    const at = Date.parse(driverPosition.observed_at);
+    const at = Date.parse(driverPosition.observed_at ?? driverPosition.updated_at);
     setFixes((f) =>
       f.last && f.last.at === at
         ? f
@@ -251,7 +251,7 @@ export function LiveCard({
   // The car as it is probably now, with the meeting point and the passenger.
   let driverMarker: MapMarker | null = null;
   if (driverPosition) {
-    const reportedAt = Date.parse(driverPosition.observed_at);
+    const reportedAt = Date.parse(driverPosition.observed_at ?? driverPosition.updated_at);
     const known = fixes.last && fixes.last.at === reportedAt;
     const raw: TimedFix = { lat: driverPosition.lat, lon: driverPosition.lon, at: reportedAt };
     const shown = known
@@ -296,7 +296,7 @@ export function LiveCard({
           ) : (
             live.data.positions.map((p) => (
               <View key={p.user_id} testID={`live-${p.user_id}`} style={styles.row}>
-                <Text style={styles.who}>{ageLine(p.name, p.observed_at, at, t)}</Text>
+                <Text style={styles.who}>{ageLine(p.name, p.observed_at ?? p.updated_at, at, t)}</Text>
                 {passenger ? null : (
                   <Button
                     testID={`live-map-${p.user_id}`}
