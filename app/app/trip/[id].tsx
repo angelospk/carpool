@@ -458,7 +458,7 @@ export default function TripScreen() {
                     facebook={trip.data.driver.facebook_url}
                     instagram={trip.data.driver.instagram_url}
                   />
-                  <CallButton phone={trip.data.driver.phone} />
+                  <CallButton phone={trip.data.driver.phone} until={trip.data.driver.call_until} />
 
                   {/* What the two hours will be like, which the photo and the
                       rating do not say. */}
@@ -509,7 +509,7 @@ export default function TripScreen() {
                             facebook={p.facebook_url}
                             instagram={p.instagram_url}
                           />
-                          <CallButton phone={p.phone} testID={`call-${p.id}`} />
+                          <CallButton phone={p.phone} until={p.call_until} testID={`call-${p.id}`} />
                         </>
                       ) : null}
                       </Fragment>

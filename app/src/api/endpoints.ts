@@ -212,6 +212,8 @@ export type Participant = {
    * trip to two hours after. Never shown as text, only dialled by the button.
    */
   phone?: string;
+  /** When the call window closes (ISO time); present exactly when `phone` is. */
+  call_until?: string;
   car_model?: string | null;
   car_color?: string | null;
   car_plate?: string | null;

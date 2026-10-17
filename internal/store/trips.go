@@ -129,6 +129,9 @@ type TripParticipant struct {
 	// are in a confirmed booking together and it is the day of the trip: see
 	// CallWindow. Co-passengers never get each other's.
 	Phone *string
+	// CallUntil is when the window closes, set exactly when Phone is, so the
+	// app can stop offering the call without another fetch.
+	CallUntil *time.Time
 	// Driver-only fields.
 	CarModel *string
 	CarColor *string
@@ -249,7 +252,8 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 	d.OccurrenceID = occurrenceID
 	var destination []float64
 	var driverPhone string
-	var inCallWindow bool
+	var inCallWindow, confirmedSeat bool
+	var callUntil time.Time
 
 	err = pool.QueryRow(ctx, `
 		SELECT o.depart_earliest, o.depart_latest, o.status, o.route_km, o.route_min, o.seats_free, o.ends_at_port, o.seats_total,
@@ -298,7 +302,10 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		               WHERE rs.template_id = o.template_id AND rs.kind = 'recurring'),
 		       u.phone,
 		       $3::timestamptz BETWEEN o.depart_earliest - $4::interval
-		                           AND o.depart_latest + o.route_min * interval '1 minute' + $4::interval
+		                           AND o.depart_latest + o.route_min * interval '1 minute' + $4::interval,
+		       o.depart_latest + o.route_min * interval '1 minute' + $4::interval,
+		       EXISTS (SELECT 1 FROM bookings b
+		               WHERE b.occurrence_id = o.id AND b.passenger_id = $2 AND b.status = 'confirmed')
 		FROM trip_occurrences o
 		JOIN route_templates t  ON t.id = o.template_id
 		JOIN driver_profiles dp ON dp.user_id = t.driver_id
@@ -311,7 +318,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		&d.Driver.CarModel, &d.Driver.CarColor, &d.Driver.CarPlate,
 		&d.Driver.Bio, &d.Driver.Preferences, &d.ConfirmedByMe, &d.Driver.CanRate, &d.Driver.Rated,
 		&d.DriveSetAt, &d.ScheduledEarliest, &d.ScheduledLatest, &d.DetourMin, &d.PickupAt,
-		&d.DriveEndedAt, &d.OffersUntil, &destination, &d.Seats, &d.Repeats, &driverPhone, &inCallWindow)
+		&d.DriveEndedAt, &d.OffersUntil, &destination, &d.Seats, &d.Repeats, &driverPhone, &inCallWindow, &callUntil, &confirmedSeat)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TripDetail{}, ErrNotParticipant
 	}
@@ -319,9 +326,11 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		return TripDetail{}, fmt.Errorf("store: loading trip: %w", err)
 	}
 	d.Driver.CanRate = d.Driver.CanRate && !d.Driver.Rated
-	// A passenger with a seat, inside the window; nobody else is handed it.
-	if role == RolePassenger && d.BookingID != nil && inCallWindow {
+	// A passenger whose booking is still confirmed, inside the window; nobody
+	// else is handed it. A completed booking is a trip that is over.
+	if role == RolePassenger && confirmedSeat && inCallWindow {
 		d.Driver.Phone = &driverPhone
+		d.Driver.CallUntil = &callUntil
 	}
 	if len(destination) == 2 {
 		d.Destination = &[2]float64{destination[0], destination[1]}
@@ -363,8 +372,9 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		}
 		if role == RoleDriver {
 			p.BookingID = &bookingID
-			if inCallWindow {
+			if inCallWindow && !completed {
 				p.Phone = &phone
+				p.CallUntil = &callUntil
 			}
 		}
 		// Only the driver rates passengers, and only once each booking is

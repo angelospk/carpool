@@ -60,6 +60,80 @@ func TestPhoneIsGivenBothWaysInsideTheWindow(t *testing.T) {
 	}
 }
 
+// bothSidesSeePhone reports whether the driver is shown the passenger's phone
+// and the passenger the driver's, which must always agree.
+func (h *harness) bothSidesSeePhone(t *testing.T, occ, driver, passenger string) bool {
+	t.Helper()
+	_, driverSees := passengerNamed(t, h.phoneView(t, occ, driver), "Επιβάτης")["phone"]
+	_, passengerSees := h.phoneView(t, occ, passenger).Driver["phone"]
+	if driverSees != passengerSees {
+		t.Fatalf("driver sees phone %v but passenger sees phone %v", driverSees, passengerSees)
+	}
+	return driverSees
+}
+
+// The window opens two hours before the earliest departure and closes two
+// hours after the latest departure plus the road (20 minutes in the fixture,
+// 30 minutes between earliest and latest). Each edge is tried on both sides,
+// a second apart, so a window that drops the road, or measures from the wrong
+// departure, fails.
+func TestPhoneWindowEdgesAreExact(t *testing.T) {
+	const road = 20 * time.Minute
+	const spread = 30 * time.Minute
+	cases := []struct {
+		name  string
+		leave time.Duration
+		want  bool
+	}{
+		{"opens at earliest minus 2h", 2 * time.Hour, true},
+		{"not yet a second before", 2*time.Hour + time.Second, false},
+		{"closes at latest plus road plus 2h", -(spread + road + 2*time.Hour), true},
+		{"over a second after", -(spread + road + 2*time.Hour + time.Second), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			driver, passenger, occ := h.bookedTrip(t)
+			var routeMin int
+			h.mustQuery(`SELECT route_min FROM trip_occurrences`, &routeMin)
+			if time.Duration(routeMin)*time.Minute != road {
+				t.Fatalf("fixture road is %d minutes, test assumes %v", routeMin, road)
+			}
+			h.leavesIn(c.leave)
+
+			if got := h.bothSidesSeePhone(t, occ.String(), driver, passenger); got != c.want {
+				t.Errorf("phone given = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// call_until travels with each phone so the app can stop offering the call
+// when the window closes, without waiting for another fetch.
+func TestPhoneComesWithTheEndOfTheWindow(t *testing.T) {
+	h := newHarness(t)
+	driver, passenger, occ := h.bookedTrip(t)
+	h.leavesIn(time.Hour)
+
+	var latest time.Time
+	h.mustQuery(`SELECT depart_latest FROM trip_occurrences`, &latest)
+	want := latest.Add(20*time.Minute + 2*time.Hour)
+
+	check := func(who string, person map[string]any) {
+		t.Helper()
+		raw, ok := person["call_until"].(string)
+		if !ok {
+			t.Fatalf("%s: no call_until beside the phone: %v", who, person)
+		}
+		got, err := time.Parse(time.RFC3339, raw)
+		if err != nil || !got.Equal(want) {
+			t.Errorf("%s: call_until = %q, want %v", who, raw, want)
+		}
+	}
+	check("driver sees", passengerNamed(t, h.phoneView(t, occ.String(), driver), "Επιβάτης"))
+	check("passenger sees", h.phoneView(t, occ.String(), passenger).Driver)
+}
+
 func TestPhoneIsAbsentOutsideTheWindow(t *testing.T) {
 	cases := map[string]time.Duration{
 		"before": 2*time.Hour + time.Minute,
@@ -71,13 +145,34 @@ func TestPhoneIsAbsentOutsideTheWindow(t *testing.T) {
 			driver, passenger, occ := h.bookedTrip(t)
 			h.leavesIn(in)
 
-			if _, ok := passengerNamed(t, h.phoneView(t, occ.String(), driver), "Επιβάτης")["phone"]; ok {
+			p := passengerNamed(t, h.phoneView(t, occ.String(), driver), "Επιβάτης")
+			if _, ok := p["phone"]; ok {
 				t.Error("driver is given the passenger's phone outside the window")
+			}
+			if _, ok := p["call_until"]; ok {
+				t.Error("driver is given a call_until with no phone")
 			}
 			if _, ok := h.phoneView(t, occ.String(), passenger).Driver["phone"]; ok {
 				t.Error("passenger is given the driver's phone outside the window")
 			}
 		})
+	}
+}
+
+// Only a booking still 'confirmed' earns the call: a completed one is a trip
+// that is over, whatever the clock says.
+func TestACompletedBookingGetsNoPhone(t *testing.T) {
+	h := newHarness(t)
+	driver, passenger, occ := h.bookedTrip(t)
+	h.leavesIn(time.Hour)
+	h.mustExec(`UPDATE bookings SET status = 'completed'`)
+
+	p := passengerNamed(t, h.phoneView(t, occ.String(), driver), "Επιβάτης")
+	if _, ok := p["phone"]; ok {
+		t.Error("driver is given the phone of a completed booking")
+	}
+	if _, ok := h.phoneView(t, occ.String(), passenger).Driver["phone"]; ok {
+		t.Error("passenger is given the driver's phone on a completed booking")
 	}
 }
 

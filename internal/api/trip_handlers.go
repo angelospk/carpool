@@ -130,6 +130,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		// Absent, not null, outside the call window or without a booking.
 		if p.Phone != nil {
 			person["phone"] = *p.Phone
+			person["call_until"] = p.CallUntil
 		}
 		passengers = append(passengers, person)
 	}
@@ -155,6 +156,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 	// otherwise (the same convention as on each passenger).
 	if trip.Driver.Phone != nil {
 		driver["phone"] = *trip.Driver.Phone
+		driver["call_until"] = trip.Driver.CallUntil
 	}
 
 	out := map[string]any{
