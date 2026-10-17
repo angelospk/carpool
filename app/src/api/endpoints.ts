@@ -283,13 +283,15 @@ export type SharedRoute = {
   for_group: boolean;
 };
 
-/** Where somebody on your trip is, as of updated_at. */
+/** Where somebody on your trip is. observed_at is when their phone took the
+    fix, which is what its age is counted from; updated_at is when it arrived. */
 export type LivePosition = {
   user_id: string;
   name: string;
   lat: number;
   lon: number;
   updated_at: string;
+  observed_at: string;
 };
 
 /** A group the caller belongs to. */

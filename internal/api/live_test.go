@@ -63,6 +63,33 @@ func TestLiveLocationOverTheAPI(t *testing.T) {
 	}
 }
 
+// The passenger is told when the phone took the fix, not only when it arrived:
+// a fix taken a minute and a half ago and uploaded now is a minute and a half old.
+func TestLiveGivesWhenTheFixWasTaken(t *testing.T) {
+	h := newHarness(t)
+	_, _, occurrenceID := h.bookedTrip(t)
+	base := "/v1/trips/" + occurrenceID.String()
+	h.clock.Set(time.Date(2026, time.July, 30, 4, 15, 0, 0, time.UTC))
+	driver, _ := h.signUp("+306900000031", "Οδηγός")
+	passenger, _ := h.signUp("+306900000032", "Επιβάτης")
+	taken := h.clock.Now().Add(-90 * time.Second)
+	if rec := h.do(http.MethodPut, base+"/position",
+		map[string]any{"lat": 40.85, "lon": 25.85, "observed_at": taken}, driver); rec.Code != http.StatusNoContent {
+		t.Fatalf("PUT: %d %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Positions []struct {
+			UpdatedAt  time.Time `json:"updated_at"`
+			ObservedAt time.Time `json:"observed_at"`
+		} `json:"positions"`
+	}
+	h.decode(h.do(http.MethodGet, base+"/live", nil, passenger), &got)
+	if len(got.Positions) != 1 || !got.Positions[0].ObservedAt.Equal(taken) ||
+		!got.Positions[0].UpdatedAt.Equal(h.clock.Now()) {
+		t.Fatalf("positions = %+v, want observed %v and updated now", got.Positions, taken)
+	}
+}
+
 type eightMinutes struct{}
 
 func (eightMinutes) Route(context.Context, []geo.Point) (geo.Route, error) {

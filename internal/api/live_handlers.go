@@ -57,6 +57,7 @@ func (d Deps) handleLive(w http.ResponseWriter, r *http.Request) {
 	for _, p := range list {
 		out = append(out, map[string]any{
 			"user_id": p.UserID, "name": p.Name, "lat": p.Lat, "lon": p.Lon, "updated_at": p.UpdatedAt,
+			"observed_at": p.ObservedAt,
 		})
 	}
 	body := map[string]any{"opens": opens, "closes": closes, "positions": out}

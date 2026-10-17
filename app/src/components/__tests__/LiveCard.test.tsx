@@ -56,7 +56,7 @@ beforeEach(() => {
 test('shows the driver and how long ago they were seen, with a map link', async () => {
   (api.live as jest.Mock).mockResolvedValue({
     ...window,
-    positions: [{ user_id: 'd', name: 'Γιώργος', lat: 40.85, lon: 25.87, updated_at: '2026-07-30T04:18:00Z' }],
+    positions: [{ user_id: 'd', name: 'Γιώργος', lat: 40.85, lon: 25.87, updated_at: '2026-07-30T04:18:00Z', observed_at: '2026-07-30T04:18:00Z' }],
   });
   render(wrap(<LiveCard tripId="occ-1" now={() => at} />));
   await waitFor(() => expect(screen.getByTestId('live-d')).toBeTruthy());
@@ -145,7 +145,7 @@ test('stopping waits for the last upload before forgetting the position', async 
 test('under a minute old reads as now', async () => {
   (api.live as jest.Mock).mockResolvedValue({
     ...window,
-    positions: [{ user_id: 'd', name: 'Γιώργος', lat: 40.85, lon: 25.87, updated_at: '2026-07-30T04:19:50Z' }],
+    positions: [{ user_id: 'd', name: 'Γιώργος', lat: 40.85, lon: 25.87, updated_at: '2026-07-30T04:19:50Z', observed_at: '2026-07-30T04:19:50Z' }],
   });
   render(wrap(<LiveCard tripId="occ-1" now={() => at} />));
   expect(await screen.findByText('Γιώργος · τώρα')).toBeTruthy();
@@ -244,19 +244,17 @@ describe('the passenger waiting for the car', () => {
     [40.85, 25.9],
   ]);
   const pickup: [number, number] = [25.85, 40.85];
-  const driver = { user_id: 'd', name: 'Γιώργος', lat: 40.85, lon: 25.82, updated_at: '2026-07-30T04:19:30Z' };
+  const driver = { user_id: 'd', name: 'Γιώργος', lat: 40.85, lon: 25.82, updated_at: '2026-07-30T04:19:30Z', observed_at: '2026-07-30T04:19:30Z' };
   const card = (extra?: object) =>
     render(wrap(<LiveCard tripId="occ-1" now={() => at} role="passenger" routePolyline={route} pickup={pickup} {...extra} />));
 
-  test('says how far away the driver is, and shows the three markers', async () => {
+  test('says how far away the driver is, and shows the car and the meeting point', async () => {
     (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [driver], driver_eta_min: 12, eta_at: '2026-07-30T04:19:40Z' });
     card();
     expect(await screen.findByTestId('live-eta')).toHaveTextContent('Ο οδηγός είναι περίπου 12′ μακριά');
-    expect(mockMapProps!.markers!.map((m) => m.kind).sort()).toEqual(['driver', 'me', 'meeting']);
+    expect(mockMapProps!.markers!.map((m) => m.kind).sort()).toEqual(['driver', 'meeting']);
     const meeting = mockMapProps!.markers!.find((m) => m.kind === 'meeting')!;
     expect(meeting).toMatchObject({ lon: 25.85, lat: 40.85 });
-    // Not sharing: I am drawn at my pickup point.
-    expect(mockMapProps!.markers!.find((m) => m.kind === 'me')).toMatchObject({ lon: 25.85, lat: 40.85 });
   });
 
   test('without an ETA there is no line, but the map is there', async () => {
@@ -277,7 +275,7 @@ describe('the passenger waiting for the car', () => {
   test('a driver still gets the link, and no map', async () => {
     (api.live as jest.Mock).mockResolvedValue({
       ...window,
-      positions: [{ user_id: 'p', name: 'Μαρία', lat: 40.85, lon: 25.87, updated_at: '2026-07-30T04:19:50Z' }],
+      positions: [{ user_id: 'p', name: 'Μαρία', lat: 40.85, lon: 25.87, updated_at: '2026-07-30T04:19:50Z', observed_at: '2026-07-30T04:19:50Z' }],
     });
     render(wrap(<LiveCard tripId="occ-1" now={() => at} role="driver" routePolyline={route} />));
     expect(await screen.findByTestId('live-map-p')).toBeTruthy();
@@ -285,7 +283,19 @@ describe('the passenger waiting for the car', () => {
   });
 
   test('a fix older than two minutes is drawn grey', async () => {
-    (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [{ ...driver, updated_at: '2026-07-30T04:17:00Z' }] });
+    (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [{ ...driver, updated_at: '2026-07-30T04:17:00Z', observed_at: '2026-07-30T04:17:00Z' }] });
+    card();
+    await waitFor(() => expect(mockMapProps).not.toBeNull());
+    expect(mockMapProps!.markers!.find((m) => m.kind === 'driver')!.stale).toBe(true);
+  });
+
+  // Uploaded just now but taken three minutes ago: the phone was out of
+  // signal, and the car may be anywhere.
+  test('a fix taken three minutes ago and uploaded now is drawn grey', async () => {
+    (api.live as jest.Mock).mockResolvedValue({
+      ...window,
+      positions: [{ ...driver, updated_at: '2026-07-30T04:20:00Z', observed_at: '2026-07-30T04:17:00Z' }],
+    });
     card();
     await waitFor(() => expect(mockMapProps).not.toBeNull());
     expect(mockMapProps!.markers!.find((m) => m.kind === 'driver')!.stale).toBe(true);
@@ -298,12 +308,14 @@ describe('the passenger waiting for the car', () => {
     expect(mockMapProps!.markers!.find((m) => m.kind === 'driver')!.stale).toBe(false);
   });
 
-  test('between reports the car moves along the road', async () => {
+  // Both reports reached the server in the same instant (a phone that got
+  // its signal back): the speed is the one between the times the fixes were taken.
+  test('between reports the car moves along the road, at the speed of the fixes taken', async () => {
     jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
     try {
       let clock = at;
-      const first = { ...driver, lon: 25.8, updated_at: '2026-07-30T04:19:00Z' };
-      const second = { ...driver, lon: 25.81, updated_at: '2026-07-30T04:19:30Z' };
+      const first = { ...driver, lon: 25.8, updated_at: '2026-07-30T04:19:35Z', observed_at: '2026-07-30T04:19:00Z' };
+      const second = { ...driver, lon: 25.81, updated_at: '2026-07-30T04:19:35Z', observed_at: '2026-07-30T04:19:30Z' };
       (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [first] });
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
       const tree = (n: number) => (
@@ -330,7 +342,18 @@ describe('the passenger waiting for the car', () => {
     }
   });
 
-  test('my own position replaces the pickup point while I share', async () => {
+  test('I am not drawn anywhere until this phone has a position of its own', async () => {
+    (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [driver] });
+    card();
+    await waitFor(() => expect(mockMapProps).not.toBeNull());
+    expect(mockMapProps!.markers!.find((m) => m.kind === 'me')).toBeUndefined();
+    // Sharing, but no fix has arrived yet: still nowhere.
+    fireEvent.press(await screen.findByTestId('live-start'));
+    await waitFor(() => expect(mockOnPosition).not.toBeNull());
+    expect(mockMapProps!.markers!.find((m) => m.kind === 'me')).toBeUndefined();
+  });
+
+  test('I am drawn where this phone shares from', async () => {
     (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [driver] });
     card();
     fireEvent.press(await screen.findByTestId('live-start'));

@@ -181,3 +181,78 @@ func TestWithoutARouterThereIsNoETA(t *testing.T) {
 		t.Fatalf("DriverETA = %v, %v; want absent", eta, err)
 	}
 }
+
+// slowRouter holds every ask until released, so simultaneous callers really
+// are simultaneous.
+type slowRouter struct {
+	countingRouter
+	release chan struct{}
+}
+
+func (r *slowRouter) Route(ctx context.Context, wp []geo.Point) (geo.Route, error) {
+	<-r.release
+	return r.countingRouter.Route(ctx, wp)
+}
+
+// askTogether has n callers ask for the rider's ETA at once and returns what
+// they got once the router is let go.
+func askTogether(t *testing.T, w *world, r *slowRouter, n int) []*live.ETA {
+	t.Helper()
+	got := make([]*live.ETA, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			eta, err := w.svc.DriverETA(context.Background(), w.trip, w.rider)
+			if err != nil {
+				t.Errorf("caller %d: %v", i, err)
+			}
+			got[i] = eta
+		}(i)
+	}
+	time.Sleep(200 * time.Millisecond)
+	close(r.release)
+	wg.Wait()
+	return got
+}
+
+func TestSimultaneousPollsAskTheRoadOnce(t *testing.T) {
+	w := newWorld(t)
+	r := &slowRouter{release: make(chan struct{})}
+	w.svc.WithRouter(r)
+	w.everybodyShares(t)
+
+	got := askTogether(t, w, r, 20)
+	if r.count() != 1 {
+		t.Fatalf("router called %d times for 20 simultaneous polls, want 1", r.count())
+	}
+	for i, eta := range got {
+		if eta == nil || eta.Minutes != 8 || !eta.At.Equal(got[0].At) {
+			t.Fatalf("caller %d got %+v, want the same 8 minutes as the rest", i, eta)
+		}
+	}
+}
+
+func TestSimultaneousPollsAfterAMinuteAndANewFixAskTheRoadOnceMore(t *testing.T) {
+	w, first := etaWorld(t)
+	ctx := context.Background()
+	w.everybodyShares(t)
+	_, _ = w.svc.DriverETA(ctx, w.trip, w.rider)
+
+	w.clock.Advance(61 * time.Second)
+	if err := w.svc.Put(ctx, w.trip, w.driver, 40.85, 25.86); err != nil {
+		t.Fatal(err)
+	}
+	r := &slowRouter{release: make(chan struct{})}
+	w.svc.WithRouter(r)
+	got := askTogether(t, w, r, 20)
+	if first.count() != 1 || r.count() != 1 {
+		t.Fatalf("router called %d then %d times, want 1 then 1", first.count(), r.count())
+	}
+	for i, eta := range got {
+		if eta == nil || !eta.At.Equal(w.clock.Now()) {
+			t.Fatalf("caller %d got %+v, want one computed now", i, eta)
+		}
+	}
+}

@@ -70,6 +70,9 @@ type Position struct {
 	Name      string
 	Lat, Lon  float64
 	UpdatedAt time.Time
+	// ObservedAt is when the phone took the fix; UpdatedAt is when it arrived.
+	// A fix without a time of its own is dated by its arrival.
+	ObservedAt time.Time
 }
 
 // Service stores and reads live positions.
@@ -283,7 +286,7 @@ func (s *Service) Visible(ctx context.Context, occurrenceID, userID uuid.UUID) (
 		return []Position{}, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT p.user_id, u.name, p.lat, p.lon, p.updated_at
+		SELECT p.user_id, u.name, p.lat, p.lon, p.updated_at, COALESCE(p.observed_at, p.updated_at)
 		FROM trip_live_positions p JOIN users u ON u.id = p.user_id
 		WHERE p.occurrence_id = $1
 		  AND p.updated_at > $2
@@ -302,7 +305,7 @@ func (s *Service) Visible(ctx context.Context, occurrenceID, userID uuid.UUID) (
 	out := []Position{}
 	for rows.Next() {
 		var p Position
-		if err := rows.Scan(&p.UserID, &p.Name, &p.Lat, &p.Lon, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.UserID, &p.Name, &p.Lat, &p.Lon, &p.UpdatedAt, &p.ObservedAt); err != nil {
 			return nil, fmt.Errorf("live: reading positions: %w", err)
 		}
 		out = append(out, p)

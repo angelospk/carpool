@@ -94,13 +94,13 @@ export function LiveCard({
   });
   useEffect(() => {
     if (!driverPosition) return;
-    const at = Date.parse(driverPosition.updated_at);
+    const at = Date.parse(driverPosition.observed_at);
     setFixes((f) =>
       f.last && f.last.at === at
         ? f
         : { prev: f.last, last: { lat: driverPosition.lat, lon: driverPosition.lon, at } },
     );
-  }, [driverPosition?.updated_at, driverPosition?.lat, driverPosition?.lon]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [driverPosition?.observed_at, driverPosition?.lat, driverPosition?.lon]); // eslint-disable-line react-hooks/exhaustive-deps
   const line = useMemo<LatLon[]>(() => {
     if (!routePolyline) return [];
     try {
@@ -251,7 +251,7 @@ export function LiveCard({
   // The car as it is probably now, with the meeting point and the passenger.
   let driverMarker: MapMarker | null = null;
   if (driverPosition) {
-    const reportedAt = Date.parse(driverPosition.updated_at);
+    const reportedAt = Date.parse(driverPosition.observed_at);
     const known = fixes.last && fixes.last.at === reportedAt;
     const raw: TimedFix = { lat: driverPosition.lat, lon: driverPosition.lon, at: reportedAt };
     const shown = known
@@ -261,8 +261,9 @@ export function LiveCard({
   }
   const markers: MapMarker[] = [];
   if (pickup) markers.push({ kind: 'meeting', lon: pickup[0], lat: pickup[1] });
-  const me = myPosition ?? (pickup ? { lon: pickup[0], lat: pickup[1] } : null);
-  if (me) markers.push({ kind: 'me', lon: me.lon, lat: me.lat });
+  // Only where this phone really is. Without a fix of its own, drawing the
+  // passenger at the meeting point would say they are already there.
+  if (myPosition) markers.push({ kind: 'me', lon: myPosition.lon, lat: myPosition.lat });
   if (driverMarker) markers.push(driverMarker);
   const eta = live.data.driver_eta_min;
 
@@ -295,7 +296,7 @@ export function LiveCard({
           ) : (
             live.data.positions.map((p) => (
               <View key={p.user_id} testID={`live-${p.user_id}`} style={styles.row}>
-                <Text style={styles.who}>{ageLine(p.name, p.updated_at, at, t)}</Text>
+                <Text style={styles.who}>{ageLine(p.name, p.observed_at, at, t)}</Text>
                 {passenger ? null : (
                   <Button
                     testID={`live-map-${p.user_id}`}
@@ -334,8 +335,8 @@ export function LiveCard({
 }
 
 // "πριν 0′" reads like a clock that stopped. Under a minute is now.
-function ageLine(name: string, updatedAt: string, at: number, t: TFunction) {
-  const minutes = Math.max(0, Math.round((at - new Date(updatedAt).getTime()) / 60_000));
+function ageLine(name: string, observedAt: string, at: number, t: TFunction) {
+  const minutes = Math.max(0, Math.round((at - new Date(observedAt).getTime()) / 60_000));
   return minutes === 0 ? t('live.now', { name }) : t('live.ago', { name, minutes });
 }
 
