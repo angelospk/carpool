@@ -18,3 +18,8 @@ test('another day for a journey a driver already took says so', () => {
   const text = refusalText(new ApiError(409, 'request_closed', 'that request is no longer looking'));
   expect(text).toMatch(/οδηγό/);
 });
+
+test('an accept that met a trip mid-change says to try again', () => {
+  const text = refusalText(new ApiError(409, 'try_again', 'the trip is changing; try again'));
+  expect(text).toMatch(/ξανά/);
+});

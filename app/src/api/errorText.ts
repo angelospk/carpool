@@ -30,6 +30,7 @@ const known = new Set([
   'not_driving',
   'duplicate_route',
   'request_closed',
+  'try_again',
   'day_in_another_group',
   'invalid_return',
   'too_late',

@@ -211,3 +211,35 @@ test('an offer alone is still inside the list, not under «δεν έχεις»',
   expect(await within(list).findByTestId('seat-offer-ask-1')).toBeTruthy();
   expect(screen.queryByTestId('empty-weekend')).toBeNull();
 });
+
+// The trips failing to load says nothing about the offers, which lapse: they
+// stay on the screen, with the trips' error beside them.
+test('an offer stays on the screen when the trips fail to load', async () => {
+  (api.upcomingTrips as jest.Mock).mockRejectedValue(new Error('offline'));
+  (api.offers as jest.Mock).mockResolvedValue({
+    offers: [
+      {
+        id: 'ask-1',
+        request_id: 'r1',
+        occurrence_id: 'occ-1',
+        driver_name: 'Γιώργος',
+        driver_photo_url: null,
+        driver_rating: null,
+        driver_rating_count: 0,
+        car: { make: 'Toyota', model: 'Yaris', colour: '' },
+        depart_earliest: '2099-10-16T12:00:00Z',
+        price_eur: 8,
+        seats: 1,
+        detour_min: 0,
+        detour_km: 0,
+        origin_label: 'Α',
+        destination_label: 'Β',
+        expires_at: '2099-10-16T09:00:00Z',
+      },
+    ],
+  });
+  render(wrap(<HomeScreen />));
+
+  const fallback = await screen.findByTestId('offers-fallback');
+  expect(await within(fallback).findByTestId('seat-offer-ask-1')).toBeTruthy();
+});

@@ -639,6 +639,7 @@
     "not_driving": "That drive is not under way.",
     "duplicate_route": "You already offer this route on the same days and hours. See your routes.",
     "request_closed": "That request is no longer looking for a driver: one was found, or it was cancelled. Check the home screen.",
+    "try_again": "The trip is changing right now. Try again in a few seconds.",
     "day_in_another_group": "You already asked for that day together with other days. Check the home screen.",
     "invalid_return": "A return needs a day and a time, and has to come after the outbound.",
     "too_late": "This trip leaves too soon to make an offer.",

@@ -304,6 +304,8 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		       EXISTS (SELECT 1 FROM route_schedules rs
 		               WHERE rs.template_id = o.template_id AND rs.kind = 'recurring'),
 		       u.phone,
+		       -- Not on a called-off trip: there is nothing left to meet for.
+		       o.status <> 'cancelled' AND
 		       $3::timestamptz BETWEEN o.depart_earliest - $4::interval
 		                           AND o.depart_latest + o.route_min * interval '1 minute' + $4::interval,
 		       o.depart_latest + o.route_min * interval '1 minute' + $4::interval,

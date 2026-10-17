@@ -164,6 +164,15 @@ export default function HomeScreen() {
       {/* A question waiting on this driver comes before anything else here:
           it lapses, and everything below it will still be there later. */}
       <PendingAsks />
+      {/* The offers live in the list, which is not drawn while the trips load
+          or after they failed. An offer lapses either way, so it stays here. */}
+      {trips.isLoading || trips.error ? (
+        // Bounded and scrolling, so several offers cannot push the error and
+        // its retry off the screen.
+        <ScrollView testID="offers-fallback" style={styles.offersFallback}>
+          <SeatOffers />
+        </ScrollView>
+      ) : null}
       <DrivingPrompt trips={all} />
 
       <AsyncState
@@ -466,6 +475,7 @@ function TripCard({ trip, onPress }: { trip: TripSummary; onPress: () => void })
 }
 
 const styles = StyleSheet.create({
+  offersFallback: { flexGrow: 0, maxHeight: '45%' },
   hero: {
     flexDirection: 'row',
     flexWrap: 'wrap',

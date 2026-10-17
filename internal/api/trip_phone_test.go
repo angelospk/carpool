@@ -207,3 +207,33 @@ func TestACancelledBookingGetsNoPhone(t *testing.T) {
 		t.Errorf("cancelled passenger reads the trip: %s", rec.Body.String())
 	}
 }
+
+// A called-off trip hands out no phone, even if a booking on it still reads
+// confirmed: the phone is for meeting up, and there is nothing to meet for.
+func TestACancelledTripGetsNoPhone(t *testing.T) {
+	h := newHarness(t)
+	driver, passenger, occ := h.bookedTrip(t)
+	h.leavesIn(time.Hour)
+	h.mustExec(`UPDATE trip_occurrences SET status = 'cancelled'`)
+
+	// The driver still reads a called-off trip of theirs; the passenger,
+	// whose seat went with it, may not. Neither is handed a phone.
+	for _, who := range []string{driver, passenger} {
+		rec := h.do(http.MethodGet, "/v1/trips/"+occ.String(), nil, who)
+		if rec.Code != http.StatusOK && rec.Code != http.StatusNotFound {
+			t.Fatalf("GET cancelled trip: %d %s", rec.Code, rec.Body.String())
+		}
+		if rec.Code != http.StatusOK {
+			continue
+		}
+		tr := h.phoneView(t, occ.String(), who)
+		if _, ok := tr.Driver["phone"]; ok && who == passenger {
+			t.Errorf("passenger sees the driver's phone on a cancelled trip")
+		}
+		for _, p := range tr.Passengers {
+			if _, ok := p["phone"]; ok {
+				t.Errorf("driver sees a passenger's phone on a cancelled trip")
+			}
+		}
+	}
+}

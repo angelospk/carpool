@@ -258,12 +258,16 @@ func TestSimultaneousPollsAfterAMinuteAndANewFixAskTheRoadOnceMore(t *testing.T)
 }
 
 // ctxRouter gives up when its caller's context does, as an HTTP router does.
+// It says when it has been entered, and when it gave up.
 type ctxRouter struct {
 	countingRouter
+	entered chan struct{}
+	aborted chan struct{}
 	release chan struct{}
 }
 
 func (r *ctxRouter) Route(ctx context.Context, wp []geo.Point) (geo.Route, error) {
+	r.entered <- struct{}{}
 	select {
 	case <-r.release:
 		return r.countingRouter.Route(ctx, wp)
@@ -271,6 +275,7 @@ func (r *ctxRouter) Route(ctx context.Context, wp []geo.Point) (geo.Route, error
 		r.mu.Lock()
 		r.calls++
 		r.mu.Unlock()
+		close(r.aborted)
 		return geo.Route{}, ctx.Err()
 	}
 }
@@ -279,7 +284,11 @@ func (r *ctxRouter) Route(ctx context.Context, wp []geo.Point) (geo.Route, error
 // immediate second ask; the road is still asked at most once a minute.
 func TestACancelledPollKeepsTheMinute(t *testing.T) {
 	w := newWorld(t)
-	r := &ctxRouter{release: make(chan struct{})}
+	r := &ctxRouter{
+		entered: make(chan struct{}, 2),
+		aborted: make(chan struct{}),
+		release: make(chan struct{}),
+	}
 	w.svc.WithRouter(r)
 	w.everybodyShares(t)
 
@@ -289,8 +298,15 @@ func TestACancelledPollKeepsTheMinute(t *testing.T) {
 		defer close(done)
 		_, _ = w.svc.DriverETA(ctx, w.trip, w.rider)
 	}()
-	time.Sleep(100 * time.Millisecond)
+	<-r.entered
 	cancel()
+	// The road is asked on a context of its own: the poll going away must not
+	// reach it. Tied to the poll, the router gives up at once.
+	select {
+	case <-r.aborted:
+		t.Fatal("the routing call was cancelled with the poll")
+	case <-time.After(200 * time.Millisecond):
+	}
 	close(r.release)
 	<-done
 
