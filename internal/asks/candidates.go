@@ -584,10 +584,34 @@ func (s *Service) createAsk(
 		 WHERE o.id = $1 AND rr.id = $2`, c.OccurrenceID, req.ID, now).Scan(&pinned, &open, &ready, &deadline); err != nil {
 		return uuid.Nil, fmt.Errorf("asks: reading the drive: %w", err)
 	}
+	// An offer cannot outlive the car it is for. The half hour is how long a
+	// driver is given to answer, not a promise that the answer still means
+	// something: a trip leaving in ten minutes would otherwise sit on their
+	// phone as a live offer for twenty minutes after it left, and hold the
+	// passenger's request against a candidate that could only ever have said no.
+	// Ending it at the departure hands them back to the sweeper, which reopens
+	// the request and looks for somebody who has not gone yet.
+	expiresAt := now.Add(DefaultTTL)
+	if pinned && deadline != nil {
+		moving := !now.Before(departs)
+		departs = *deadline
+		// A driver on the road answers with one tap or not at all, and the
+		// pickup gets nearer every minute: a short answer window frees the
+		// passenger for somebody else quickly.
+		if moving && now.Add(MovingTTL).Before(expiresAt) {
+			expiresAt = now.Add(MovingTTL)
+		}
+	}
+	if departs.Before(expiresAt) {
+		expiresAt = departs
+	}
+
 	// An offer that would lapse before the driver can unlock the phone and
 	// answer it is not sent: it would only take the passenger's request out of
-	// play for a question nobody could answer.
-	if !open || !ready || (pinned && (deadline == nil || deadline.Before(now.Add(minDriveAnswer)))) {
+	// play for a question nobody could answer. Judged on the expiry exactly as
+	// it will be written, so a one-off leaving in a minute is refused too, not
+	// only a pinned drive.
+	if !open || !ready || (pinned && deadline == nil) || expiresAt.Before(now.Add(minDriveAnswer)) {
 		return uuid.Nil, errNoRoomToAsk
 	}
 
@@ -654,28 +678,6 @@ func (s *Service) createAsk(
 	// stops on the driver's road network are recomputed at accept time, against
 	// the itinerary as it stands then.
 	pickup, dropoff := req.Origin, req.Destination
-
-	// An offer cannot outlive the car it is for. The half hour is how long a
-	// driver is given to answer, not a promise that the answer still means
-	// something: a trip leaving in ten minutes would otherwise sit on their
-	// phone as a live offer for twenty minutes after it left, and hold the
-	// passenger's request against a candidate that could only ever have said no.
-	// Ending it at the departure hands them back to the sweeper, which reopens
-	// the request and looks for somebody who has not gone yet.
-	expiresAt := now.Add(DefaultTTL)
-	if pinned {
-		moving := !now.Before(departs)
-		departs = *deadline
-		// A driver on the road answers with one tap or not at all, and the
-		// pickup gets nearer every minute: a short answer window frees the
-		// passenger for somebody else quickly.
-		if moving && now.Add(MovingTTL).Before(expiresAt) {
-			expiresAt = now.Add(MovingTTL)
-		}
-	}
-	if departs.Before(expiresAt) {
-		expiresAt = departs
-	}
 
 	var askID uuid.UUID
 	err = tx.QueryRow(ctx, `

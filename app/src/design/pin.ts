@@ -76,5 +76,9 @@ function one(value: string | string[] | undefined): string | undefined {
  * recognises in a list and the landmark is what they go to.
  */
 export function pointLabel(pin: Pin, point: { name: string } | null): string {
-  return point ? `${pin.label}, ${point.name}` : pin.label;
+  if (!point) return pin.label;
+  // OSM names often carry the town already: «Αλεξανδρούπολη Λιμάνι». Saying
+  // it again, «Αλεξανδρούπολη, Αλεξανδρούπολη Λιμάνι», adds nothing.
+  if (point.name.toLocaleLowerCase('el').includes(pin.label.toLocaleLowerCase('el'))) return point.name;
+  return `${pin.label}, ${point.name}`;
 }

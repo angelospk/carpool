@@ -74,3 +74,21 @@ func TestATripSaysWhetherItsRouteRepeats(t *testing.T) {
 		t.Errorf("a recurring route does not repeat")
 	}
 }
+
+// A passenger's trip lists no co-passengers' seats, so the app cannot add the
+// car's size up from what it is shown; the trip says it.
+func TestATripCarriesTheCarsSeatTotal(t *testing.T) {
+	h := newHarness(t)
+	driver, passenger, occ := h.bookedTrip(t)
+	h.mustExec(`UPDATE trip_occurrences SET seats_total = 4`)
+
+	for _, token := range []string{driver, passenger} {
+		var trip struct {
+			SeatsTotal *int `json:"seats_total"`
+		}
+		h.decode(h.do(http.MethodGet, "/v1/trips/"+occ.String(), nil, token), &trip)
+		if trip.SeatsTotal == nil || *trip.SeatsTotal != 4 {
+			t.Errorf("seats_total %v, want 4", trip.SeatsTotal)
+		}
+	}
+}

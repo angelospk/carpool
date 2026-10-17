@@ -27,10 +27,17 @@ export function DriveCard({
   trip,
   now = () => Date.now(),
   onDone,
+  onTrackingWarning,
 }: {
   trip: TripDetail;
   now?: () => number;
   onDone: () => void;
+  /**
+   * Where the position warning goes. The trip refetch that follows «Φεύγω»
+   * replaces this card, so a warning kept in it would vanish; given this, the
+   * screen shows it and the card does not.
+   */
+  onTrackingWarning?: (text: string | null) => void;
 }) {
   const { t } = useTranslation();
   // Only the minutes the server would take: with somebody booked, not before
@@ -58,9 +65,16 @@ export function DriveCard({
         { title: t('drive.trackTitle'), body: t('drive.trackBody') },
         trip.passengers.flatMap((p) => [p.pickup, p.dropoff]).filter((s): s is LonLat => !!s),
       ).catch(() => 'failed' as const);
-      if (started === 'denied') setError(t('drive.trackDenied'));
-      else if (started === 'unavailable') setError(t('drive.trackWeb'));
-      else if (started === 'failed') setError(t('drive.trackFailed'));
+      const warning =
+        started === 'denied'
+          ? t('drive.trackDenied')
+          : started === 'unavailable'
+            ? t('drive.trackWeb')
+            : started === 'failed'
+              ? t('drive.trackFailed')
+              : null;
+      if (onTrackingWarning) onTrackingWarning(warning);
+      else if (warning) setError(warning);
       onDone();
     },
     onError: (e) => setError(refusalText(e) ?? t('drive.failed')),

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"carpool/internal/geo"
 	"carpool/internal/match"
 	"carpool/internal/store"
@@ -20,12 +22,21 @@ func TestTwoPassengersShareOneDepartureInRoadOrder(t *testing.T) {
 	ctx := context.Background()
 	mustExec(t, f, `DELETE FROM asks`)
 	mustExec(t, f, `UPDATE trip_occurrences SET seats_total = 4, seats_free = 4`)
-	svc := f.service()
+	svc := f.matcher()
 
 	// The road runs east. Their rides overlap: a boards, b boards, a gets off,
-	// b gets off. b is accepted first, so accept order is not road order.
-	a, _, askA := f.placedAsk("+306900000051", 1, geo.Point{Lon: 25.84, Lat: 40.85}, geo.Point{Lon: 25.92, Lat: 40.85})
-	b, _, askB := f.placedAsk("+306900000052", 1, geo.Point{Lon: 25.88, Lat: 40.85}, geo.Point{Lon: 25.96, Lat: 40.85})
+	// b gets off. b is accepted first, so accept order is not road order. Each
+	// offer is made by the matcher, as it is in production, not written by hand.
+	a, reqA := f.openRequest("+306900000051", 1, geo.Point{Lon: 25.84, Lat: 40.85}, geo.Point{Lon: 25.92, Lat: 40.85})
+	b, reqB := f.openRequest("+306900000052", 1, geo.Point{Lon: 25.88, Lat: 40.85}, geo.Point{Lon: 25.96, Lat: 40.85})
+	askA, err := svc.AskNext(ctx, reqA)
+	if err != nil {
+		t.Fatalf("ask for a: %v", err)
+	}
+	askB, err := svc.AskNext(ctx, reqB)
+	if err != nil {
+		t.Fatalf("ask for b: %v", err)
+	}
 	if _, err := svc.Accept(ctx, askB, f.driverID); err != nil {
 		t.Fatalf("accept b: %v", err)
 	}
@@ -72,11 +83,33 @@ func TestTwoPassengersShareOneDepartureInRoadOrder(t *testing.T) {
 
 	// The party cap: the car holds two passengers' stops at most, whatever the
 	// seats say. The refused accept must not take a seat.
+	// The matcher no longer offers this car to anybody, so the stale offer a
+	// third passenger could still be holding is written by hand, quoted against
+	// the itinerary as it stands.
 	_, _, askC := f.placedAsk("+306900000053", 1, onRoadFrom, onRoadTo)
+	mustExec(t, f, `UPDATE asks SET itinerary_version = (SELECT itinerary_version FROM trip_occurrences WHERE id = $1)
+		WHERE id = $2`, f.occurrenceID, askC)
 	if _, err := svc.Accept(ctx, askC, f.driverID); !errors.Is(err, match.ErrPartyCapReached) {
 		t.Fatalf("third accept = %v, want ErrPartyCapReached", err)
 	}
 	if got := f.seatsFree(); got != 2 {
 		t.Fatalf("seats_free = %d after a refused accept, want 2", got)
 	}
+}
+
+// openRequest adds a passenger with an open request, and no offer yet, from
+// origin to dest.
+func (f *fixture) openRequest(phone string, seats int, origin, dest geo.Point) (passenger, requestID uuid.UUID) {
+	f.t.Helper()
+	ctx := context.Background()
+	must(f.t, f.pool.QueryRow(ctx, `
+		INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		VALUES (DATE '1990-01-01', $1, 'Rider', (SELECT home_region_id FROM users WHERE id = $2)) RETURNING id`,
+		phone, f.passengerID).Scan(&passenger), "passenger")
+	must(f.t, f.pool.QueryRow(ctx, `
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end, seats, kind, status)
+		VALUES ($1, ST_SetSRID(ST_MakePoint($2,$3),4326), ST_SetSRID(ST_MakePoint($4,$5),4326),
+			'2026-07-30T04:00:00Z', '2026-07-30T06:00:00Z', $6, 'open', 'open')
+		RETURNING id`, passenger, origin.Lon, origin.Lat, dest.Lon, dest.Lat, seats).Scan(&requestID), "request")
+	return passenger, requestID
 }

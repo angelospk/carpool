@@ -33,7 +33,14 @@ jest.mock('../../src/api/endpoints', () => ({
     cancelBooking: jest.fn(),
     rateTrip: jest.fn(),
     here: jest.fn(),
+    startDrive: jest.fn(),
   },
+}));
+
+const mockTrack = jest.fn((_trip: string, _notice: unknown) => Promise.resolve('started'));
+jest.mock('../../src/drive/tracking', () => ({
+  ...jest.requireActual('../../src/drive/tracking'),
+  startDriveTracking: (trip: string, notice: unknown) => mockTrack(trip, notice),
 }));
 
 // Their own screens have their own tests; here they only need to stay quiet.
@@ -666,4 +673,67 @@ describe('a question waiting on the driver', () => {
     await screen.findByTestId('trip-leave');
     expect(screen.queryByTestId('pending-asks-for')).toBeNull();
   });
+});
+
+// «Φεύγω» swaps the drive card for the on-the-road one when the trip is
+// refetched; the warning about the position must outlive the card that
+// raised it.
+test('the tracking warning survives the card being swapped for the on-the-road one', async () => {
+  const left = new Date(Date.now() - 60_000).toISOString();
+  const before = tripOf({
+    role: 'driver',
+    depart_earliest: new Date(Date.now() + 10 * 60_000).toISOString(),
+    depart_latest: new Date(Date.now() + 30 * 60_000).toISOString(),
+    passengers: [],
+  });
+  const onTheRoad = { ...before, drive_set_at: left, depart_earliest: left, depart_latest: left };
+  (api.trip as jest.Mock).mockResolvedValueOnce(before).mockResolvedValue(onTheRoad);
+  (api.startDrive as jest.Mock).mockResolvedValue({ departs_at: left });
+  mockTrack.mockResolvedValueOnce('unavailable');
+  render(<TripScreen />);
+
+  fireEvent.press(await screen.findByTestId('drive-go'));
+
+  await waitFor(() => expect(screen.queryByTestId('drive-card')).toBeNull());
+  expect(await screen.findByTestId('road-card')).toBeTruthy();
+  expect(screen.getByTestId('tracking-warning')).toHaveTextContent(el.drive.trackWeb);
+});
+
+// The car's size comes from the trip: a passenger is not shown the other
+// bookings, and counting them as one seat each shrank the car.
+test('the seat pips use the car\'s own total', async () => {
+  (api.trip as jest.Mock).mockResolvedValue(
+    tripOf({ seats_free: 1, seats_total: 4, passengers: [person('me', 'Εγώ', { seats: 1 })] }),
+  );
+  render(<TripScreen />);
+
+  const pips = await screen.findByTestId('seat-pips');
+  expect(pips.props.accessibilityLabel).toBe('1/4');
+});
+
+// A long history opens at its newest message, not its oldest.
+test('the chat opens at the newest message', async () => {
+  (api.trip as jest.Mock).mockResolvedValue(tripOf());
+  (api.messages as jest.Mock).mockResolvedValue({
+    messages: Array.from({ length: 40 }, (_, i) => ({
+      id: `m${i}`,
+      sender_id: 'drv',
+      sender_name: 'Γιώργος',
+      body: `μήνυμα ${i}`,
+      created_at: new Date().toISOString(),
+    })),
+  });
+  const scrollEnd = jest.spyOn(FlatList.prototype, 'scrollToEnd').mockImplementation(() => {});
+  render(<TripScreen />);
+  await screen.findByText('μήνυμα 0');
+
+  const grow = (h: number) =>
+    fireEvent(screen.getByTestId('message-list'), 'contentSizeChange', 300, h);
+  grow(4000);
+  await waitFor(() => expect(scrollEnd).toHaveBeenCalledTimes(1));
+
+  // Only the first layout: later growth is the new-message logic's business.
+  grow(4100);
+  expect(scrollEnd).toHaveBeenCalledTimes(1);
+  scrollEnd.mockRestore();
 });

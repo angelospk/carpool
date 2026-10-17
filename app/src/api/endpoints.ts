@@ -341,6 +341,8 @@ export type TripStop = {
 };
 
 export type TripDetail = TripSummary & {
+  /** The car's size for this departure; the passenger view hides other bookings' seats. */
+  seats_total?: number;
   /** Every stop along the road, in order. Absent from older servers. */
   stops?: TripStop[];
   route_polyline: string;

@@ -140,6 +140,7 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		"ends_at_port":       trip.EndsAtPort,
 		"price_eur":          trip.PriceEUR,
 		"seats_free":         trip.SeatsFree,
+		"seats_total":        trip.SeatsTotal,
 		"seats":              trip.Seats,
 		"repeats":            trip.Repeats,
 		"origin_label":       trip.OriginLabel,

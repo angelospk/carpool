@@ -153,6 +153,9 @@ type TripParticipant struct {
 // TripDetail is the trip card.
 type TripDetail struct {
 	Trip
+	// SeatsTotal is the car's size for this departure, so the app can draw
+	// it whole when a passenger is not shown the other bookings' seats.
+	SeatsTotal int
 	Driver     TripParticipant
 	Passengers []TripParticipant
 	// RoutePolyline is the stored geometry encoded for the app's map.
@@ -235,7 +238,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 	var destination []float64
 
 	err = pool.QueryRow(ctx, `
-		SELECT o.depart_earliest, o.depart_latest, o.status, o.route_km, o.seats_free, o.ends_at_port,
+		SELECT o.depart_earliest, o.depart_latest, o.status, o.route_km, o.seats_free, o.ends_at_port, o.seats_total,
 		       t.origin_label, t.destination_label,
 		       o.template_id, EXTRACT(ISODOW FROM o.service_date)::int,
 		       (SELECT b.id FROM bookings b
@@ -285,7 +288,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		JOIN users u            ON u.id = t.driver_id
 		`+match.DriveCar("o", "$3")+`
 		WHERE o.id = $1`, occurrenceID, userID, now).Scan(
-		&d.DepartEarliest, &d.DepartLatest, &d.Status, &d.RouteKm, &d.SeatsFree, &d.EndsAtPort,
+		&d.DepartEarliest, &d.DepartLatest, &d.Status, &d.RouteKm, &d.SeatsFree, &d.EndsAtPort, &d.SeatsTotal,
 		&d.OriginLabel, &d.DestLabel, &d.TemplateID, &d.Weekday, &d.BookingID, &d.RoutePolyline,
 		&d.Driver.UserID, &d.Driver.Name, &d.Driver.PhotoVersion, &d.Driver.FacebookHandle, &d.Driver.InstagramHandle, &d.Driver.Rating,
 		&d.Driver.CarModel, &d.Driver.CarColor, &d.Driver.CarPlate,

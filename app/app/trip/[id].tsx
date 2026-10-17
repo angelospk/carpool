@@ -95,6 +95,10 @@ export default function TripScreen() {
     return m.content - (m.y + m.view) < NEAR_BOTTOM;
   };
   const scrollToEnd = () => requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+  // The opening fetch is not a «new» message, so nothing above scrolls to it:
+  // a long history would open on its oldest messages. Once, after the first
+  // layout that has messages in it.
+  const openedAtEnd = useRef(false);
   const onListScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
     metrics.current = { y: contentOffset.y, view: layoutMeasurement.height, content: contentSize.height };
@@ -128,6 +132,10 @@ export default function TripScreen() {
     },
     onContentSizeChange: (_w: number, h: number) => {
       metrics.current.content = h;
+      if (!openedAtEnd.current && messages.data?.messages.length) {
+        openedAtEnd.current = true;
+        requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
+      }
     },
   };
   const newMessagePill = hasNew ? (
@@ -184,6 +192,9 @@ export default function TripScreen() {
   // Re-evaluated on a timer as well as on render, because somebody sitting on
   // this screen at 07:29 would otherwise still be offered cancel at 07:31.
   const [now, setNow] = useState(() => Date.now());
+  // Raised by the drive card, shown here: pressing «Φεύγω» swaps that card for
+  // the on-the-road one, and a warning kept inside it would go with it.
+  const [trackingWarning, setTrackingWarning] = useState<string | null>(null);
   const earliestAt = trip.data ? new Date(trip.data.depart_earliest).getTime() : null;
   const latestAt = trip.data ? new Date(trip.data.depart_latest).getTime() : null;
   const nextEdge = [earliestAt, latestAt].find((at) => at !== null && at > now) ?? null;
@@ -356,7 +367,10 @@ export default function TripScreen() {
                       <View style={styles.seatsRow}>
                         <SeatPips
                           free={trip.data.seats_free}
-                          total={trip.data.seats_free + trip.data.passengers.reduce((n, p) => n + (p.seats ?? 1), 0)}
+                          total={
+                            trip.data.seats_total ??
+                            trip.data.seats_free + trip.data.passengers.reduce((n, p) => n + (p.seats ?? 1), 0)
+                          }
                           testID="seat-pips"
                         />
                         <Text testID="seats-free" style={styles.meta}>
@@ -493,10 +507,19 @@ export default function TripScreen() {
                   </Card>
                 ) : null}
 
+                {trackingWarning && (onTheRoad(trip.data, now) || driveCardShown(trip.data, now)) ? (
+                  <Text testID="tracking-warning" style={styles.trackingWarning}>
+                    {trackingWarning}
+                  </Text>
+                ) : null}
                 {onTheRoad(trip.data, now) ? (
                   <OnTheRoadCard trip={trip.data} onChanged={() => void trip.refetch()} />
                 ) : driveCardShown(trip.data, now) ? (
-                  <DriveCard trip={trip.data} onDone={() => void trip.refetch()} />
+                  <DriveCard
+                    trip={trip.data}
+                    onDone={() => void trip.refetch()}
+                    onTrackingWarning={setTrackingWarning}
+                  />
                 ) : null}
 
                 {herePossible(trip.data, me?.id) ? (
@@ -715,6 +738,7 @@ export default function TripScreen() {
 
 const styles = StyleSheet.create({
   label: { ...type.caption, color: colors.muted, marginBottom: space.xs },
+  trackingWarning: { ...type.body, color: colors.danger },
   seatsRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   stop: { gap: 2, marginBottom: space.sm },
   stopHead: { ...type.label, color: colors.ink },
