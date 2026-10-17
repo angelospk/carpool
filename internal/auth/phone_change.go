@@ -103,22 +103,34 @@ func (s *PhoneChangeService) Request(ctx context.Context, userID uuid.UUID, newP
 		return uuid.Nil, "", ErrSameNumber
 	}
 
-	// Checked before an SMS is sent, so the person is not asked for a code that
-	// can never work. Not a substitute for the unique constraint at the end:
-	// two people can pass this check at the same moment.
+	// Checked before an SMS is sent, so nobody else's phone is texted. Not a
+	// substitute for the unique constraint at the end: two people can pass
+	// this check at the same moment.
+	//
+	// A taken number is answered exactly like a free one, and counted against
+	// the same limit: a challenge is stored that no code can confirm, and no
+	// SMS goes out. Refusing it here told any signed-in user, for free and
+	// without limit, whether a number has an account (QA 2026-10-17 A 3).
 	var taken bool
 	if err := s.pool.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM users WHERE phone = $1 AND status <> 'deleted')`, newPhone).
 		Scan(&taken); err != nil {
 		return uuid.Nil, "", fmt.Errorf("auth: checking the number: %w", err)
 	}
-	if taken {
-		return uuid.Nil, "", ErrPhoneTaken
-	}
 
 	code, errCode := newCode()
 	if errCode != nil {
 		return uuid.Nil, "", errCode
+	}
+	stored := code
+	if taken {
+		// The digest is of a code nobody is ever told.
+		if stored, errCode = newCode(); errCode != nil {
+			return uuid.Nil, "", errCode
+		}
+		if stored == code {
+			stored += "x"
+		}
 	}
 
 	// Counting and inserting in one transaction under a lock on the account.
@@ -153,7 +165,7 @@ func (s *PhoneChangeService) Request(ctx context.Context, userID uuid.UUID, newP
 		INSERT INTO phone_change_challenges (user_id, old_phone, new_phone, code_hmac, expires_at, created_at)
 		VALUES ($1, $2, $3, $4, $6, $5)
 		RETURNING id`,
-		userID, currentPhone, newPhone, s.digest(newPhone, code), now, now.Add(PhoneChangeTTL)).Scan(&id)
+		userID, currentPhone, newPhone, s.digest(newPhone, stored), now, now.Add(PhoneChangeTTL)).Scan(&id)
 	if err != nil {
 		return uuid.Nil, "", fmt.Errorf("auth: storing the challenge: %w", err)
 	}
@@ -162,6 +174,9 @@ func (s *PhoneChangeService) Request(ctx context.Context, userID uuid.UUID, newP
 		return uuid.Nil, "", fmt.Errorf("auth: committing: %w", err)
 	}
 
+	if taken {
+		return id, code, nil
+	}
 	if err := s.sms.Send(ctx, newPhone, code+" is your carpool verification code. It expires in 10 minutes."); err != nil {
 		return uuid.Nil, "", fmt.Errorf("auth: sending the code: %w", err)
 	}

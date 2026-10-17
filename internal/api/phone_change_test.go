@@ -90,12 +90,41 @@ func TestANumberSomebodyElseHasCannotBeTaken(t *testing.T) {
 	// this endpoint would become a way to send SMS to any number at will.
 	h.sms.Reset()
 
-	rec, _ := requestChange(h, token, "+306900000905")
-	if rec.Code != http.StatusConflict {
-		t.Errorf("status %d, want 409", rec.Code)
+	rec, ch := requestChange(h, token, "+306900000905")
+	if rec.Code != http.StatusOK {
+		t.Errorf("status %d, want the same 200 a free number gets", rec.Code)
 	}
 	if sent := h.sms.Sent(); len(sent) != 0 {
 		t.Errorf("a refused request still sent %+v", sent)
+	}
+	// And no code can ever confirm it.
+	rec = h.do(http.MethodPost, "/v1/me/phone/confirm", map[string]any{
+		"challenge_id": ch.ChallengeID, "code": ch.DevCode,
+	}, token)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("confirm: status %d, want 401 as for a wrong code", rec.Code)
+	}
+}
+
+// QA 2026-10-17 A 3: whether a number has an account was answered for free
+// and without limit (409 for taken, 200 for free, only the free ones counted).
+// Both now answer alike and both count against the caller's hourly limit.
+func TestTheNumberCheckIsNotAnOracle(t *testing.T) {
+	h := newHarnessWith(t, true)
+	for i := 0; i < 5; i++ {
+		_, _ = h.signUp("+30690000097"+string(rune('0'+i)), "Κάποιος")
+	}
+	token, _ := h.signUp("+306900000980", "Ψάχνει")
+
+	for i := 0; i < 5; i++ {
+		rec, _ := requestChange(h, token, "+30690000097"+string(rune('0'+i)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("probe %d: status %d, want 200", i, rec.Code)
+		}
+	}
+	rec, _ := requestChange(h, token, "+306900000989")
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("sixth request: status %d, want 429: probing taken numbers must count", rec.Code)
 	}
 }
 
