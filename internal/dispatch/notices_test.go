@@ -71,6 +71,10 @@ func TestEveryNoticeReachesThePersonItNames(t *testing.T) {
 			"2 άτομα στον δρόμο σου θέλουν να πάνε τώρα",
 			"Έχεις ελεύθερες θέσεις. Πες πότε φεύγεις και τους ρωτάμε.",
 		},
+		notices.WeekendAsk: {
+			"Φεύγεις αυτό το Σαββατοκύριακο;",
+			"Πες μας με ένα πάτημα, για να ψάξουμε οδηγό.",
+		},
 	}
 
 	for _, event := range notices.All() {
@@ -125,6 +129,8 @@ func TestEveryNoticeReachesThePersonItNames(t *testing.T) {
 				field = "booking_id"
 			case notices.DriveNudge:
 				field = "occurrence_id"
+			case notices.WeekendAsk:
+				field = "plan_id"
 			}
 			if got.Data[field] != resource.String() {
 				t.Errorf("carried %s %v, want %s", field, got.Data[field], resource)
@@ -132,7 +138,7 @@ func TestEveryNoticeReachesThePersonItNames(t *testing.T) {
 			// And nothing else. An id the event does not use has to be absent
 			// rather than present and zero, or the app follows it to a booking
 			// that was never made.
-			for _, absent := range []string{"booking_id", "arrangement_id", "occurrence_id"} {
+			for _, absent := range []string{"booking_id", "arrangement_id", "occurrence_id", "plan_id"} {
 				if _, ok := got.Data[absent]; ok && absent != field {
 					t.Errorf("carried %s %v, which this event has none of", absent, got.Data[absent])
 				}
@@ -151,6 +157,8 @@ func build(event notices.Event, recipient, resource uuid.UUID) (outbox.Message, 
 		return notices.Nudge(recipient, resource, 2)
 	case notices.PassengerHere:
 		return notices.Here(recipient, resource)
+	case notices.WeekendAsk:
+		return notices.WeekendQuestion(recipient, resource, time.Date(2026, time.July, 31, 0, 0, 0, 0, time.UTC))
 	}
 	return notices.Arrangement(event, recipient, resource)
 }

@@ -36,6 +36,7 @@ import (
 	"carpool/internal/push"
 	"carpool/internal/standing"
 	"carpool/internal/store"
+	"carpool/internal/weekend"
 	"carpool/internal/ws"
 )
 
@@ -190,6 +191,11 @@ func run() error {
 		_, err := driveSvc.Nudge(ctx)
 		return err
 	})
+	// Each active weekend plan gets its requests for the coming weekend, and on
+	// Thursday evening the question of whether the passenger is going. Hourly:
+	// the question is asked at the first pass after 18:00.
+	weekendSvc := weekend.NewService(pool, clk, athens)
+	start(ctx, &workers, "weekend plans", weekendInterval, weekendSvc.Run)
 	reconciler := jobs.NewReconciler(pool, clk)
 	start(ctx, &workers, "match reconciler", jobs.ReconcileInterval, func(ctx context.Context) error {
 		_, err := reconciler.Run(ctx)
@@ -226,6 +232,7 @@ func run() error {
 		Account:       account.NewService(pool, clk),
 		Drivers:       drivers.NewService(pool, clk),
 		Moderation:    moderation.NewService(pool, clk),
+		Weekend:       weekendSvc,
 		// Keyed on the JWT secret: the phone-change codes are stored as an HMAC
 		// rather than a bare hash, and this is the key that makes a leaked
 		// table useless without it.
@@ -260,6 +267,7 @@ const (
 	sweepInterval       = 30 * time.Second
 	materializeInterval = 15 * time.Minute
 	nudgeInterval       = time.Minute
+	weekendInterval     = time.Hour
 	// Retention periods are measured in months, so an hour either way is
 	// nothing. What the cadence buys is that a restart does not leave the
 	// backlog for a day, since every loop also runs once on start.

@@ -64,6 +64,10 @@ const (
 	DriveNudge Event = "drive_nudge"
 	// PassengerHere reaches a driver on a drive: a passenger is at the pickup.
 	PassengerHere Event = "passenger_here"
+
+	// WeekendAsk reaches a passenger with a weekend plan, on the Thursday
+	// evening: are you going this weekend?
+	WeekendAsk Event = "weekend_ask"
 )
 
 // All is every event a producer can emit, and the reason a new one cannot be
@@ -79,6 +83,7 @@ func All() []Event {
 		DriveRetimed,
 		DriveNudge,
 		PassengerHere,
+		WeekendAsk,
 	}
 }
 
@@ -97,6 +102,7 @@ type Payload struct {
 	BookingID     *uuid.UUID `json:"booking_id,omitempty"`
 	ArrangementID *uuid.UUID `json:"arrangement_id,omitempty"`
 	OccurrenceID  *uuid.UUID `json:"occurrence_id,omitempty"`
+	PlanID        *uuid.UUID `json:"plan_id,omitempty"`
 	// Count is how many people a nudge is about.
 	Count int `json:"count,omitempty"`
 }
@@ -125,6 +131,10 @@ func (p Payload) Validate() error {
 		}
 		if p.Count < 1 {
 			return fmt.Errorf("notices: %s is about nobody", p.Event)
+		}
+	case WeekendAsk:
+		if p.PlanID == nil || *p.PlanID == uuid.Nil {
+			return fmt.Errorf("notices: %s names no weekend plan", p.Event)
 		}
 	default:
 		return fmt.Errorf("notices: unknown event %q", p.Event)
@@ -175,6 +185,13 @@ func Nudge(driver, occurrence uuid.UUID, count int) (outbox.Message, error) {
 func Here(driver, booking uuid.UUID) (outbox.Message, error) {
 	return message(Payload{Event: PassengerHere, RecipientID: driver, BookingID: &booking},
 		"passenger_here:"+booking.String())
+}
+
+// WeekendQuestion builds the Thursday question for one plan. One per plan and
+// weekend, the weekend being named by its Friday.
+func WeekendQuestion(passenger, plan uuid.UUID, friday time.Time) (outbox.Message, error) {
+	return message(Payload{Event: WeekendAsk, RecipientID: passenger, PlanID: &plan},
+		"weekend_ask:"+plan.String()+":"+friday.Format("2006-01-02"))
 }
 
 func message(p Payload, key string) (outbox.Message, error) {

@@ -44,6 +44,11 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 	if req.PassengerStatus != "active" {
 		return uuid.Nil, ErrNoCandidates
 	}
+	// A weekend request waits for a driver to offer: the driver says yes first
+	// and only then is the passenger told (specs/WEEKEND.md).
+	if req.Weekend {
+		return uuid.Nil, ErrNoCandidates
+	}
 
 	candidates, err := match.Gross(ctx, s.pool, s.grossQuery(req))
 	if err != nil {
@@ -214,6 +219,9 @@ type request struct {
 	// Target names the one occurrence a repeat is aimed at. Nil for an ordinary
 	// request, which is free to go to whichever driver ranks best.
 	Target *uuid.UUID
+	// Weekend marks a request made from a weekend plan, which the matcher
+	// never asks anybody about.
+	Weekend bool
 }
 
 func (s *Service) loadRequest(ctx context.Context, id uuid.UUID) (request, error) {
@@ -223,14 +231,14 @@ func (s *Service) loadRequest(ctx context.Context, id uuid.UUID) (request, error
 		       ST_X(rr.origin), ST_Y(rr.origin), ST_X(rr.destination), ST_Y(rr.destination),
 		       rr.window_start, rr.window_end, rr.seats, rr.status, rr.target_occurrence_id,
 		       ST_Distance(rr.origin::geography, rr.destination::geography) / 1000,
-		       rr.luggage, rr.luggage_count, u.status
+		       rr.luggage, rr.luggage_count, u.status, rr.weekend_plan_id IS NOT NULL
 		FROM ride_requests rr
 		JOIN users u ON u.id = rr.passenger_id
 		WHERE rr.id = $1`, id).Scan(
 		&r.ID, &r.PassengerID,
 		&r.Origin.Lon, &r.Origin.Lat, &r.Destination.Lon, &r.Destination.Lat,
 		&r.WindowStart, &r.WindowEnd, &r.Seats, &r.Status, &r.Target, &r.RequestKm,
-		&r.Luggage, &r.LuggageCount, &r.PassengerStatus)
+		&r.Luggage, &r.LuggageCount, &r.PassengerStatus, &r.Weekend)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return request{}, ErrNoCandidates
 	}

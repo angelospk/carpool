@@ -24,6 +24,7 @@ import (
 	"carpool/internal/live"
 	"carpool/internal/moderation"
 	"carpool/internal/standing"
+	"carpool/internal/weekend"
 	"carpool/internal/ws"
 )
 
@@ -67,6 +68,8 @@ type Deps struct {
 	// Drivers records a driver's car, and works out what it drinks so that the
 	// driver does not get to say.
 	Drivers *drivers.Service
+	// Weekend keeps the plans of people who leave town most weekends.
+	Weekend *weekend.Service
 	// Moderation files complaints, works the queue and carries out what is
 	// decided — including the cascade that a suspension is.
 	Moderation *moderation.Service
@@ -323,6 +326,12 @@ func NewRouter(deps Deps) http.Handler {
 				// in proxy logs, analytics and history, and a pair of
 				// coordinates is where somebody lives and where they go.
 				r.With(estimates.perUser).Post("/estimates", deps.handleEstimate)
+			}
+			if deps.Weekend != nil {
+				r.Post("/weekend-plans", deps.handleCreateWeekendPlan)
+				r.Get("/weekend-plans", deps.handleListWeekendPlans)
+				r.Delete("/weekend-plans/{id}", deps.handleStopWeekendPlan)
+				r.Post("/weekend-plans/{id}/this-week", deps.handleWeekendThisWeek)
 			}
 			if deps.Asks != nil {
 				r.Post("/requests", deps.handleCreateRequest)

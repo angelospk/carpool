@@ -83,6 +83,7 @@ type pushPayload struct {
 	DetourMin   float64    `json:"detour_min"`
 
 	OccurrenceID *uuid.UUID `json:"occurrence_id"`
+	PlanID       *uuid.UUID `json:"plan_id"`
 	Count        int        `json:"count"`
 	// Drive marks an offer on a drive, which is answered from the
 	// notification itself.
@@ -151,6 +152,9 @@ func (r *Router) handlePush(ctx context.Context, m outbox.Message) error {
 	}
 	if p.OccurrenceID != nil {
 		data["occurrence_id"] = p.OccurrenceID.String()
+	}
+	if p.PlanID != nil {
+		data["plan_id"] = p.PlanID.String()
 	}
 
 	// One message fans out to every device the user has, and the devices fail
@@ -260,7 +264,7 @@ func (p pushPayload) notification() (recipient uuid.UUID, title, body string, er
 	if err := (notices.Payload{
 		Event: p.Event, RecipientID: p.RecipientID,
 		BookingID: p.BookingID, ArrangementID: p.ArrangementID,
-		OccurrenceID: p.OccurrenceID, Count: p.Count,
+		OccurrenceID: p.OccurrenceID, PlanID: p.PlanID, Count: p.Count,
 	}).Validate(); err != nil {
 		return uuid.Nil, "", "", err
 	}
@@ -282,6 +286,9 @@ func say(event notices.Event, count int) (title, body string, ok bool) {
 	case notices.DriveRetimed:
 		return "Ο οδηγός είπε πότε φεύγει",
 			"Άνοιξε τη διαδρομή για να δεις πότε περνά από το σημείο σου.", true
+	case notices.WeekendAsk:
+		return "Φεύγεις αυτό το Σαββατοκύριακο;",
+			"Πες μας με ένα πάτημα, για να ψάξουμε οδηγό.", true
 	case notices.DriveNudge:
 		title := "Κάποιος στον δρόμο σου θέλει να πάει τώρα"
 		if count > 1 {

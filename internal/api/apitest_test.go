@@ -29,6 +29,7 @@ import (
 	"carpool/internal/standing"
 	"carpool/internal/store"
 	"carpool/internal/store/testdb"
+	"carpool/internal/weekend"
 )
 
 const testSecret = "0123456789abcdef0123456789abcdef"
@@ -127,6 +128,7 @@ func newHarnessDeps(t *testing.T, devMode bool, matcher func(*asks.Service) *ask
 		Account:       account.NewService(pool, c),
 		Drivers:       drivers.NewService(pool, c),
 		Moderation:    moderation.NewService(pool, c),
+		Weekend:       weekend.NewService(pool, c, testLocation()),
 	}
 	if tweak != nil {
 		tweak(&deps)
