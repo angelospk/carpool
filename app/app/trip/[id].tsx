@@ -38,6 +38,7 @@ import { border, colors, radius, size, space, type } from '../../src/design/toke
 import { athensDay, athensTime, eur, km } from '../../src/design/format';
 import { approxArrival } from '../../src/design/ticket';
 import { Ticket } from '../../src/components/Ticket';
+import { tripPollInterval } from '../../src/design/tripPolling';
 
 export default function TripScreen() {
   const { t } = useTranslation();
@@ -51,10 +52,10 @@ export default function TripScreen() {
   const trip = useQuery({
     queryKey: ['trips', id],
     queryFn: () => api.trip(id),
-    // After the trip, what can be done here waits on the other side: rating
-    // opens once they confirm too. Polled until nothing is left to wait for,
-    // so it appears without leaving and coming back.
-    refetchInterval: (q) => (awaitingOthers(q.state.data) ? 30_000 : false),
+    // Other people change this screen: somebody leaves or is let on before the
+    // trip, and after it rating opens once they confirm too. See
+    // tripPollInterval for when it is worth asking again.
+    refetchInterval: (q) => tripPollInterval(q.state.data, Date.now()),
   });
   const messages = useQuery({
     queryKey: ['trips', id, 'messages'],
@@ -154,6 +155,8 @@ export default function TripScreen() {
       // The routes screen counts upcoming departures per route, and one of them
       // just stopped being upcoming.
       void queryClient.invalidateQueries({ queryKey: ['my-routes'] });
+      void queryClient.invalidateQueries({ queryKey: ['trips'] });
+      void queryClient.invalidateQueries({ queryKey: ['asks'] });
     },
     onError: (e) =>
       setNotice(
@@ -170,6 +173,7 @@ export default function TripScreen() {
       queryClient.removeQueries({ queryKey: ['trips', id] });
       void queryClient.invalidateQueries({ queryKey: ['trips'] });
       void queryClient.invalidateQueries({ queryKey: ['requests'] });
+      void queryClient.invalidateQueries({ queryKey: ['supply'] });
       // Opened from a notification there is no screen behind this one.
       if (router.canGoBack()) router.back();
       else router.replace('/(tabs)');
@@ -679,15 +683,6 @@ const styles = StyleSheet.create({
     paddingVertical: space.md,
   },
 });
-
-// A finished trip where the caller has confirmed but somebody they could rate
-// has not: the one state in which this screen changes because of someone else.
-function awaitingOthers(trip: TripDetail | undefined): boolean {
-  if (!trip || trip.status === 'cancelled' || !trip.confirmed_by_me) return false;
-  if (Date.now() < new Date(trip.depart_latest).getTime()) return false;
-  const others = trip.role === 'driver' ? trip.passengers : [trip.driver];
-  return others.some((p) => !p.can_rate && !p.rated);
-}
 
 // Where the trip stands, said once, in the hero. A cancelled trip used to look
 // exactly like a live one.

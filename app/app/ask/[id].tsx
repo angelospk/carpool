@@ -52,6 +52,7 @@ export default function AskScreen() {
   const answered = () => {
     void queryClient.invalidateQueries({ queryKey: ['trips'] });
     void queryClient.invalidateQueries({ queryKey: ['asks'] });
+    void queryClient.invalidateQueries({ queryKey: ['supply'] });
     home();
   };
 
@@ -99,6 +100,7 @@ export default function AskScreen() {
       if (!ask.data) return answered();
       void queryClient.invalidateQueries({ queryKey: ['trips'] });
       void queryClient.invalidateQueries({ queryKey: ['asks'] });
+      void queryClient.invalidateQueries({ queryKey: ['supply'] });
       router.replace({ pathname: '/trip/[id]', params: { id: ask.data.occurrence_id } });
     },
     onError,
