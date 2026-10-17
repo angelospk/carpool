@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/google/uuid"
+
+	"carpool/internal/store"
 )
 
 // wsWriteTimeout bounds how long a single frame write may take before the
@@ -19,7 +22,7 @@ const wsWriteTimeout = 10 * time.Second
 // reconnects refetches over REST, so a dropped frame costs latency and nothing
 // else.
 func (d Deps) handleTripSocket(w http.ResponseWriter, r *http.Request) {
-	_, occurrenceID, _, ok := d.tripParams(w, r)
+	userID, occurrenceID, _, ok := d.tripParams(w, r)
 	if !ok {
 		return
 	}
@@ -58,6 +61,15 @@ func (d Deps) handleTripSocket(w http.ResponseWriter, r *http.Request) {
 			if !open {
 				return
 			}
+			// Who is on the trip is checked again for every frame, not only at
+			// the upgrade: a passenger who cancelled their seat, was dropped
+			// with the departure, or was suspended must stop reading the car's
+			// chat (QA 2026-10-17 A 2). Chat is a few messages a trip, so a
+			// query per frame costs nothing worth saving.
+			if !d.stillOnTrip(ctx, occurrenceID, userID) {
+				_ = conn.Close(websocket.StatusPolicyViolation, "no longer on this trip")
+				return
+			}
 			writeCtx, cancel := context.WithTimeout(ctx, wsWriteTimeout)
 			err := conn.Write(writeCtx, websocket.MessageText, frame)
 			cancel()
@@ -69,4 +81,19 @@ func (d Deps) handleTripSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// stillOnTrip reports whether userID is an active account taking part in the
+// occurrence. A failed lookup counts as no: the socket is never the source of
+// truth, and the app refetches over REST.
+func (d Deps) stillOnTrip(ctx context.Context, occurrenceID, userID uuid.UUID) bool {
+	if _, err := store.ParticipantRole(ctx, d.Pool, occurrenceID, userID); err != nil {
+		return false
+	}
+	var active bool
+	if err := d.Pool.QueryRow(ctx,
+		`SELECT status = 'active' FROM users WHERE id = $1`, userID).Scan(&active); err != nil {
+		return false
+	}
+	return active
 }
