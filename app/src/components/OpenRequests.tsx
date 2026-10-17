@@ -120,6 +120,11 @@ export function requestProgress(request: OpenRequest, t: TFunction): string {
 function whyNobody(request: OpenRequest, t: TFunction): string | null {
   const m = request.missed;
   if (m?.reason === 'no_stops') return t('home.missedNoStops');
+  if (m?.reason === 'full') return t('home.missedFull');
+  if (m?.reason === 'party_cap') return t('home.missedPartyCap');
+  if (m?.reason === 'luggage') return t('home.missedLuggage');
+  if (m?.reason === 'off_corridor' && m.need != null)
+    return t('home.missedOffCorridor', { need: Math.round(m.need) });
   if (m && m.need != null && m.limit != null) {
     const need = Math.ceil(m.need);
     return m.reason === 'detour_min'
@@ -142,6 +147,12 @@ function asking(request: OpenRequest, t: TFunction): string {
 }
 
 function progressOf(request: OpenRequest, t: TFunction): string {
+  // A road that passes outside the driver's radius is not on the corridor,
+  // and "nobody drives this road" would be untrue (QA 2026-10-17 U F5).
+  if (request.drivers_asked === 0 && request.missed?.reason === 'off_corridor') {
+    const why = whyNobody(request, t);
+    if (why) return why;
+  }
   if (request.drivers_asked === 0 && request.drivers_on_corridor === 0)
     return t('home.requestNoDrivers');
   const declined =

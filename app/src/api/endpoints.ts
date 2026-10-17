@@ -382,7 +382,7 @@ export type OpenRequest = {
   nearest_departure?: string | null;
   /** Why the last search asked nobody though a car passes. No driver is named. */
   missed?: {
-    reason: 'no_stops' | 'detour_min' | 'detour_km';
+    reason: 'no_stops' | 'detour_min' | 'detour_km' | 'full' | 'party_cap' | 'luggage' | 'off_corridor';
     need: number | null;
     limit: number | null;
   } | null;

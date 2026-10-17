@@ -108,6 +108,25 @@ test('a missed detour in kilometres, and a driver who takes no stops', () => {
   ).toBe(el.home.missedNoStops);
 });
 
+// QA 2026-10-17 T F3, U F5: the other reasons a car that passes was not asked.
+test('a full car, a car with two groups, and a boot that is full each say so', () => {
+  const r = (reason: 'full' | 'party_cap' | 'luggage') =>
+    requestProgress(waiting({ drivers_on_corridor: 1, missed: { reason, need: null, limit: null } }), t);
+  expect(r('full')).toBe(el.home.missedFull);
+  expect(r('party_cap')).toBe(el.home.missedPartyCap);
+  expect(r('luggage')).toBe(el.home.missedLuggage);
+});
+
+// The road passes 8 km away, outside the driver's radius: the corridor count
+// is zero, and the passenger used to be told nobody drives this road.
+test('a road that passes too far away says how far, not that nobody drives it', () => {
+  const got = requestProgress(
+    waiting({ drivers_on_corridor: 0, missed: { reason: 'off_corridor', need: 8.1, limit: 2 } }),
+    t,
+  );
+  expect(got).toBe(t('home.missedOffCorridor', { need: 8 }));
+});
+
 test('nobody leaving then says when the nearest one does', () => {
   const got = requestProgress(
     waiting({ drivers_on_corridor: 1, drivers_departing: 0, nearest_departure: '2026-09-17T08:30:00Z' }),

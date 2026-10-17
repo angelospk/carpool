@@ -63,7 +63,7 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 		})
 	}
 	if len(scored) == 0 {
-		s.recordMiss(ctx, req.ID, nil)
+		s.recordMiss(ctx, req.ID, s.notACandidate(ctx, req))
 		return uuid.Nil, ErrNoCandidates
 	}
 
@@ -111,14 +111,18 @@ func (s *Service) AskNext(ctx context.Context, requestID uuid.UUID) (uuid.UUID, 
 			why = &m
 		}
 	}
+	if why == nil {
+		why = s.notACandidate(ctx, req)
+	}
 	s.recordMiss(ctx, req.ID, why)
 	return uuid.Nil, ErrNoCandidates
 }
 
 // miss is why a car that passes was not asked: its driver takes no stops
 // (no_stops), or the detour is longer than they take, in minutes of driving
-// (detour_min) or kilometres (detour_km). need is what the pickup would take
-// and limit what the driver agreed to.
+// (detour_min) or kilometres (detour_km); need is what the pickup would take
+// and limit what the driver agreed to. Or it was no candidate at all: see
+// notACandidate.
 type miss struct {
 	reason      string
 	need, limit float64
@@ -149,6 +153,22 @@ func (s *Service) missedBy(ctx context.Context, c match.Candidate, req request) 
 	return miss{reason: "detour_km", need: ins.TotalDetourKm, limit: c.Budget.Km}, nil
 }
 
+// notACandidate is why a car that passes was not asked for a reason other
+// than its detour: full, party_cap, luggage or off_corridor (QA 2026-10-17
+// T F3, U F5). Nil when no car passes, and when finding out fails: the reason
+// is a courtesy.
+func (s *Service) notACandidate(ctx context.Context, req request) *miss {
+	m, err := match.WhyMissed(ctx, s.pool, s.grossQuery(req))
+	if err != nil {
+		slog.Warn("finding why nobody was asked", "request", req.ID, "error", err)
+		return nil
+	}
+	if m == nil {
+		return nil
+	}
+	return &miss{reason: m.Reason, need: m.NeedKm, limit: m.LimitKm}
+}
+
 // recordMiss writes why the request's last search asked nobody, or clears it
 // with a nil m. A failed write is logged, not returned: the search itself did
 // not fail.
@@ -157,7 +177,7 @@ func (s *Service) recordMiss(ctx context.Context, requestID uuid.UUID, m *miss) 
 	var need, limit *float64
 	if m != nil {
 		reason, need, limit = &m.reason, &m.need, &m.limit
-		if m.reason == "no_stops" {
+		if m.reason != "detour_min" && m.reason != "detour_km" && m.reason != "off_corridor" {
 			need, limit = nil, nil
 		}
 	}
