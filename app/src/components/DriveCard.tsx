@@ -51,12 +51,16 @@ export function DriveCard({
       // Sharing the car starts with «Φεύγω», so that once it has left the
       // people ahead of it can be timed. Refused, the drive still stands; it
       // just takes nobody new once it is moving, and the driver is told why.
+      // The drive has already started, so a task that will not start gets its
+      // own message rather than «drive.failed».
       const started = await startDriveTracking(
         trip.id,
         { title: t('drive.trackTitle'), body: t('drive.trackBody') },
         trip.passengers.flatMap((p) => [p.pickup, p.dropoff]).filter((s): s is LonLat => !!s),
-      );
+      ).catch(() => 'failed' as const);
       if (started === 'denied') setError(t('drive.trackDenied'));
+      else if (started === 'unavailable') setError(t('drive.trackWeb'));
+      else if (started === 'failed') setError(t('drive.trackFailed'));
       onDone();
     },
     onError: (e) => setError(refusalText(e) ?? t('drive.failed')),

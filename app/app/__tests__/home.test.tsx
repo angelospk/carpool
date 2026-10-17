@@ -166,6 +166,33 @@ test('writes the contribution and the distance with a decimal comma', async () =
   expect(screen.getByText('57,8\u00a0χλμ')).toBeTruthy();
 });
 
+// QA F4: a price is per seat. Two seats is said as each and in all, one seat as
+// a bare price.
+test('a booking of two seats says the price per seat and the total, on the hero and on a row', async () => {
+  (api.upcomingTrips as jest.Mock).mockResolvedValue({
+    trips: [
+      trip({ price_eur: 2.5, seats: 2 }),
+      trip({ id: 't2', depart_earliest: '2026-07-30T05:30:00Z', price_eur: 3, seats: 2 }),
+    ],
+  });
+
+  render(wrap(<HomeScreen />));
+  await screen.findByTestId('trip-t1');
+
+  // The hero ticket puts the fare big and the rest under it.
+  expect(screen.getByText(/^ανά θέση · σύνολο 5,00.€/)).toBeTruthy();
+  expect(screen.getByText(/3,00.€.ανά θέση · σύνολο 6,00.€/)).toBeTruthy();
+});
+
+test('one seat is a bare price', async () => {
+  (api.upcomingTrips as jest.Mock).mockResolvedValue({ trips: [trip({ price_eur: 2.5, seats: 1 })] });
+
+  render(wrap(<HomeScreen />));
+  await screen.findByTestId('trip-t1');
+
+  expect(screen.queryByText(/ανά θέση/)).toBeNull();
+});
+
 // The first-run card offers both sides of the deal in full; the two pills in
 // the header said the same thing a second time, and the tab bar a third.
 test('an empty account is offered each action once, not twice', async () => {

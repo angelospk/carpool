@@ -116,6 +116,12 @@ export function LiveCard({
 
   const start = async () => {
     if (carShared || starting.current || watch.current) return;
+    // Browsers only hand out a position to a secure page. Asking anyway ends
+    // in a bare denial that reads like the user said no.
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && !window.isSecureContext) {
+      setError(t('live.needsHttps'));
+      return;
+    }
     starting.current = true;
     setError(null);
     failures.current = 0;
@@ -145,9 +151,11 @@ export function LiveCard({
             (e: unknown) => {
               if (mine !== generation.current) return;
               // The window closed, or the trip was called off: stop rather than
-              // keep sending into a refusal.
+              // keep sending into a refusal. A closed window is said out loud,
+              // or the button would just quietly come back.
               if (e instanceof ApiError && (e.code === 'not_sharing_now' || e.code === 'not_found')) {
                 void stop();
+                if (e.code === 'not_sharing_now') setError(t('live.notSharingNow'));
                 return;
               }
               // Anything else may be a moment without signal. Three in a row is
@@ -195,7 +203,9 @@ export function LiveCard({
       ) : (
         <>
           {live.data.positions.length === 0 ? (
-            <Hint testID="live-nobody">{t('live.nobody')}</Hint>
+            // The server leaves the caller out of the list, so while this
+            // phone shares, an empty list means only me — not nobody.
+            <Hint testID="live-nobody">{t(sharing || carShared ? 'live.onlyYou' : 'live.nobody')}</Hint>
           ) : (
             live.data.positions.map((p) => (
               <View key={p.user_id} testID={`live-${p.user_id}`} style={styles.row}>

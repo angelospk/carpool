@@ -70,6 +70,7 @@ func (d Deps) handleUpcomingTrips(w http.ResponseWriter, r *http.Request) {
 			"destination_label": t.DestLabel,
 			"price_eur":         t.PriceEUR,
 			"seats_free":        t.SeatsFree,
+			"seats":             t.Seats,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"trips": out})
@@ -139,6 +140,8 @@ func (d Deps) handleGetTrip(w http.ResponseWriter, r *http.Request) {
 		"ends_at_port":       trip.EndsAtPort,
 		"price_eur":          trip.PriceEUR,
 		"seats_free":         trip.SeatsFree,
+		"seats":              trip.Seats,
+		"repeats":            trip.Repeats,
 		"origin_label":       trip.OriginLabel,
 		"destination_label":  trip.DestLabel,
 		"route_polyline":     trip.RoutePolyline,

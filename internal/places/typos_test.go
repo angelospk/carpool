@@ -64,6 +64,24 @@ func TestANearbyPlaceComesFirstAmongEquals(t *testing.T) {
 	}
 }
 
+// Two homonymous villages, both far from the other end: the closer one comes
+// first even though the other outranks it by kind. «Αύρα» led with the one in
+// Άρτα, 351 km away (F20).
+func TestTheNearerHomonymComesFirstEvenBeyondNearKm(t *testing.T) {
+	set := fixture(t, [2]string{"Αύρα", "town"}, [2]string{"Αύρα", "hamlet"})
+	set[0].Lon, set[0].Lat = 20.99, 39.15 // Άρτα
+	set[1].Lon, set[1].Lat = 22.9, 40.6   // Θεσσαλονίκη
+	near := &Near{Lon: 25.87, Lat: 40.85} // Αλεξανδρούπολη
+
+	got := searchNear(set, "Αύρα", 5, near)
+	if len(got) != 2 || got[0].Lon != 22.9 {
+		t.Errorf("near Αλεξανδρούπολη: %+v", got)
+	}
+	if got := searchNear(set, "Αύρα", 5, nil); got[0].Lon != 20.99 {
+		t.Errorf("with nowhere to be near the kind decides: %+v", got)
+	}
+}
+
 // The endpoint is public and answers on every keystroke. A query longer than
 // any place name is not one, and correcting it against every key would cost a
 // thousand times a normal search.

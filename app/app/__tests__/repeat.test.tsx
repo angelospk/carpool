@@ -51,6 +51,22 @@ beforeEach(() => {
   (api.arrangements as jest.Mock).mockResolvedValue({ arrangements: [] });
 });
 
+// QA F7: a one-off route does not run again, so there is nothing to repeat.
+test('a route that does not repeat offers no repeat card', async () => {
+  const view = render(wrap(<RepeatCard trip={{ ...trip, repeats: false } as TripDetail} />));
+
+  await waitFor(() => expect(api.arrangements).toHaveBeenCalled());
+  expect(screen.queryByTestId('repeat-switch')).toBeNull();
+  expect(screen.queryByTestId('repeat-state')).toBeNull();
+  expect(view.toJSON()).toBeNull();
+});
+
+test('a route that repeats offers the switch', async () => {
+  render(wrap(<RepeatCard trip={{ ...trip, repeats: true } as TripDetail} />));
+
+  expect(await screen.findByTestId('repeat-switch')).toBeTruthy();
+});
+
 test('the passenger turns the switch on and the driver is asked once', async () => {
   (api.repeatBooking as jest.Mock).mockResolvedValue({ arrangement_id: 'arr-1' });
 

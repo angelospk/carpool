@@ -202,6 +202,7 @@ func (d Deps) handlePastTrips(w http.ResponseWriter, r *http.Request) {
 			"destination_label": t.DestLabel,
 			"price_eur":         t.PriceEUR,
 			"seats_free":        t.SeatsFree,
+			"seats":             t.Seats,
 			"driver_name":       t.DriverName,
 			"origin_lon":        t.OriginLon,
 			"origin_lat":        t.OriginLat,

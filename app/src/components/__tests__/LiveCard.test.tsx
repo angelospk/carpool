@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react-native';
+import { Platform } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import * as Location from 'expo-location';
@@ -162,4 +163,62 @@ test('handing the car to the drive stops the screen\'s share without deleting th
   await waitFor(() => expect(mockRemove).toHaveBeenCalled());
   unmount();
   expect(api.stopPosition).not.toHaveBeenCalled();
+});
+
+// After the window the button is gone and the card says the trip is over.
+test('after the trip it says so and offers nothing', async () => {
+  (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [] });
+  render(wrap(<LiveCard tripId="occ-1" now={() => Date.parse(window.closes) + 60_000} />));
+  expect(await screen.findByTestId('live-over')).toHaveTextContent(/^Το ταξίδι τελείωσε\./);
+  expect(screen.queryByTestId('live-start')).toBeNull();
+});
+
+// A refusal is not a blip: sharing stops, and the screen says why rather than
+// quietly turning the button back on.
+test('a not_sharing_now refusal stops the sharing and says so', async () => {
+  (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [] });
+  (api.putPosition as jest.Mock).mockRejectedValue(new ApiError(409, 'not_sharing_now', 'no'));
+  render(wrap(<LiveCard tripId="occ-1" now={() => at} />));
+  fireEvent.press(await screen.findByTestId('live-start'));
+  await waitFor(() => expect(mockOnPosition).not.toBeNull());
+  act(() => mockOnPosition!({ coords: { latitude: 40.85, longitude: 25.87 } }));
+  expect(await screen.findByTestId('live-error')).toHaveTextContent(/δεν μοιράζεται πια/);
+  expect(screen.getByTestId('live-error')).not.toHaveTextContent('Κάτι πήγε στραβά');
+  expect(mockRemove).toHaveBeenCalled();
+});
+
+describe('on a web page that is not https', () => {
+  const originalOS = Platform.OS;
+  afterEach(() => {
+    Object.defineProperty(Platform, 'OS', { value: originalOS, configurable: true });
+    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+  });
+
+  test('it says the browser wants https and does not ask for the position', async () => {
+    Object.defineProperty(Platform, 'OS', { value: 'web', configurable: true });
+    Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true });
+    (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [] });
+    render(wrap(<LiveCard tripId="occ-1" now={() => at} />));
+    fireEvent.press(await screen.findByTestId('live-start'));
+    expect(await screen.findByTestId('live-error')).toHaveTextContent('Η τοποθεσία στο browser θέλει https.');
+    expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+    expect(Location.watchPositionAsync).not.toHaveBeenCalled();
+  });
+});
+
+// The server never lists the caller's own position, so an empty list while I
+// am sharing is not "nobody".
+test('while sharing, an empty list says only you, not nobody', async () => {
+  (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [] });
+  render(wrap(<LiveCard tripId="occ-1" now={() => at} />));
+  expect(await screen.findByText('Κανείς δεν μοιράζεται τη θέση του αυτή τη στιγμή.')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('live-start'));
+  expect(await screen.findByText('Μόνο εσύ μοιράζεσαι τη θέση σου τώρα.')).toBeTruthy();
+  expect(screen.queryByText('Κανείς δεν μοιράζεται τη θέση του αυτή τη στιγμή.')).toBeNull();
+});
+
+test('when the drive shares the car, an empty list says only you too', async () => {
+  (api.live as jest.Mock).mockResolvedValue({ ...window, positions: [] });
+  render(wrap(<LiveCard tripId="occ-1" now={() => at} carShared />));
+  expect(await screen.findByText('Μόνο εσύ μοιράζεσαι τη θέση σου τώρα.')).toBeTruthy();
 });

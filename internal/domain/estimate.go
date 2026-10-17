@@ -50,12 +50,19 @@ type PlanningEstimate struct {
 	RouteKm  float64 `json:"route_km"`
 	RouteMin int     `json:"route_min"`
 
-	// ContributionCents is the headline: one number, floored to the same half
-	// euro the real formula floors to, so the estimate and the eventual figure
-	// are at least made the same way.
+	// ContributionCents is the headline: one number, the fuel floored to the
+	// same half euro the real formula floors to, plus the toll share, so the
+	// estimate and the eventual figure are at least made the same way.
 	ContributionCents int `json:"contribution_cents"`
+	// FuelCents is the fuel part of the headline alone.
+	FuelCents int `json:"fuel_cents"`
+	// TollCents is one seat's share of the barriers on the route, divided among
+	// the same car as the fuel. Zero on a road with none. It is added after the
+	// fuel is floored and is not floored itself, as SuggestedPrice does.
+	TollCents int `json:"toll_cents"`
 	// CeilingCents is the same trip in the thirstiest car the app will price,
-	// at the same number of seats.
+	// at the same number of seats. The toll is the same in any car, so it is in
+	// here too and the ceiling never falls below the headline.
 	//
 	// It is here because the honest failure of a single figure is upward: a
 	// passenger quoted 12 € and then asked for 25 € has been misled, even
@@ -81,6 +88,9 @@ type EstimateInputs struct {
 	// Divisor is the whole car: the seats a route usually offers, plus the
 	// driver. Not a guess about this trip, which has no driver.
 	Divisor int
+	// TollShareCents is one seat's part of the barriers on the routed trip, the
+	// car split as Divisor is. See tolls.Result.Gates.
+	TollShareCents int
 
 	Version       string
 	FuelPriceAsOf string
@@ -106,6 +116,10 @@ func Estimate(in EstimateInputs) PlanningEstimate {
 			RegionName:     in.RegionName,
 		},
 	}
+	if in.TollShareCents > 0 {
+		out.TollCents = in.TollShareCents
+		out.ContributionCents = in.TollShareCents
+	}
 	// Not a correctness check on the number — with any of these at zero the
 	// arithmetic below already lands on nothing. It is a guard against dividing
 	// by a zero divisor, where int(+Inf) is undefined in Go and lands on
@@ -115,7 +129,8 @@ func Estimate(in EstimateInputs) PlanningEstimate {
 	}
 
 	perSeat := in.RouteKm * in.CostPerKmEUR / float64(in.Divisor)
-	out.ContributionCents = floorToStep(int(math.Round(perSeat * 100)))
+	out.FuelCents = floorToStep(int(math.Round(perSeat * 100)))
+	out.ContributionCents = out.FuelCents + out.TollCents
 
 	// Compared after flooring rather than before. A car that drinks a little
 	// more than typical is dearer per kilometre and still lands on the same
@@ -123,8 +138,8 @@ func Estimate(in EstimateInputs) PlanningEstimate {
 	// meant to be.
 	if in.CeilingCostPerKmEUR > in.CostPerKmEUR {
 		dearest := in.RouteKm * in.CeilingCostPerKmEUR / float64(in.Divisor)
-		if ceiling := floorToStep(int(math.Round(dearest * 100))); ceiling > out.ContributionCents {
-			out.CeilingCents = ceiling
+		if ceiling := floorToStep(int(math.Round(dearest * 100))); ceiling > out.FuelCents {
+			out.CeilingCents = ceiling + out.TollCents
 		}
 	}
 	return out

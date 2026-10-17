@@ -22,6 +22,8 @@ const estimate = {
   route_km: 29,
   route_min: 33,
   contribution_cents: 200,
+  fuel_cents: 200,
+  toll_cents: 0,
   ceiling_cents: 0,
   assumptions: {
     version: 'eea-2026-08',
@@ -131,4 +133,27 @@ test('no upper bound is shown when there is nothing above the estimate', async (
 
   fireEvent.press(await screen.findByTestId('est-how'));
   expect(screen.queryByTestId('est-ceiling')).toBeNull();
+});
+
+// QA U F4: the search said fuel only while the real ask carried the tolls too.
+test('it says tolls are in the figure when the route has them', async () => {
+  (api.estimate as jest.Mock).mockResolvedValue({
+    ...estimate,
+    contribution_cents: 238,
+    fuel_cents: 100,
+    toll_cents: 138,
+  });
+
+  render(wrap(<Estimate from={alex} to={feres} testID="est" />));
+
+  const headline = await screen.findByTestId('est-headline');
+  expect(headline.props.children).toMatch(/2,38\s€.*καύσιμα και διόδια.*όχι προσφορά οδηγού/);
+});
+
+test('a route without tolls keeps the fuel-only sentence', async () => {
+  render(wrap(<Estimate from={alex} to={feres} testID="est" />));
+
+  const headline = await screen.findByTestId('est-headline');
+  expect(headline.props.children).toMatch(/για τα καύσιμα/);
+  expect(headline.props.children).not.toMatch(/διόδια/);
 });

@@ -493,6 +493,8 @@ export function Field({
   valid,
   compact,
   multiline,
+  onBlur,
+  selectTextOnFocus,
 }: {
   label: string;
   value: string;
@@ -506,6 +508,9 @@ export function Field({
   compact?: boolean;
   /** For a few sentences rather than a name. */
   multiline?: boolean;
+  onBlur?: () => void;
+  /** Typing replaces what is there, for values that are re-entered whole. */
+  selectTextOnFocus?: boolean;
 }) {
   const [focused, setFocused] = useState(false);
   return (
@@ -524,7 +529,11 @@ export function Field({
         value={value}
         onChangeText={onChangeText}
         onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onBlur={() => {
+          setFocused(false);
+          onBlur?.();
+        }}
+        selectTextOnFocus={selectTextOnFocus}
         placeholder={placeholder}
         placeholderTextColor={colors.muted}
         keyboardType={keyboardType}

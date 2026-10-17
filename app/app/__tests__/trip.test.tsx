@@ -1,9 +1,9 @@
-import { act, render as rtlRender, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, render as rtlRender, screen, fireEvent, waitFor, within } from '@testing-library/react-native';
 import el from '../../src/i18n/el.json';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 
-import { StyleSheet } from 'react-native';
+import { FlatList, StyleSheet } from 'react-native';
 import TripScreen from '../trip/[id]';
 import { colors } from '../../src/design/tokens';
 import { api, type TripDetail } from '../../src/api/endpoints';
@@ -39,6 +39,15 @@ jest.mock('../../src/api/endpoints', () => ({
 // Their own screens have their own tests; here they only need to stay quiet.
 jest.mock('../../src/components/LiveCard', () => ({ LiveCard: () => null }));
 jest.mock('../../src/components/RepeatCard', () => ({ RepeatCard: () => null }));
+// Its own test covers the filter; here only that the trip asks for its own.
+jest.mock('../../src/components/PendingAsks', () => {
+  const { Text } = require('react-native');
+  return {
+    PendingAsks: ({ occurrenceId }: { occurrenceId?: string }) => (
+      <Text testID="pending-asks-for">{occurrenceId}</Text>
+    ),
+  };
+});
 
 // The confirm dialog answers yes at once, so a test reads as the tap it is.
 jest.mock('../../src/components/confirm', () => ({
@@ -384,6 +393,100 @@ describe('the chat', () => {
     });
     expect(screen.getByTestId('message-input').props.value).toBe('');
   });
+
+  // The newest message used to arrive out of sight: no scroll to it and no
+  // sign that it had come.
+  describe('new messages', () => {
+    const msg = (n: number, sender = 'drv') => ({
+      id: `m${n}`,
+      sender_id: sender,
+      sender_name: 'Γιώργος',
+      body: `μήνυμα ${n}`,
+      created_at: new Date().toISOString(),
+    });
+    const scrollTo = (y: number) =>
+      fireEvent.scroll(screen.getByTestId('message-list'), {
+        nativeEvent: {
+          contentOffset: { x: 0, y },
+          layoutMeasurement: { width: 300, height: 600 },
+          contentSize: { width: 300, height: 2000 },
+        },
+      });
+    const refetchWith = async (client: QueryClient, messages: unknown[]) => {
+      (api.messages as jest.Mock).mockResolvedValue({ messages });
+      await act(async () => {
+        await client.invalidateQueries({ queryKey: ['trips', 'occ-1', 'messages'] });
+      });
+    };
+
+    it('points at a new message when the reader has scrolled up, and goes to it on press', async () => {
+      (api.trip as jest.Mock).mockResolvedValue(tripOf());
+      (api.messages as jest.Mock).mockResolvedValue({ messages: [msg(1)] });
+      const scrollEnd = jest.spyOn(FlatList.prototype, 'scrollToEnd').mockImplementation(() => {});
+      const { client } = render(<TripScreen />);
+      await screen.findByText('μήνυμα 1');
+
+      scrollTo(0);
+      await refetchWith(client, [msg(1), msg(2)]);
+
+      const pill = await screen.findByTestId('new-message');
+      expect(within(pill).getByText(el.trip.newMessage)).toBeTruthy();
+      expect(scrollEnd).not.toHaveBeenCalled();
+
+      fireEvent.press(pill);
+      expect(screen.queryByTestId('new-message')).toBeNull();
+      await waitFor(() => expect(scrollEnd).toHaveBeenCalled());
+      scrollEnd.mockRestore();
+    });
+
+    it('hides the pointer once the reader reaches the bottom', async () => {
+      (api.trip as jest.Mock).mockResolvedValue(tripOf());
+      (api.messages as jest.Mock).mockResolvedValue({ messages: [msg(1)] });
+      const { client } = render(<TripScreen />);
+      await screen.findByText('μήνυμα 1');
+
+      scrollTo(0);
+      await refetchWith(client, [msg(1), msg(2)]);
+      await screen.findByTestId('new-message');
+
+      scrollTo(1400);
+      expect(screen.queryByTestId('new-message')).toBeNull();
+    });
+
+    it('follows a new message down when the reader is at the bottom', async () => {
+      (api.trip as jest.Mock).mockResolvedValue(tripOf());
+      (api.messages as jest.Mock).mockResolvedValue({ messages: [msg(1)] });
+      const scrollEnd = jest.spyOn(FlatList.prototype, 'scrollToEnd').mockImplementation(() => {});
+      const { client } = render(<TripScreen />);
+      await screen.findByText('μήνυμα 1');
+
+      scrollTo(1400);
+      await refetchWith(client, [msg(1), msg(2)]);
+
+      await waitFor(() => expect(scrollEnd).toHaveBeenCalled());
+      expect(screen.queryByTestId('new-message')).toBeNull();
+      scrollEnd.mockRestore();
+    });
+
+    it('goes to the end after the reader sends, even from further up', async () => {
+      (api.trip as jest.Mock).mockResolvedValue(tripOf());
+      (api.messages as jest.Mock).mockResolvedValue({ messages: [msg(1)] });
+      (api.postMessage as jest.Mock).mockResolvedValue(undefined);
+      const scrollEnd = jest.spyOn(FlatList.prototype, 'scrollToEnd').mockImplementation(() => {});
+      const { client } = render(<TripScreen />);
+      await screen.findByText('μήνυμα 1');
+
+      scrollTo(0);
+      fireEvent.changeText(screen.getByTestId('message-input'), 'Έρχομαι');
+      fireEvent.press(screen.getByTestId('message-send'));
+      await waitFor(() => expect(api.postMessage).toHaveBeenCalled());
+      await refetchWith(client, [msg(1), msg(2, 'me')]);
+
+      await waitFor(() => expect(scrollEnd).toHaveBeenCalled());
+      expect(screen.queryByTestId('new-message')).toBeNull();
+      scrollEnd.mockRestore();
+    });
+  });
 });
 
 // On a drive a passenger says when they are at the pickup, once, and the
@@ -438,4 +541,129 @@ test('the seat pips count booked seats, not passengers', async () => {
 
   const pips = await screen.findByTestId('seat-pips');
   expect(pips.props.accessibilityLabel).toBe('1/3');
+});
+
+// QA U F3: the screen says where and in what order. The ticket has the car's
+// two ends; the stops card has everybody picked up and dropped in between.
+describe('stops card', () => {
+  const at = (h: number, m: number) => new Date(Date.UTC(2030, 0, 15, h, m)).toISOString();
+  const stop = (extra: Record<string, unknown>) => ({
+    kind: 'pickup',
+    mine: false,
+    passenger_id: null,
+    name: null,
+    label: null,
+    point: null,
+    at: null,
+    seats: null,
+    luggage: null,
+    luggage_count: null,
+    ...extra,
+  });
+
+  test('the driver sees each stop in order with name, place, seats and luggage', async () => {
+    (api.trip as jest.Mock).mockResolvedValue(
+      tripOf({
+        role: 'driver',
+        booking_id: null,
+        passengers: [person('p1', 'Μαρία'), person('p2', 'Νίκος')],
+        stops: [
+          stop({ kind: 'pickup', passenger_id: 'p1', name: 'Μαρία', label: 'Λιμάνι', at: at(5, 30), seats: 2, luggage_count: 1 }),
+          stop({ kind: 'pickup', passenger_id: 'p2', name: 'Νίκος', label: 'Πλατεία', at: at(5, 40), seats: 1, luggage_count: 0 }),
+          stop({ kind: 'dropoff', passenger_id: 'p1', name: 'Μαρία', label: 'Κομοτηνή Κέντρο', at: at(6, 20), seats: 2, luggage_count: 1 }),
+        ],
+      } as never),
+    );
+    render(<TripScreen />);
+
+    expect(await screen.findByText('Στάσεις')).toBeTruthy();
+    const first = screen.getByTestId('stop-0');
+    expect(within(first).getByText(/07:30/)).toBeTruthy();
+    expect(within(first).getByText(/Παραλαβή/)).toBeTruthy();
+    expect(within(first).getByText(/Μαρία · Λιμάνι · 2 θέσεις · 1 αποσκευή/)).toBeTruthy();
+    const second = screen.getByTestId('stop-1');
+    expect(within(second).getByText(/Νίκος · Πλατεία · 1 θέση$/)).toBeTruthy();
+    const third = screen.getByTestId('stop-2');
+    expect(within(third).getByText(/Αποβίβαση/)).toBeTruthy();
+  });
+
+  test('a passenger sees their own place and only «Άλλος επιβάτης» for the rest', async () => {
+    (api.trip as jest.Mock).mockResolvedValue(
+      tripOf({
+        stops: [
+          stop({ kind: 'pickup', mine: false }),
+          stop({ kind: 'pickup', mine: true, passenger_id: 'me', name: 'Εγώ', label: 'Αλεξανδρούπολη Λιμάνι', at: at(5, 30) }),
+          stop({ kind: 'dropoff', mine: false }),
+        ],
+      } as never),
+    );
+    render(<TripScreen />);
+
+    await screen.findByText('Στάσεις');
+    expect(within(screen.getByTestId('stop-1')).getByText(/Εσύ · Αλεξανδρούπολη Λιμάνι/)).toBeTruthy();
+    expect(within(screen.getByTestId('stop-0')).getByText('Άλλος επιβάτης')).toBeTruthy();
+    expect(within(screen.getByTestId('stop-2')).getByText('Άλλος επιβάτης')).toBeTruthy();
+  });
+
+  test('no card without stops', async () => {
+    (api.trip as jest.Mock).mockResolvedValue(tripOf({ stops: [] } as never));
+    render(<TripScreen />);
+    await screen.findByTestId('trip-leave');
+    expect(screen.queryByText('Στάσεις')).toBeNull();
+  });
+
+  test('no card when the server sends no stops at all', async () => {
+    (api.trip as jest.Mock).mockResolvedValue(tripOf());
+    render(<TripScreen />);
+    await screen.findByTestId('trip-leave');
+    expect(screen.queryByText('Στάσεις')).toBeNull();
+  });
+});
+
+// The dots alone did not say whether they counted free or taken seats.
+test('free seats are said in words beside the dots', async () => {
+  (api.trip as jest.Mock).mockResolvedValue(tripOf({ seats_free: 2 }));
+  const { unmount } = render(<TripScreen />);
+  expect(await screen.findByText('2 ελεύθερες θέσεις')).toBeTruthy();
+  unmount();
+
+  (api.trip as jest.Mock).mockResolvedValue(tripOf({ seats_free: 1 }));
+  render(<TripScreen />);
+  expect(await screen.findByText('1 ελεύθερη θέση')).toBeTruthy();
+});
+
+// QA F4: the price on a ticket is per seat.
+test('a passenger holding two seats sees the price per seat and the total', async () => {
+  (api.trip as jest.Mock).mockResolvedValue(
+    tripOf({ price_eur: 2.5, seats: 2, passengers: [person('me', 'Εγώ', { seats: 2 })] }),
+  );
+  render(<TripScreen />);
+
+  expect(await screen.findByText(/ανά θέση · σύνολο 5,00.€/)).toBeTruthy();
+});
+
+test('one seat is a bare price on the ticket', async () => {
+  (api.trip as jest.Mock).mockResolvedValue(tripOf({ price_eur: 2.5, seats: 1 }));
+  render(<TripScreen />);
+
+  await screen.findByTestId('seat-pips');
+  expect(screen.queryByText(/ανά θέση/)).toBeNull();
+});
+
+// QA F8: a driver on the trip screen has to see a new ask for it.
+describe('a question waiting on the driver', () => {
+  it('is on the driver\'s trip, for this trip', async () => {
+    (api.trip as jest.Mock).mockResolvedValue(tripOf({ role: 'driver', booking_id: null, price_eur: 0 }));
+    render(<TripScreen />);
+
+    expect(await screen.findByTestId('pending-asks-for')).toHaveTextContent('occ-1');
+  });
+
+  it('is not on a passenger\'s trip', async () => {
+    (api.trip as jest.Mock).mockResolvedValue(tripOf());
+    render(<TripScreen />);
+
+    await screen.findByTestId('trip-leave');
+    expect(screen.queryByTestId('pending-asks-for')).toBeNull();
+  });
 });

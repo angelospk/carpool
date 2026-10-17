@@ -11,5 +11,7 @@ import { decimal } from './format';
 export function detourText(minutes: number, km: number, t: TFunction): string {
   const m = Math.round(minutes);
   if (m === 0 && km < 0.05) return t('ask.noDetour');
-  return t('ask.detour', { minutes: m, km: decimal(km, 1) });
+  // "+0 λεπτά" beside a real distance reads as no detour at all, and count
+  // picks «λεπτό» for one.
+  return t('ask.detour', { count: Math.max(1, m), km: decimal(km, 1) });
 }

@@ -70,8 +70,10 @@ export default function PublishScreen() {
   const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]);
   // A trip that happens once — Saturday to Θεσσαλονίκη — rather than a commute.
   // The date defaults to tomorrow, the likeliest answer when somebody opens
-  // this to offer a single journey.
-  const [kind, setKind] = useState<'recurring' | 'oneoff'>('recurring');
+  // this to offer a single journey. One-off is also the safe default: a hasty
+  // publish used to create a weekly Monday-to-Friday route nobody had asked for
+  // (QA 2026-10-17), and a recurring one is one deliberate tap away.
+  const [kind, setKind] = useState<'recurring' | 'oneoff'>('oneoff');
   // The tab stays mounted, possibly overnight, so "today" is read again every
   // time the screen comes back into view rather than once when it was built.
   const [today, setToday] = useState(() => athensDate(new Date()));
@@ -89,6 +91,12 @@ export default function PublishScreen() {
   }, [dates, oneoffDate]);
   const [earliest, setEarliest] = useState('07:30');
   const [latest, setLatest] = useState('08:00');
+  // Whether a time field has been left yet. The error waits for that, so
+  // somebody halfway through typing "07:" is not told off.
+  const [leftEarliest, setLeftEarliest] = useState(false);
+  const [leftLatest, setLeftLatest] = useState(false);
+  const earliestBad = parseTime(earliest) === null;
+  const latestBad = parseTime(latest) === null;
   // «Φεύγω τώρα»: a trip for the next quarter of an hour, published and
   // opened at once, where «Φεύγω» is. A one-off for today whose window is
   // worked out when the button is pressed, so it never goes out in the past.
@@ -132,6 +140,9 @@ export default function PublishScreen() {
   const [groupID, setGroupID] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
   const [published, setPublished] = useState<ShareableRoute | null>(null);
+  // What the confirmation card says. Separate from `outcome`, which stays the
+  // place for refusals and for things that went wrong after the route existed.
+  const [done, setDone] = useState<{ title: string; detail: string | null } | null>(null);
 
   // «Αλλαγή» from the list of routes: the form arrives filled in with the
   // route, and saving changes it in place. With other ends it is a new route:
@@ -212,7 +223,7 @@ export default function PublishScreen() {
           ? { oneoff_date: snap.oneoff_date }
           : { weekdays: snap.weekdays }),
         depart_earliest: snap.depart_earliest,
-        depart_latest: nowWindow.current?.latest ?? latest,
+        depart_latest: nowWindow.current?.latest ?? parseTime(latest) ?? latest,
         ...(allowStops !== null ? { allow_stops: allowStops } : {}),
         ...(detourKm !== null ? { detour_km: detourKm } : {}),
         ...(vehicleID !== null ? { vehicle_id: vehicleID } : {}),
@@ -252,14 +263,16 @@ export default function PublishScreen() {
       // a result for the request still in flight.
       setOutcome(null);
       setPublished(null);
+      setDone(null);
     },
     onSuccess: (r, snap) => {
-      setOutcome(
+      setDone(
         r.edited
-          ? r.kept_trips > 0
-            ? `${t('publish.edited')} ${t('publish.keptTrips', { count: r.kept_trips })}`
-            : t('publish.edited')
-          : `${t('publish.published')} · ${km(r.route_km)}`,
+          ? {
+              title: t('publish.edited'),
+              detail: r.kept_trips > 0 ? t('publish.keptTrips', { count: r.kept_trips }) : null,
+            }
+          : { title: t('publish.published'), detail: km(r.route_km) },
       );
       setPublished({ ...snap, id: r.template_id });
       // The places go, so a second press cannot publish the same route again
@@ -518,11 +531,20 @@ export default function PublishScreen() {
           <>
           <Text style={styles.label}>{t('publish.departWindow')}</Text>
           <View style={styles.times}>
+            {/* Typing replaces the value: with the old one kept, "08:15" was
+                appended to "07:30" and the field held nonsense (QA 2026-10-17).
+                Digits are enough, "0745" and "7:45" both mean 07:45. */}
             <Field
               testID="depart-earliest"
               label={t('publish.from')}
               value={earliest}
               onChangeText={setEarliest}
+              onBlur={() => {
+                setLeftEarliest(true);
+                setEarliest((v) => parseTime(v) ?? v);
+              }}
+              selectTextOnFocus
+              keyboardType="number-pad"
               compact
             />
             <Field
@@ -530,9 +552,23 @@ export default function PublishScreen() {
               label={t('publish.until')}
               value={latest}
               onChangeText={setLatest}
+              onBlur={() => {
+                setLeftLatest(true);
+                setLatest((v) => parseTime(v) ?? v);
+              }}
+              selectTextOnFocus
+              keyboardType="number-pad"
               compact
             />
           </View>
+          {(leftEarliest && earliestBad) || (leftLatest && latestBad) ? (
+            <Text
+              testID={leftEarliest && earliestBad ? 'depart-earliest-error' : 'depart-latest-error'}
+              style={styles.error}
+            >
+              {t('publish.timeInvalid')}
+            </Text>
+          ) : null}
           </>
           )}
         </Card>
@@ -626,12 +662,32 @@ export default function PublishScreen() {
           form has been scrolled to. */}
       <BottomBar bleed inset={false}>
         {outcome ? <Hint>{outcome}</Hint> : null}
-        {published !== null ? (
-          <ShareRouteButton
-            route={published}
-            testID="publish-share-route"
-            failedTestID="publish-share-failed"
-          />
+        {/* A card rather than a grey line over a button that has gone dead: the
+            driver has just finished the whole form and should be told plainly
+            that it worked, and what to do next. */}
+        {done !== null ? (
+          <Card testID="publish-done">
+            <Text style={styles.doneTitle}>{done.title}</Text>
+            {done.detail ? <Text style={styles.hint}>{done.detail}</Text> : null}
+            {published !== null ? (
+              <ShareRouteButton
+                route={published}
+                testID="publish-share-route"
+                failedTestID="publish-share-failed"
+              />
+            ) : null}
+            <Button
+              testID="publish-done-home"
+              label={t('publish.goHome')}
+              variant="secondary"
+              onPress={() => router.replace('/(tabs)')}
+            />
+          </Card>
+        ) : null}
+        {/* The button is shut until both ends are chosen; say so, or it just
+            looks broken. */}
+        {(!from || !to) && done === null ? (
+          <Hint testID="publish-needs-places">{t('publish.needPlaces')}</Hint>
         ) : null}
         <Button
           testID="publish-submit"
@@ -656,7 +712,9 @@ export default function PublishScreen() {
                 : kind === 'oneoff'
                   ? { oneoff_date: oneoffDate }
                   : { weekdays: [...weekdays] }),
-              depart_earliest: leavingNow ? athensTime(new Date(at + 2 * 60_000).toISOString()) : earliest,
+              depart_earliest: leavingNow
+                ? athensTime(new Date(at + 2 * 60_000).toISOString())
+                : (parseTime(earliest) ?? earliest),
               seats,
             });
           }}
@@ -665,7 +723,7 @@ export default function PublishScreen() {
           // route would go out to everybody without the driver having seen
           // the question.
           disabled={
-            !from || !to || (kind === 'recurring' && !weekdays.length) || noCar || noBootLeft || publish.isPending || !myGroups.isSuccess
+            !from || !to || (kind === 'recurring' && !weekdays.length) || noCar || noBootLeft || (!leavingNow && (earliestBad || latestBad)) || publish.isPending || !myGroups.isSuccess
           }
         />
       </BottomBar>
@@ -684,6 +742,8 @@ const styles = StyleSheet.create({
   seatsLabel: { ...type.body, color: colors.ink },
   toggle: { ...type.label, color: colors.ink },
   hint: { ...type.caption, color: colors.muted, marginTop: space.xs },
+  error: { ...type.caption, color: colors.danger },
+  doneTitle: { ...type.label, color: colors.ink },
   divider: { height: 1, backgroundColor: colors.line, marginVertical: space.sm },
 });
 
@@ -714,6 +774,19 @@ function first(value: string | string[] | undefined): string | undefined {
 // sorted, but a preset is a set either way.
 function sameDays(chosen: number[], preset: readonly number[]): boolean {
   return chosen.length === preset.length && preset.every((d) => chosen.includes(d));
+}
+
+/**
+ * "0745", "745", "7:45" and "07:45" all mean 07:45; anything else is not a time
+ * of day. Returns HH:MM, or null.
+ */
+function parseTime(text: string): string | null {
+  const m = /^(\d{1,2}):?(\d{2})(?::\d{2})?$/.exec(text.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  return `${String(h).padStart(2, '0')}:${m[2]}`;
 }
 
 /**

@@ -15,6 +15,7 @@ import { useSession } from '../../src/state/session';
 import { Avatar, Button, Card, Field, Row, Screen, SectionHeader } from '../../src/components/ui';
 import { PreferencePicker } from '../../src/components/Preferences';
 import { type PreferenceTag } from '../../src/api/endpoints';
+import { confirm } from '../../src/components/confirm';
 import { colors, radius, space, type } from '../../src/design/tokens';
 
 export default function ProfileScreen() {
@@ -259,7 +260,18 @@ export default function ProfileScreen() {
           testID="sign-out"
           label={t('profile.signOut')}
           variant="danger"
-          onPress={() => void signOut()}
+          // One stray tap on the last button of the screen would otherwise end
+          // the session, and getting back in costs an SMS.
+          onPress={() =>
+            confirm({
+              title: t('profile.signOut'),
+              message: t('profile.signOutConfirm'),
+              confirmLabel: t('profile.signOut'),
+              cancelLabel: t('common.cancel'),
+              destructive: true,
+              onConfirm: () => void signOut(),
+            })
+          }
         />
       </ScrollView>
     </Screen>

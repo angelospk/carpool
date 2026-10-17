@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"carpool/internal/asks"
+	"carpool/internal/groups"
 	"carpool/internal/match"
 	"carpool/internal/store"
 )
@@ -105,7 +106,12 @@ func (d Deps) handlePendingAsks(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]any, 0, len(list))
 	for _, a := range list {
-		out = append(out, askJSON(a))
+		shared, err := groups.SharedNames(r.Context(), d.Pool, userID, a.PassengerID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not list asks")
+			return
+		}
+		out = append(out, askJSON(a, shared))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"asks": out})
 }
@@ -125,23 +131,39 @@ func (d Deps) handleGetAsk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "could not load the request")
 		return
 	}
-	writeJSON(w, http.StatusOK, askJSON(a))
+	shared, err := groups.SharedNames(r.Context(), d.Pool, userID, a.PassengerID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "could not load the request")
+		return
+	}
+	writeJSON(w, http.StatusOK, askJSON(a, shared))
 }
 
 // askJSON is built field by field, so a new field on the store type does not
 // reach a driver's phone because somebody exported it.
-func askJSON(a store.PendingAsk) map[string]any {
+//
+// shared is the groups the driver has in common with the passenger, the same
+// trust signal the trip screen shows.
+func askJSON(a store.PendingAsk, shared []string) map[string]any {
 	return map[string]any{
-		"id":                a.ID,
-		"occurrence_id":     a.OccurrenceID,
-		"passenger_name":    a.PassengerName,
-		"origin_label":      a.OriginLabel,
-		"destination_label": a.DestinationLabel,
-		"detour_min":        a.DetourMin,
-		"detour_km":         a.DetourKm,
-		"price_eur":         a.PriceEUR,
-		"seats":             a.Seats,
-		"depart_earliest":   a.DepartEarliest,
-		"expires_at":        a.ExpiresAt,
+		"id":                     a.ID,
+		"occurrence_id":          a.OccurrenceID,
+		"passenger_name":         a.PassengerName,
+		"passenger_photo_url":    avatarURL(a.PassengerID, a.PhotoVersion),
+		"passenger_rating":       a.Rating,
+		"passenger_rating_count": a.RatingCount,
+		"shared_groups":          shared,
+		"luggage":                a.Luggage,
+		"luggage_count":          a.LuggageCount,
+		"window_start":           a.WindowStart,
+		"window_end":             a.WindowEnd,
+		"origin_label":           a.OriginLabel,
+		"destination_label":      a.DestinationLabel,
+		"detour_min":             a.DetourMin,
+		"detour_km":              a.DetourKm,
+		"price_eur":              a.PriceEUR,
+		"seats":                  a.Seats,
+		"depart_earliest":        a.DepartEarliest,
+		"expires_at":             a.ExpiresAt,
 	}
 }

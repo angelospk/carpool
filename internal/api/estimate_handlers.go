@@ -3,10 +3,12 @@ package api
 import (
 	"errors"
 	"net/http"
+	"sync"
 
 	"carpool/internal/domain"
 	"carpool/internal/geo"
 	"carpool/internal/store"
+	"carpool/internal/tolls"
 	"carpool/internal/vehicles"
 )
 
@@ -18,6 +20,45 @@ import (
 // figure derived from six of them would look more principled than it is. Worth
 // revisiting against real occurrences when there are enough to have a middle.
 const typicalSeats = 3
+
+// tollDataset is the shipped toll network, read once. Nil when it failed to
+// load, which costs the estimate its toll component and nothing else, as it
+// does for a real ask.
+var tollDataset = sync.OnceValue(func() *tolls.Dataset {
+	set, err := tolls.Load()
+	if err != nil {
+		return nil
+	}
+	return set
+})
+
+// tollShareOf is one seat's part of the barriers on a routed trip, from the
+// same plaza matching a real ask uses, split among the whole car for the whole
+// way: the driver and every seat aboard at every barrier.
+//
+// Floored per barrier, so the odd cents never push the estimate above what the
+// split would charge. Zero for geometry that cannot be read or a crossed
+// station with no price, rather than an error: an estimate without its toll
+// beats no estimate.
+func tollShareOf(encoded string, car int) int {
+	set := tollDataset()
+	if set == nil || car <= 0 {
+		return 0
+	}
+	route, err := geo.DecodePolylinePrecision(encoded, 6)
+	if err != nil || len(route) < 2 {
+		return 0
+	}
+	gates, priced := set.Match(route).Gates(tolls.Car)
+	if !priced {
+		return 0
+	}
+	total := 0
+	for _, g := range gates {
+		total += g.Cents / car
+	}
+	return total
+}
 
 // handleEstimate answers "roughly what will this cost", before any driver has
 // seen the trip.
@@ -140,6 +181,7 @@ func (d Deps) handleEstimate(w http.ResponseWriter, r *http.Request) {
 		CostPerKmEUR:        costPerKm,
 		CeilingCostPerKmEUR: dearest,
 		Divisor:             typicalSeats + 1,
+		TollShareCents:      tollShareOf(route.Geometry, typicalSeats+1),
 		Version:             typical.Version,
 		FuelPriceAsOf:       asOf.Format("2006-01-02"),
 		RegionName:          region.Name,

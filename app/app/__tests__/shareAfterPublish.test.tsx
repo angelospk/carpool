@@ -84,6 +84,8 @@ afterEach(() => {
 
 async function pickBothEnds() {
   render(wrap(<PublishScreen />));
+  // These tests are about a weekly route's message; the form starts one-off.
+  fireEvent.press(screen.getByTestId('schedule-recurring'));
   await pickEnds();
 }
 

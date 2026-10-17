@@ -480,6 +480,10 @@ func (s *Service) ridersAboard(
 // errAskExists signals that a pending ask already existed for this request.
 var errAskExists = errors.New("asks: an ask already exists")
 
+// minDriveAnswer is the least time a driver on a drive is given to answer: an
+// offer whose deadline is nearer than this is not created.
+const minDriveAnswer = 2 * time.Minute
+
 // errNoRoomToAsk signals that every remaining seat on this occurrence is
 // already promised to somebody, so the next candidate should be tried instead.
 var errNoRoomToAsk = errors.New("asks: no unspoken-for seat on this occurrence")
@@ -580,7 +584,10 @@ func (s *Service) createAsk(
 		 WHERE o.id = $1 AND rr.id = $2`, c.OccurrenceID, req.ID, now).Scan(&pinned, &open, &ready, &deadline); err != nil {
 		return uuid.Nil, fmt.Errorf("asks: reading the drive: %w", err)
 	}
-	if !open || !ready || (pinned && (deadline == nil || !deadline.After(now))) {
+	// An offer that would lapse before the driver can unlock the phone and
+	// answer it is not sent: it would only take the passenger's request out of
+	// play for a question nobody could answer.
+	if !open || !ready || (pinned && (deadline == nil || deadline.Before(now.Add(minDriveAnswer)))) {
 		return uuid.Nil, errNoRoomToAsk
 	}
 

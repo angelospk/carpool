@@ -137,7 +137,12 @@ export type PlanningEstimate = {
   kind: 'planning_estimate';
   route_km: number;
   route_min: number;
+  /** Fuel plus tolls: one seat's whole share. */
   contribution_cents: number;
+  /** The fuel part of the contribution alone. */
+  fuel_cents: number;
+  /** One seat's share of the barriers on the route. Zero when there are none. */
+  toll_cents: number;
   /** The same trip in the thirstiest car the app will price. Zero when there
       is no headroom above the typical figure. */
   ceiling_cents: number;
@@ -190,6 +195,8 @@ export type TripSummary = {
   destination_label: string;
   price_eur: number;
   seats_free: number;
+  /** Seats the caller's own booking holds; price_eur is per seat. Absent for the driver. */
+  seats?: number | null;
 };
 
 export type Participant = {
@@ -234,10 +241,22 @@ export type PendingAsk = {
   id: string;
   occurrence_id: string;
   passenger_name: string;
+  passenger_photo_url: string | null;
+  /** Average stars, null while nobody has rated them. */
+  passenger_rating: number | null;
+  passenger_rating_count: number;
+  /** Groups the driver and the passenger are both in. */
+  shared_groups: string[];
+  luggage: LuggageSize;
+  luggage_count: number;
+  /** When the passenger can go. */
+  window_start: string;
+  window_end: string;
   origin_label: string;
   destination_label: string;
   detour_min: number;
   detour_km: number;
+  /** Per seat. */
   price_eur: number;
   seats: number;
   depart_earliest: string;
@@ -306,7 +325,24 @@ export type PriceBreakdownData = {
   mode: 'formula' | 'free_contribution' | 'free';
 };
 
+/** One pick-up or drop-off on the road, in road order. A passenger gets only
+    kind and mine for everyone else's: the rest is null. */
+export type TripStop = {
+  kind: 'pickup' | 'dropoff';
+  mine: boolean;
+  passenger_id: string | null;
+  name: string | null;
+  label: string | null;
+  point: [number, number] | null;
+  at: string | null;
+  seats: number | null;
+  luggage: LuggageSize | null;
+  luggage_count: number | null;
+};
+
 export type TripDetail = TripSummary & {
+  /** Every stop along the road, in order. Absent from older servers. */
+  stops?: TripStop[];
   route_polyline: string;
   driver: Participant;
   passengers: Participant[];
@@ -334,6 +370,8 @@ export type TripDetail = TripSummary & {
   offers_until?: string | null;
   /** End of the driver's road, [lon, lat]. The driver's only. */
   destination?: [number, number] | null;
+  /** The route runs again: its schedule is recurring. */
+  repeats?: boolean;
 };
 
 export type PastTrip = TripSummary & {

@@ -133,3 +133,30 @@ test('with passengers booked it offers only minutes inside their window', () => 
   expect(screen.getByTestId('drive-not-yet')).toHaveTextContent(/07:00/);
   expect(screen.getByTestId('drive-go').props.accessibilityState?.disabled).toBe(true);
 });
+
+// On the web nothing can send the car's position after the tab is put away, so
+// the driver is told to use the app instead of left believing it is shared.
+test('on the web the driver is told the browser sends no position', async () => {
+  (api.startDrive as jest.Mock).mockResolvedValue({ departs_at: '2026-08-04T03:50:00Z' });
+  mockTrack.mockResolvedValueOnce('unavailable');
+  const onDone = jest.fn();
+  render(wrap(<DriveCard trip={trip()} now={() => at('03:50')} onDone={onDone} />));
+  fireEvent.press(screen.getByTestId('drive-go'));
+  expect(await screen.findByTestId('drive-error')).toHaveTextContent(
+    'Από browser δεν στέλνεται θέση στη διαδρομή. Χρησιμοποίησε την εφαρμογή.',
+  );
+  expect(onDone).toHaveBeenCalled();
+});
+
+// The drive has started by then; "the drive failed" would be a lie.
+test('a position task that cannot start does not read as a failed drive', async () => {
+  (api.startDrive as jest.Mock).mockResolvedValue({ departs_at: '2026-08-04T03:50:00Z' });
+  mockTrack.mockRejectedValueOnce(new Error('boom'));
+  const onDone = jest.fn();
+  render(wrap(<DriveCard trip={trip()} now={() => at('03:50')} onDone={onDone} />));
+  fireEvent.press(screen.getByTestId('drive-go'));
+  expect(await screen.findByTestId('drive-error')).toHaveTextContent(
+    'Η διαδρομή ξεκίνησε, αλλά η θέση δεν στέλνεται.',
+  );
+  expect(onDone).toHaveBeenCalled();
+});

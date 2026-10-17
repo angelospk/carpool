@@ -26,7 +26,7 @@ import { Ticket } from '../../src/components/Ticket';
 import { Icon, type IconName } from '../../src/components/Icon';
 import { border, colors, radius, size, space, type } from '../../src/design/tokens';
 import { approxArrival } from '../../src/design/ticket';
-import { athensDay, athensTime, eur, greetingKey, km, startsNewDay } from '../../src/design/format';
+import { athensDay, athensTime, eur, greetingKey, km, seatPrice, seatPriceNote, startsNewDay } from '../../src/design/format';
 import { thisWeek } from '../../src/design/upcoming';
 
 export default function HomeScreen() {
@@ -359,7 +359,11 @@ function NextTrip({ trip, onPress }: { trip: TripSummary; onPress: () => void })
       }
       // Bare euros beside a journey reads as a fare. It is not one.
       fare={trip.price_eur > 0 ? eur(trip.price_eur) : undefined}
-      fareLabel={trip.price_eur > 0 ? t('home.contribution') : undefined}
+      fareLabel={
+        trip.price_eur > 0
+          ? seatPriceNote(t, trip.price_eur, trip.seats) ?? t('home.contribution')
+          : undefined
+      }
     />
   );
 }
@@ -413,7 +417,7 @@ function TripCard({ trip, onPress }: { trip: TripSummary; onPress: () => void })
             label={trip.role === 'driver' ? t('home.asDriver') : t('home.asPassenger')}
             tone={trip.role === 'driver' ? 'primary' : 'quiet'}
           />
-          {trip.price_eur > 0 ? <Text style={styles.meta}>{eur(trip.price_eur)}</Text> : null}
+          {trip.price_eur > 0 ? <Text style={styles.meta}>{seatPrice(t, trip.price_eur, trip.seats)}</Text> : null}
         </View>
       }
     />

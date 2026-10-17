@@ -32,14 +32,14 @@ func (h *harness) secondPassenger(t *testing.T) string {
 }
 
 type stop struct {
-	Kind         string     `json:"kind"`
-	Mine         bool       `json:"mine"`
-	Name         *string    `json:"name"`
-	Label        *string    `json:"label"`
+	Kind         string      `json:"kind"`
+	Mine         bool        `json:"mine"`
+	Name         *string     `json:"name"`
+	Label        *string     `json:"label"`
 	Point        *[2]float64 `json:"point"`
-	At           *string    `json:"at"`
-	Seats        *int       `json:"seats"`
-	LuggageCount *int       `json:"luggage_count"`
+	At           *string     `json:"at"`
+	Seats        *int        `json:"seats"`
+	LuggageCount *int        `json:"luggage_count"`
 }
 
 type tripWithStops struct {

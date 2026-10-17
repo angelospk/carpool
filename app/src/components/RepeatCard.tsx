@@ -75,6 +75,8 @@ export function RepeatCard({ trip }: { trip: TripDetail }) {
 
   // The driver has no booking of their own, so they cannot start an
   // arrangement — only answer one.
+  // A one-off route does not run again, so there is nothing to switch on.
+  if (trip.repeats === false) return null;
   if (isDriver && !mine) return null;
   if (!isDriver && !trip.booking_id) return null;
 

@@ -58,7 +58,9 @@ export function Estimate({
       {/* One sentence, and it says it is not an offer: that half is what keeps
           this from being a price, so it is never folded away. */}
       <Text testID={testID ? `${testID}-headline` : undefined} style={styles.headline}>
-        {t('estimate.about', { amount: euros(data.contribution_cents) })}
+        {t(data.toll_cents > 0 ? 'estimate.aboutWithTolls' : 'estimate.about', {
+          amount: euros(data.contribution_cents),
+        })}
       </Text>
       <Pressable
         testID={testID ? `${testID}-how` : undefined}

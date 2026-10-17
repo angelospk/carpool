@@ -28,6 +28,23 @@ import { colors, radius, space, type as typography } from '../design/tokens';
 // that the list is there by the time the finger stops.
 const DEBOUNCE_MS = 300;
 
+// Past this a suggestion is worth a warning. Dozens of villages share a name,
+// and the municipality alone does not tell somebody in Evros that the «Αύρα»
+// on top is in Άρτα.
+const FAR_KM = 150;
+
+// Great-circle distance in kilometres. Whole kilometres is as precise as the
+// label needs to be.
+function kmBetween(a: { lon: number; lat: number }, b: { lon: number; lat: number }): number {
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLon = (b.lon - a.lon) * rad;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+
 export function PlaceField({
   label,
   value,
@@ -241,23 +258,27 @@ export function PlaceField({
 
       {suggestions && suggestions.length > 0 ? (
         <View testID={testID ? `${testID}-suggestions` : undefined} style={styles.list}>
-          {suggestions.map((place) => (
-            <Pressable
-              key={place.id}
-              testID={testID ? `${testID}-${place.id}` : undefined}
-              onPress={() => choose(place)}
-              style={styles.row}
-            >
-              <Text style={styles.name}>{place.name}</Text>
-              {/* Dozens of Greek villages share a name. The municipality is
+          {suggestions.map((place) => {
+            const away = near ? kmBetween(near, place) : 0;
+            return (
+              <Pressable
+                key={place.id}
+                testID={testID ? `${testID}-${place.id}` : undefined}
+                onPress={() => choose(place)}
+                style={styles.row}
+              >
+                <Text style={styles.name}>{place.name}</Text>
+                {/* Dozens of Greek villages share a name. The municipality is
                   what tells otherwise identical rows apart, and the kind is
                   what says which of them is a city and which is five houses. */}
-              <Text style={styles.kind}>
-                {place.area ? `${areaLabel(place.area)} · ` : ''}
-                {t(`places.${place.kind}`)}
-              </Text>
-            </Pressable>
-          ))}
+                <Text style={styles.kind}>
+                  {place.area ? `${areaLabel(place.area)} · ` : ''}
+                  {t(`places.${place.kind}`)}
+                  {away > FAR_KM ? ` · ${t('places.away', { km: Math.round(away) })}` : ''}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
       ) : null}
 
@@ -275,7 +296,9 @@ export function PlaceField({
 // hang on Android when no provider has one, so it gets ten seconds and then
 // counts as a failure, which the field reports instead of sitting still.
 async function position(): Promise<Location.LocationObject> {
-  const recent = await Location.getLastKnownPositionAsync({ maxAge: 10 * 60_000 });
+  const recent = await Location.getLastKnownPositionAsync({
+    maxAge: 10 * 60_000,
+  });
   if (recent) return recent;
   return Promise.race([
     Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
@@ -310,5 +333,10 @@ const styles = StyleSheet.create({
     paddingVertical: space.xs,
   },
   hereLabel: { ...typography.label, color: colors.ink },
-  empty: { ...typography.caption, color: colors.muted, marginTop: space.xs, paddingHorizontal: space.md },
+  empty: {
+    ...typography.caption,
+    color: colors.muted,
+    marginTop: space.xs,
+    paddingHorizontal: space.md,
+  },
 });

@@ -6,9 +6,11 @@ import PublishScreen from '../(tabs)/publish';
 import { athensDate, nextDate } from '../../src/design/when';
 import { api } from '../../src/api/endpoints';
 import i18n from 'i18next';
+import el from '../../src/i18n/el.json';
 
+const mockReplace = jest.fn();
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+  useRouter: () => ({ push: jest.fn(), replace: mockReplace }),
   // Focus is once, on mount, which is what a test screen gets.
   useFocusEffect: (effect: () => void) => require('react').useEffect(effect, []),
   useLocalSearchParams: () => ({}),
@@ -107,6 +109,7 @@ describe('the schedule is when the car goes, and nothing else', () => {
   // "πρόγραμμα" the name of the box holding everything with no home.
   test('a preset replaces the days rather than adding to them', async () => {
     await fillRoute();
+    fireEvent.press(screen.getByTestId('schedule-recurring'));
 
     fireEvent.press(screen.getByTestId('preset-presetWeekend'));
     fireEvent.press(screen.getByTestId('publish-submit'));
@@ -117,8 +120,9 @@ describe('the schedule is when the car goes, and nothing else', () => {
 
   test('the preset that matches the chosen days reads as chosen', async () => {
     await fillRoute();
+    fireEvent.press(screen.getByTestId('schedule-recurring'));
 
-    // Monday to Friday is the form's own default.
+    // Monday to Friday is the days a driver starts from once they pick every week.
     expect(screen.getByTestId('preset-presetWeekdays').props.accessibilityState?.selected).toBe(
       true,
     );
@@ -129,6 +133,7 @@ describe('the schedule is when the car goes, and nothing else', () => {
 
   test('a day can still be dropped one at a time', async () => {
     await fillRoute();
+    fireEvent.press(screen.getByTestId('schedule-recurring'));
 
     fireEvent.press(screen.getByTestId('weekday-3'));
     fireEvent.press(screen.getByTestId('publish-submit'));
@@ -270,4 +275,102 @@ test('the detour is asked right after the road', async () => {
   expect(at('publish.route')).toBeGreaterThan(-1);
   expect(at('publish.detour')).toBeGreaterThan(at('publish.route'));
   expect(at('publish.detour')).toBeLessThan(at('publish.schedule'));
+});
+
+// QA F9: a hasty publish used to create a weekly Monday-to-Friday route.
+test('an untouched form is a one-off, not a weekly route', async () => {
+  await fillRoute();
+
+  expect(screen.getByTestId('schedule-oneoff').props.accessibilityState?.selected).toBe(true);
+  expect(screen.getByTestId('schedule-recurring').props.accessibilityState?.selected).toBe(false);
+  fireEvent.press(screen.getByTestId('publish-submit'));
+
+  await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
+  const body = (api.publishRoute as jest.Mock).mock.calls[0][0];
+  expect(body.kind).toBe('oneoff');
+  expect(body.weekdays).toBeUndefined();
+});
+
+// QA F9: the result was a small grey line over a disabled button.
+test('a published route is confirmed with a way to share it and a way home', async () => {
+  await fillRoute();
+  fireEvent.press(screen.getByTestId('publish-submit'));
+
+  const done = await screen.findByTestId('publish-done');
+  expect(done).toBeTruthy();
+  expect(screen.getByText(el.publish.published)).toBeTruthy();
+  expect(screen.getByText(/31,2/)).toBeTruthy();
+  expect(screen.getByTestId('publish-share-route')).toBeTruthy();
+
+  fireEvent.press(screen.getByTestId('publish-done-home'));
+  expect(mockReplace).toHaveBeenCalledWith('/(tabs)');
+});
+
+test('an empty From/To says why the button is shut', async () => {
+  (api.vehicles as jest.Mock).mockResolvedValue([car]);
+  render(wrap(<PublishScreen />));
+
+  await waitFor(() =>
+    expect(screen.getByTestId('publish-submit').props.accessibilityState?.disabled).toBe(true),
+  );
+  expect(screen.getByTestId('publish-needs-places')).toBeTruthy();
+  expect(screen.getByText(el.publish.needPlaces)).toBeTruthy();
+});
+
+// QA F10: the stepper showed a bare number.
+test('the detour field names its unit', async () => {
+  await fillRoute();
+  fireEvent.press(screen.getByTestId('detour-override'));
+
+  expect(screen.getByText('Παράκαμψη έως (χλμ)')).toBeTruthy();
+});
+
+// QA F11: the time fields were plain text, so typing appended to the old value.
+describe('departure times', () => {
+  const blurWith = async (id: string, text: string) => {
+    fireEvent(screen.getByTestId(id), 'focus');
+    fireEvent.changeText(screen.getByTestId(id), text);
+    fireEvent(screen.getByTestId(id), 'blur');
+  };
+
+  test('typing replaces the value, on a numeric keyboard', async () => {
+    await fillRoute();
+    const input = screen.getByTestId('depart-earliest');
+    expect(input.props.selectTextOnFocus).toBe(true);
+    expect(input.props.keyboardType).toBe('number-pad');
+  });
+
+  test.each([
+    ['0745', '07:45'],
+    ['7:45', '07:45'],
+    ['745', '07:45'],
+    ['07:45', '07:45'],
+  ])('%s becomes %s on blur', async (typed, shown) => {
+    await fillRoute();
+    await blurWith('depart-earliest', typed);
+
+    expect(screen.getByTestId('depart-earliest').props.value).toBe(shown);
+    expect(screen.queryByTestId('depart-earliest-error')).toBeNull();
+  });
+
+  test('a normalised time is what is sent', async () => {
+    await fillRoute();
+    await blurWith('depart-earliest', '0745');
+    await blurWith('depart-latest', '9:05');
+    fireEvent.press(screen.getByTestId('publish-submit'));
+
+    await waitFor(() => expect(api.publishRoute).toHaveBeenCalled());
+    const body = (api.publishRoute as jest.Mock).mock.calls[0][0];
+    expect(body.depart_earliest).toBe('07:45');
+    expect(body.depart_latest).toBe('09:05');
+  });
+
+  test('an impossible time is flagged and stops publishing', async () => {
+    await fillRoute();
+    await blurWith('depart-latest', '25:99');
+
+    expect(screen.getByTestId('depart-latest-error')).toBeTruthy();
+    expect(screen.getByText(el.publish.timeInvalid)).toBeTruthy();
+    expect(screen.getByTestId('publish-submit').props.accessibilityState?.disabled).toBe(true);
+  });
 });

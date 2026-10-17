@@ -15,6 +15,7 @@
 package places
 
 import (
+	"cmp"
 	_ "embed"
 	"encoding/csv"
 	"math"
@@ -291,11 +292,18 @@ func searchNear(set []indexed, query string, limit int, near *Near) []Place {
 		}
 	}
 
-	nearby := func(p Place) int {
-		if near == nil || geoKm(near.Lon, near.Lat, p.Lon, p.Lat) <= NearKm {
+	// Kilometres beyond NearKm, or 0 for anything near enough to count as
+	// here. Within NearKm the kind and size decide, as before; beyond it the
+	// nearer of two homonyms wins even if the farther one is a bigger place.
+	// «Αύρα» listed the one in Άρτα, 351 km away, ahead of a closer one (F20).
+	away := func(p Place) float64 {
+		if near == nil {
 			return 0
 		}
-		return 1
+		if d := geoKm(near.Lon, near.Lat, p.Lon, p.Lat); d > NearKm {
+			return d
+		}
+		return 0
 	}
 
 	// Sorted rather than partially sorted, and by id last, so that the same
@@ -305,8 +313,8 @@ func searchNear(set []indexed, query string, limit int, near *Near) []Place {
 		if a.score != b.score {
 			return a.score - b.score
 		}
-		if n := nearby(a.Place) - nearby(b.Place); n != 0 {
-			return n
+		if c := cmp.Compare(away(a.Place), away(b.Place)); c != 0 {
+			return c
 		}
 		if r := rank(a.Kind) - rank(b.Kind); r != 0 {
 			return r

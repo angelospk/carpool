@@ -4,6 +4,8 @@
 // device sitting on UTC, must still see the local departure time everyone
 // agreed on — so the zone is pinned here rather than left to the device.
 
+import type { TFunction } from 'i18next';
+
 const ZONE = 'Europe/Athens';
 const LOCALE = 'el-GR';
 
@@ -105,6 +107,21 @@ export function decimal(n: number, digits: number): string {
 /** A contribution in euros (not cents), e.g. «2,37 €». */
 export function eur(amount: number): string {
   return euros(Math.round(amount * 100));
+}
+
+/**
+ * What a passenger pays, said so that a booking of several seats is not read as
+ * one: a price is per seat, so two seats show each and in all (QA F4).
+ */
+export function seatPrice(t: TFunction, price: number, seats?: number | null): string {
+  if (!seats || seats <= 1) return eur(price);
+  return t('home.perSeat', { each: eur(price), total: eur(price * seats) });
+}
+
+/** The words that go over a ticket's per-seat fare when it holds several seats. */
+export function seatPriceNote(t: TFunction, price: number, seats?: number | null): string | undefined {
+  if (!seats || seats <= 1) return undefined;
+  return t('home.perSeatTotal', { total: eur(price * seats) });
 }
 
 /** A distance to one decimal, e.g. «57,9 χλμ». */

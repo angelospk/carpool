@@ -20,13 +20,14 @@ import {
   Spacer,
 } from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
-import { athensTime, eur } from '../../src/design/format';
+import { athensTime } from '../../src/design/format';
 import { mapsUrl, remainingStops, type LonLat } from '../../src/drive/maps';
 import { setDriveStops, visitedStops } from '../../src/drive/tracking';
 import { decodeRoute } from '../../src/components/RouteGlyph';
 import { getMapsApp } from '../../src/drive/mapsApp';
 import { detourText } from '../../src/design/detour';
 import { JourneySummary } from '../../src/components/JourneySummary';
+import { AskPassenger, askPriceText } from '../../src/components/PendingAsks';
 
 export default function AskScreen() {
   const { t } = useTranslation();
@@ -171,12 +172,13 @@ export default function AskScreen() {
               </Text>
               {ask.data.price_eur > 0 ? (
                 <Text style={styles.price}>
-                  {eur(ask.data.price_eur)}{' '}
+                  {askPriceText(ask.data, t)}{' '}
                   <Text style={styles.suggested}>{t('ask.suggested')}</Text>
                 </Text>
               ) : null}
             </Card>
             <Card>
+              <AskPassenger ask={ask.data} showLuggageNone />
               <JourneySummary
                 from={ask.data.origin_label}
                 to={ask.data.destination_label}

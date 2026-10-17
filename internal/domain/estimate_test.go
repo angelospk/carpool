@@ -201,3 +201,50 @@ func TestNoCeilingIsShownWhenItFloorsToTheSameFigure(t *testing.T) {
 			got.CeilingCents, got.ContributionCents)
 	}
 }
+
+// QA U F4: the search showed 1,00 € for the fuel while the real ask was 2,38 €,
+// because the barriers the passenger rides through were not in the figure.
+// The toll is added after the fuel is floored, exactly as SuggestedPrice adds
+// it, and is not itself floored: a toll is money handed over, not a step.
+func TestTheEstimateIncludesTheTollShare(t *testing.T) {
+	in := estimateInputs()
+	in.CeilingCostPerKmEUR = 0.2045
+	fuelOnly := domain.Estimate(in)
+
+	in.TollShareCents = 138
+	got := domain.Estimate(in)
+
+	if got.TollCents != 138 {
+		t.Errorf("toll = %d, want 138", got.TollCents)
+	}
+	if got.FuelCents != fuelOnly.ContributionCents {
+		t.Errorf("fuel = %d, want %d", got.FuelCents, fuelOnly.ContributionCents)
+	}
+	if got.ContributionCents != fuelOnly.ContributionCents+138 {
+		t.Errorf("contribution = %d, want fuel %d + 138", got.ContributionCents, fuelOnly.ContributionCents)
+	}
+	if got.CeilingCents != fuelOnly.CeilingCents+138 {
+		t.Errorf("ceiling = %d, want %d: the toll is the same in a thirstier car",
+			got.CeilingCents, fuelOnly.CeilingCents+138)
+	}
+}
+
+func TestWithoutTollsTheEstimateIsFuelOnly(t *testing.T) {
+	got := domain.Estimate(estimateInputs())
+	if got.TollCents != 0 {
+		t.Errorf("toll = %d with no barriers", got.TollCents)
+	}
+	if got.ContributionCents != got.FuelCents {
+		t.Errorf("contribution %d != fuel %d", got.ContributionCents, got.FuelCents)
+	}
+}
+
+// No ceiling is shown when the fuel has no headroom, tolls or not.
+func TestATollAloneDoesNotInventACeiling(t *testing.T) {
+	in := estimateInputs()
+	in.CeilingCostPerKmEUR = in.CostPerKmEUR
+	in.TollShareCents = 138
+	if got := domain.Estimate(in); got.CeilingCents != 0 {
+		t.Errorf("ceiling = %d with no fuel headroom", got.CeilingCents)
+	}
+}

@@ -1,9 +1,14 @@
 {
   "ask": {
+    "unrated": "No ratings yet",
+    "detour_one": "+{{count}} min, +{{km}} km",
+    "detour_other": "+{{count}} min, +{{km}} km",
+    "pricePerSeat": "{{price}} per seat · {{total}} in total",
+    "window": "wants to go {{from}}–{{to}}",
+    "luggage": "Luggage: {{count}} × {{size}}",
     "accept": "Accept",
     "closed": "This request was already answered",
     "decline": "Not now",
-    "detour": "+{{minutes}} min, +{{km}} km",
     "expired": "This request expired",
     "noSeats": "No free seats left",
     "partyCap": "The car already carries two groups of passengers. We are looking for another driver for this one.",
@@ -83,6 +88,7 @@
   },
   "estimate": {
     "about": "About {{amount}} for the fuel, not an offer from a driver.",
+    "aboutWithTolls": "About {{amount}} (fuel and tolls), not an offer from a driver.",
     "how": "How is this worked out?",
     "basis": "For {{km}} km, with a typical car and {{seats}} seats offered.",
     "notAnOffer": "This is not an offer of a trip. No driver has been found or agreed. The real contribution appears with the specific car and may differ.",
@@ -121,6 +127,10 @@
   "home": {
     "asDriver": "Driving",
     "asPassenger": "Riding",
+    "perSeat": "{{each}} per seat · {{total}} in all",
+    "perSeatTotal": "per seat · {{total}} in all",
+    "pastCompleted": "Completed",
+    "pastCancelled": "Cancelled",
     "empty": "You have no upcoming trips.",
     "title": "Your trips",
     "upcoming": "Upcoming trips",
@@ -211,6 +221,7 @@
     "hamlet": "settlement",
     "noMeetingPoints": "No meeting point is listed here. Agree one between yourselves.",
     "none": "No such place",
+    "away": "{{km}} km away",
     "here": "From here",
     "hereFailed": "Could not tell where you are. Type the town.",
     "point": {
@@ -234,7 +245,7 @@
     "proposeTooMany": "That is enough suggestions for today.",
     "town": "town",
     "village": "village",
-    "whereExactly": "Where exactly?"
+    "whereExactly": "Where exactly? (optional)"
   },
   "preferences": {
     "air_conditioning": "Air conditioning",
@@ -292,6 +303,7 @@
     "routes": "My routes",
     "settings": "Settings",
     "signOut": "Sign out",
+    "signOutConfirm": "You will need a new SMS code to get back in.",
     "social": "Facebook or Instagram profile",
     "socialHint": "Just the username, not the whole link. Not verified.",
     "socialInvalid": "Give a facebook.com or instagram.com link",
@@ -316,7 +328,7 @@
     "detourChange": "Change it just for this trip",
     "detourFromProfile": "As set on your profile",
     "detourHint": "Extra kilometres over your own journey. There is a time limit too, because 15 km on the motorway is not 15 km on a mountain road.",
-    "detourKm": "Detour up to",
+    "detourKm": "Detour up to (km)",
     "from": "From",
     "outsideServiceArea": "That destination is outside the area we can route to yet. Try somewhere closer.",
     "noStopsHint": "You will not be offered anyone who is not already on your route.",
@@ -349,6 +361,9 @@
     "today": "Today",
     "tomorrow": "Tomorrow",
     "leavingNow": "Leaving now",
+    "needPlaces": "Choose where you are leaving from and going to before you publish.",
+    "timeInvalid": "Enter a time like 07:45.",
+    "goHome": "Go to home",
     "leavingNowHint": "A trip for the next quarter of an hour. Once published it opens, so you can say exactly when you leave."
   },
   "request": {
@@ -407,6 +422,15 @@
   "trip": {
     "you": "you",
     "inTheCar": "In the car",
+    "stops": "Stops",
+    "stopPickup": "Pick-up",
+    "stopDropoff": "Drop-off",
+    "stopYou": "You",
+    "stopOther": "Another passenger",
+    "stopSeats_one": "{{count}} seat",
+    "stopSeats_other": "{{count}} seats",
+    "stopLuggage_one": "{{count}} bag",
+    "stopLuggage_other": "{{count}} bags",
     "cancel": "Cancel trip",
     "cancelConfirm": "This trip will not happen.",
     "cancelWithPassengers": "This trip will not happen. {{count}} passengers will be told.",
@@ -449,7 +473,8 @@
     "rateStars_other": "{{count}} stars",
     "ratedDone": "Rated",
     "openProfile": "Profile: {{name}}",
-    "sendFailed": "The message was not sent. Press Send again."
+    "sendFailed": "The message was not sent. Press Send again.",
+    "newMessage": "New message ↓"
   },
   "user": {
     "block": "Block",
@@ -562,6 +587,9 @@
     "notYet": "Location can be shared from {{time}}.",
     "over": "The trip is over. Location is no longer shared.",
     "nobody": "Nobody is sharing their location right now.",
+    "onlyYou": "Only you are sharing your location right now.",
+    "notSharingNow": "Your location is no longer shared: the trip's sharing window has closed.",
+    "needsHttps": "Location in the browser needs https.",
     "ago": "{{name}} · {{minutes}}′ ago",
     "openMap": "Map",
     "denied": "Without location permission your location cannot be shared.",
@@ -645,6 +673,8 @@
     "skip": "No",
     "trackTitle": "Sharing the car's position",
     "trackBody": "For this drive only, until you tap «End».",
+    "trackWeb": "A browser does not send a position during a drive. Use the app.",
+    "trackFailed": "The drive has started, but your position is not being sent.",
     "trackDenied": "Without your position we cannot tell anyone when you pass, so no passengers are sent to you while you drive.",
     "driving": "You are driving",
     "offeringUntil": "Taking people until {{time}}",

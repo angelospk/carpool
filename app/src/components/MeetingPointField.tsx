@@ -15,6 +15,10 @@ import { type Pin } from '../design/pin';
 import { ProposePoint } from './ProposePoint';
 import { border, colors, radius, space, type } from '../design/tokens';
 
+// A bare abbreviation says nothing: «EKO», «ΑΠ», «Α.Π.». OSM names are
+// often just the brand.
+const ABBREVIATION_MAX = 4;
+
 export function MeetingPointField({
   place,
   value,
@@ -60,6 +64,16 @@ export function MeetingPointField({
       <Text style={styles.label}>{t('places.whereExactly')}</Text>
       {points.data.map((p) => {
         const chosen = value?.id === p.id;
+        // The town is already chosen above, so a label that starts with it
+        // would say it twice: «Αλεξανδρούπολη, Αλεξανδρούπολη Λιμάνι».
+        const prefix = `${place.label}, `;
+        const name =
+          p.name.startsWith(prefix) && p.name.length > prefix.length
+            ? p.name.slice(prefix.length)
+            : p.name;
+        // The kind goes into the name instead of beside it, so it is said
+        // once. «other» is not a kind worth saying.
+        const folded = name.length <= ABBREVIATION_MAX && p.kind !== 'other';
         return (
           <Pressable
             key={p.id}
@@ -67,8 +81,10 @@ export function MeetingPointField({
             onPress={() => onChange(chosen ? null : p)}
             style={[styles.row, chosen && styles.chosen]}
           >
-            <Text style={styles.name}>{p.name}</Text>
-            <Text style={styles.kind}>{t(`places.point.${p.kind}`)}</Text>
+            <Text style={styles.name}>
+              {folded ? `${name} · ${t(`places.point.${p.kind}`)}` : name}
+            </Text>
+            {folded ? null : <Text style={styles.kind}>{t(`places.point.${p.kind}`)}</Text>}
           </Pressable>
         );
       })}

@@ -35,6 +35,11 @@ type Trip struct {
 	DestLabel      string
 	PriceEUR       float64
 	SeatsFree      int
+	// Seats is how many seats the caller's own booking holds, so a per-seat
+	// price can be shown with its total. Nil for the driver.
+	Seats *int
+	// Repeats is whether the route runs again: its schedule is recurring.
+	Repeats bool
 }
 
 // tripEndsAt is when the departure o is over, for listing it as next or as
@@ -57,7 +62,7 @@ func tripEndsAt(o string) string {
 func UpcomingTrips(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, now time.Time) ([]Trip, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT o.id, 'driver', o.depart_earliest, o.depart_latest, o.status, o.route_km,
-		       t.origin_label, t.destination_label, 0::numeric, o.seats_free
+		       t.origin_label, t.destination_label, 0::numeric, o.seats_free, NULL::int
 		FROM trip_occurrences o
 		JOIN route_templates t ON t.id = o.template_id
 		WHERE t.driver_id = $1
@@ -70,7 +75,7 @@ func UpcomingTrips(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, no
 		UNION ALL
 
 		SELECT o.id, 'passenger', o.depart_earliest, o.depart_latest, o.status, o.route_km,
-		       t.origin_label, t.destination_label, b.price_eur, o.seats_free
+		       t.origin_label, t.destination_label, b.price_eur, o.seats_free, b.seats
 		FROM bookings b
 		JOIN trip_occurrences o ON o.id = b.occurrence_id
 		JOIN route_templates t  ON t.id = o.template_id
@@ -91,7 +96,7 @@ func UpcomingTrips(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, no
 	for rows.Next() {
 		var t Trip
 		if err := rows.Scan(&t.OccurrenceID, &t.Role, &t.DepartEarliest, &t.DepartLatest,
-			&t.Status, &t.RouteKm, &t.OriginLabel, &t.DestLabel, &t.PriceEUR, &t.SeatsFree); err != nil {
+			&t.Status, &t.RouteKm, &t.OriginLabel, &t.DestLabel, &t.PriceEUR, &t.SeatsFree, &t.Seats); err != nil {
 			return nil, fmt.Errorf("store: scanning trip: %w", err)
 		}
 		out = append(out, t)
@@ -268,7 +273,12 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		            WHERE b.occurrence_id = o.id AND b.passenger_id = $2 AND b.status = 'confirmed')
 		       END,
 		       o.drive_ended_at, o.offers_until,
-		       CASE WHEN t.driver_id = $2 THEN ARRAY[ST_X(t.destination), ST_Y(t.destination)] END
+		       CASE WHEN t.driver_id = $2 THEN ARRAY[ST_X(t.destination), ST_Y(t.destination)] END,
+		       (SELECT b.seats FROM bookings b
+		        WHERE b.occurrence_id = o.id AND b.passenger_id = $2
+		          AND b.status IN ('confirmed','completed')),
+		       EXISTS (SELECT 1 FROM route_schedules rs
+		               WHERE rs.template_id = o.template_id AND rs.kind = 'recurring')
 		FROM trip_occurrences o
 		JOIN route_templates t  ON t.id = o.template_id
 		JOIN driver_profiles dp ON dp.user_id = t.driver_id
@@ -281,7 +291,7 @@ func GetTrip(ctx context.Context, pool *pgxpool.Pool, occurrenceID, userID uuid.
 		&d.Driver.CarModel, &d.Driver.CarColor, &d.Driver.CarPlate,
 		&d.Driver.Bio, &d.Driver.Preferences, &d.ConfirmedByMe, &d.Driver.CanRate, &d.Driver.Rated,
 		&d.DriveSetAt, &d.ScheduledEarliest, &d.ScheduledLatest, &d.DetourMin, &d.PickupAt,
-		&d.DriveEndedAt, &d.OffersUntil, &destination)
+		&d.DriveEndedAt, &d.OffersUntil, &destination, &d.Seats, &d.Repeats)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TripDetail{}, ErrNotParticipant
 	}
@@ -614,7 +624,7 @@ func PastTrips(
 	}
 	rows, err := pool.Query(ctx, `
 		SELECT o.id, o.depart_earliest, o.depart_latest, o.status, o.route_km,
-		       t.origin_label, t.destination_label, b.price_eur, o.seats_free,
+		       t.origin_label, t.destination_label, b.price_eur, o.seats_free, b.seats,
 		       b.id, u.name,
 		       ST_X(b.pickup_point), ST_Y(b.pickup_point),
 		       ST_X(b.dropoff_point), ST_Y(b.dropoff_point)
@@ -637,7 +647,7 @@ func PastTrips(
 		var p PastTrip
 		p.Role = RolePassenger
 		if err := rows.Scan(&p.OccurrenceID, &p.DepartEarliest, &p.DepartLatest, &p.Status,
-			&p.RouteKm, &p.OriginLabel, &p.DestLabel, &p.PriceEUR, &p.SeatsFree,
+			&p.RouteKm, &p.OriginLabel, &p.DestLabel, &p.PriceEUR, &p.SeatsFree, &p.Seats,
 			&p.BookingID, &p.DriverName,
 			&p.OriginLon, &p.OriginLat, &p.DestLon, &p.DestLat); err != nil {
 			return nil, fmt.Errorf("store: scanning a past trip: %w", err)

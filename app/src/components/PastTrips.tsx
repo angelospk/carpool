@@ -7,7 +7,7 @@ import { api, type PastTrip } from '../api/endpoints';
 import { ApiError } from '../api/client';
 import { Button, Card } from './ui';
 import { colors, radius, space, type } from '../design/tokens';
-import { athensDay, eur } from '../design/format';
+import { athensDay, seatPrice } from '../design/format';
 
 /**
  * The rides already taken, each with one button.
@@ -60,8 +60,13 @@ export function PastTrips() {
               </Text>
               <Text style={styles.meta}>
                 {athensDay(trip.depart_earliest)} · {trip.driver_name}
-                {trip.price_eur > 0 ? ` · ${eur(trip.price_eur)}` : ''}
+                {trip.price_eur > 0 ? ` · ${seatPrice(t, trip.price_eur, trip.seats)}` : ''}
               </Text>
+              {trip.status === 'completed' || trip.status === 'cancelled' ? (
+                <Text testID={`past-status-${trip.booking_id}`} style={styles.meta}>
+                  {trip.status === 'completed' ? t('home.pastCompleted') : t('home.pastCancelled')}
+                </Text>
+              ) : null}
             </View>
             <Button
               testID={`again-${trip.booking_id}`}

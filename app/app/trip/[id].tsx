@@ -1,10 +1,23 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  FlatList,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { api, type Message, type TripDetail } from '../../src/api/endpoints';
+import type { TFunction } from 'i18next';
+
+import { api, type Message, type TripDetail, type TripStop } from '../../src/api/endpoints';
 import { ApiError } from '../../src/api/client';
 import { useSession } from '../../src/state/session';
 import {
@@ -19,6 +32,7 @@ import {
 } from '../../src/components/ui';
 import { RouteGlyph, decodeRoute } from '../../src/components/RouteGlyph';
 import { RepeatCard } from '../../src/components/RepeatCard';
+import { PendingAsks } from '../../src/components/PendingAsks';
 import { RatingRow } from '../../src/components/RatingRow';
 import { SocialLinks } from '../../src/components/SocialLink';
 import { PortNotice } from '../../src/components/PortNotice';
@@ -35,10 +49,14 @@ import { Map } from '../../src/map/Map';
 import polyline from '@mapbox/polyline';
 import { haveTiles } from '../../src/map/tiles';
 import { border, colors, radius, size, space, type } from '../../src/design/tokens';
-import { athensDay, athensTime, eur, km } from '../../src/design/format';
+import { athensDay, athensTime, eur, km, seatPriceNote } from '../../src/design/format';
 import { approxArrival } from '../../src/design/ticket';
 import { Ticket } from '../../src/components/Ticket';
 import { tripPollInterval } from '../../src/design/tripPolling';
+
+// How far from the end still counts as «at the bottom», in px: a bubble's
+// worth of slack so a half-scrolled last message does not read as scrolled up.
+const NEAR_BOTTOM = 80;
 
 export default function TripScreen() {
   const { t } = useTranslation();
@@ -64,6 +82,67 @@ export default function TripScreen() {
     // this is the one that always works.
     refetchInterval: 10_000,
   });
+
+  // Keeping the newest message in view. The composer sits outside the list, so
+  // nothing covers the last bubble; what was missing is moving to it. A reader
+  // at the bottom follows new messages down; one who scrolled up to reread
+  // something is not yanked away, and is told instead.
+  const listRef = useRef<FlatList<Message>>(null);
+  const metrics = useRef({ y: 0, view: 0, content: 0 });
+  const [hasNew, setHasNew] = useState(false);
+  const nearBottom = () => {
+    const m = metrics.current;
+    return m.content - (m.y + m.view) < NEAR_BOTTOM;
+  };
+  const scrollToEnd = () => requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+  const onListScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+    metrics.current = { y: contentOffset.y, view: layoutMeasurement.height, content: contentSize.height };
+    if (nearBottom()) setHasNew(false);
+  };
+  // undefined until the first load: the opening fetch is not a «new» message.
+  const lastSeen = useRef<string | null | undefined>(undefined);
+  const lastMessage = messages.data?.messages.at(-1);
+  const lastId = messages.data ? (lastMessage?.id ?? null) : undefined;
+  useEffect(() => {
+    if (lastId === undefined) return;
+    const before = lastSeen.current;
+    lastSeen.current = lastId;
+    if (before === undefined || lastId === null || lastId === before) return;
+    // Own messages always follow (that covers sending), others only when the
+    // reader is already at the end.
+    if (lastMessage?.sender_id === me?.id || nearBottom()) {
+      setHasNew(false);
+      scrollToEnd();
+    } else {
+      setHasNew(true);
+    }
+  }, [lastId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const listProps = {
+    ref: listRef,
+    testID: 'message-list',
+    onScroll: onListScroll,
+    scrollEventThrottle: 100,
+    onLayout: (e: { nativeEvent: { layout: { height: number } } }) => {
+      metrics.current.view = e.nativeEvent.layout.height;
+    },
+    onContentSizeChange: (_w: number, h: number) => {
+      metrics.current.content = h;
+    },
+  };
+  const newMessagePill = hasNew ? (
+    <Pressable
+      testID="new-message"
+      accessibilityRole="button"
+      style={styles.newMessage}
+      onPress={() => {
+        setHasNew(false);
+        scrollToEnd();
+      }}
+    >
+      <Text style={styles.newMessageText}>{t('trip.newMessage')}</Text>
+    </Pressable>
+  ) : null;
 
   // A message that did not go says so, and stays in the box so sending it
   // again is one tap. It used to vanish without a word.
@@ -273,15 +352,25 @@ export default function TripScreen() {
                   // left in the driver's car, or the contribution.
                   lowerLeft={
                     Number.isFinite(trip.data.seats_free) ? (
-                      <SeatPips
-                        free={trip.data.seats_free}
-                        total={trip.data.seats_free + trip.data.passengers.reduce((n, p) => n + (p.seats ?? 1), 0)}
-                        testID="seat-pips"
-                      />
+                      // Dots alone do not say whether they count free or taken seats.
+                      <View style={styles.seatsRow}>
+                        <SeatPips
+                          free={trip.data.seats_free}
+                          total={trip.data.seats_free + trip.data.passengers.reduce((n, p) => n + (p.seats ?? 1), 0)}
+                          testID="seat-pips"
+                        />
+                        <Text testID="seats-free" style={styles.meta}>
+                          {t('home.seatsFree', { count: trip.data.seats_free })}
+                        </Text>
+                      </View>
                     ) : undefined
                   }
                   fare={trip.data.price_eur > 0 ? eur(trip.data.price_eur) : undefined}
-                  fareLabel={trip.data.price_eur > 0 ? t('ask.suggested') : undefined}
+                  fareLabel={
+                    trip.data.price_eur > 0
+                      ? seatPriceNote(t, trip.data.price_eur, trip.data.seats) ?? t('ask.suggested')
+                      : undefined
+                  }
                 />
 
                   {trip.data.pickup_at ? (
@@ -387,6 +476,23 @@ export default function TripScreen() {
                   </Card>
                 ) : null}
 
+                {/* In road order. The ticket already has the car's two ends,
+                    so only the stops between are listed. */}
+                {trip.data.stops && trip.data.stops.length > 0 ? (
+                  <Card>
+                    <Text style={styles.label}>{t('trip.stops')}</Text>
+                    {trip.data.stops.map((s, i) => (
+                      <View key={i} testID={`stop-${i}`} style={styles.stop}>
+                        <Text style={styles.stopHead}>
+                          {s.at ? `${athensTime(s.at)} · ` : ''}
+                          {s.kind === 'pickup' ? t('trip.stopPickup') : t('trip.stopDropoff')}
+                        </Text>
+                        <Text style={styles.meta}>{stopDetail(s, trip.data.role, t)}</Text>
+                      </View>
+                    ))}
+                  </Card>
+                ) : null}
+
                 {onTheRoad(trip.data, now) ? (
                   <OnTheRoadCard trip={trip.data} onChanged={() => void trip.refetch()} />
                 ) : driveCardShown(trip.data, now) ? (
@@ -440,6 +546,10 @@ export default function TripScreen() {
                 />
 
                 <RepeatCard trip={trip.data} />
+
+                {/* A driver is told here too: the question lapses, and the home
+                    screen is not where they are looking. */}
+                {trip.data.role === 'driver' ? <PendingAsks occurrenceId={trip.data.id} /> : null}
 
                 {notice ? (
                   <Text testID="trip-notice" style={styles.notice}>
@@ -542,13 +652,14 @@ export default function TripScreen() {
               <View style={styles.chatColumn}>
                 <Text style={styles.chatLabel}>{t('trip.chat')}</Text>
                 <FlatList
-                  testID="message-list"
+                  {...listProps}
                   data={messages.data?.messages ?? []}
                   keyExtractor={(m) => m.id}
                   contentContainerStyle={styles.chatList}
                   showsVerticalScrollIndicator={false}
                   renderItem={renderMessage}
                 />
+                {newMessagePill}
                 {composerView}
               </View>
             </View>
@@ -563,7 +674,7 @@ export default function TripScreen() {
       <AsyncState loading={trip.isLoading} error={trip.error} onRetry={() => void trip.refetch()}>
         {trip.data ? (
           <FlatList
-            testID="message-list"
+            {...listProps}
             data={messages.data?.messages ?? []}
             keyExtractor={(m) => m.id}
             contentContainerStyle={styles.list}
@@ -579,6 +690,7 @@ export default function TripScreen() {
         ) : null}
       </AsyncState>
 
+      {newMessagePill}
       {sendFailedLine}
       <View style={styles.composer}>
         <TextInput
@@ -603,6 +715,9 @@ export default function TripScreen() {
 
 const styles = StyleSheet.create({
   label: { ...type.caption, color: colors.muted, marginBottom: space.xs },
+  seatsRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  stop: { gap: 2, marginBottom: space.sm },
+  stopHead: { ...type.label, color: colors.ink },
   pickupAt: { ...type.label, fontSize: 16, color: colors.ink, marginTop: space.sm },
   here: { marginTop: space.sm },
   list: { gap: space.sm, paddingBottom: space.lg },
@@ -663,6 +778,16 @@ const styles = StyleSheet.create({
   bubbleTextMine: { color: colors.paper },
   bubbleTime: { ...type.caption, fontSize: 11, color: colors.muted, alignSelf: 'flex-end' },
   bubbleTimeMine: { color: 'rgba(255,255,255,0.7)' },
+
+  newMessage: {
+    alignSelf: 'center',
+    backgroundColor: colors.ink,
+    borderRadius: radius.chip,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
+    marginBottom: space.sm,
+  },
+  newMessageText: { ...type.label, color: colors.paper },
 
   composer: {
     flexDirection: 'row',
@@ -743,6 +868,23 @@ function PersonLink({
 function startOf(encoded: string) {
   const [first] = polyline.decode(encoded, 6);
   return first ? { lon: first[1], lat: first[0] } : { lon: 23.7275, lat: 37.9838 };
+}
+
+// What a stop says under its time. The driver sees everyone; a passenger sees
+// their own meeting point and, for everyone else, only that somebody gets on or
+// off there — the server sends nothing more, and neither do we invent it.
+function stopDetail(s: TripStop, role: TripDetail['role'], t: TFunction): string {
+  if (role !== 'driver') {
+    return s.mine ? [t('trip.stopYou'), s.label].filter(Boolean).join(' · ') : t('trip.stopOther');
+  }
+  return [
+    s.name,
+    s.label,
+    s.seats ? t('trip.stopSeats', { count: s.seats }) : null,
+    s.luggage_count && s.luggage_count > 0 ? t('trip.stopLuggage', { count: s.luggage_count }) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 /** The caller's own place on the trip, as a passenger. */

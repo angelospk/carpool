@@ -14,9 +14,19 @@ import (
 // journey, how far out of the way, for how much — and nothing that locates the
 // passenger more closely than the labels they typed.
 type PendingAsk struct {
-	ID               uuid.UUID
-	OccurrenceID     uuid.UUID
-	PassengerName    string
+	ID            uuid.UUID
+	OccurrenceID  uuid.UUID
+	PassengerID   uuid.UUID
+	PassengerName string
+	// PhotoVersion is nil when the passenger has no photo.
+	PhotoVersion *string
+	// Rating is nil while nobody has rated the passenger.
+	Rating           *float64
+	RatingCount      int
+	Luggage          string
+	LuggageCount     int
+	WindowStart      time.Time
+	WindowEnd        time.Time
 	OriginLabel      string
 	DestinationLabel string
 	DetourMin        float64
@@ -56,7 +66,11 @@ func AskFor(ctx context.Context, pool *pgxpool.Pool, askID, driverID uuid.UUID, 
 
 func queryAsks(ctx context.Context, pool *pgxpool.Pool, where string, args ...any) ([]PendingAsk, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT a.id, a.occurrence_id, u.name,
+		SELECT a.id, a.occurrence_id, u.id, u.name,
+		       (SELECT encode(substring(sha256 from 1 for 6), 'hex') FROM profile_photos WHERE user_id = u.id),
+		       (SELECT round(avg(stars)::numeric, 2)::float8 FROM ratings WHERE ratee_id = u.id),
+		       (SELECT count(*) FROM ratings WHERE ratee_id = u.id),
+		       r.luggage::text, r.luggage_count::int, r.window_start, r.window_end,
 		       coalesce(r.origin_label, ''), coalesce(r.destination_label, ''),
 		       a.detour_min::float8, a.detour_km::float8, a.suggested_price_eur::float8,
 		       r.seats, o.depart_earliest, a.expires_at
@@ -81,7 +95,9 @@ func queryAsks(ctx context.Context, pool *pgxpool.Pool, where string, args ...an
 	out := []PendingAsk{}
 	for rows.Next() {
 		var a PendingAsk
-		if err := rows.Scan(&a.ID, &a.OccurrenceID, &a.PassengerName, &a.OriginLabel, &a.DestinationLabel,
+		if err := rows.Scan(&a.ID, &a.OccurrenceID, &a.PassengerID, &a.PassengerName,
+			&a.PhotoVersion, &a.Rating, &a.RatingCount, &a.Luggage, &a.LuggageCount, &a.WindowStart, &a.WindowEnd,
+			&a.OriginLabel, &a.DestinationLabel,
 			&a.DetourMin, &a.DetourKm, &a.PriceEUR, &a.Seats, &a.DepartEarliest, &a.ExpiresAt); err != nil {
 			return nil, fmt.Errorf("store: scanning ask: %w", err)
 		}

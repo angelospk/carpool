@@ -75,3 +75,29 @@ test('a passenger with no history is shown nothing', async () => {
   await waitFor(() => expect(api.pastTrips).toHaveBeenCalled());
   expect(view.toJSON()).toBeNull();
 });
+
+// QA F4: the price is per seat; a booking of two says each and in all.
+test('a two-seat ride says the price per seat and the total', async () => {
+  (api.pastTrips as jest.Mock).mockResolvedValue({ trips: [{ ...ride, seats: 2 }] });
+
+  render(wrap(<PastTrips />));
+
+  expect(await screen.findByText(/3,20.€.ανά θέση · σύνολο 6,40.€/)).toBeTruthy();
+});
+
+// QA F19: a past ride says how it ended.
+test('a completed ride says so, a cancelled one says so, any other says nothing', async () => {
+  (api.pastTrips as jest.Mock).mockResolvedValue({
+    trips: [
+      ride,
+      { ...ride, booking_id: 'bk-2', status: 'cancelled' },
+      { ...ride, booking_id: 'bk-3', status: 'scheduled' },
+    ],
+  });
+
+  render(wrap(<PastTrips />));
+
+  expect(await screen.findByTestId('past-status-bk-1')).toHaveTextContent('Ολοκληρώθηκε');
+  expect(screen.getByTestId('past-status-bk-2')).toHaveTextContent('Ακυρώθηκε');
+  expect(screen.queryByTestId('past-status-bk-3')).toBeNull();
+});

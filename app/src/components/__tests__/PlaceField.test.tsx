@@ -218,4 +218,39 @@ describe('PlaceField given a place from outside', () => {
     await type('νεα');
     expect(api.places).toHaveBeenCalledWith('νεα', { lon: 26.53, lat: 41.5 });
   });
+
+  // F20: «Αύρα» listed the one in Άρτα first, 351 km from where the journey is.
+  it('says how far a suggestion is when it is far from the other end', async () => {
+    (api.places as jest.Mock).mockResolvedValue({
+      places: [
+        { id: 'node/9', area: 'Άρτας', kind: 'village', name: 'Αύρα', lon: 20.99, lat: 39.15 },
+        { id: 'node/10', area: 'Ορεστιάδας', kind: 'village', name: 'Αύρα', lon: 26.5, lat: 41.5 },
+      ],
+    });
+    render(
+      <PlaceField
+        testID="from"
+        label="Από"
+        value={null}
+        onChange={jest.fn()}
+        near={{ lon: 25.8743, lat: 40.8476 }}
+      />,
+    );
+    await type('αυρα');
+    await waitFor(() => expect(screen.getByTestId('from-node/9')).toBeTruthy());
+
+    expect(api.places).toHaveBeenCalledWith('αυρα', { lon: 25.8743, lat: 40.8476 });
+    expect(within(screen.getByTestId('from-node/9')).getByText(/\d+ χλμ μακριά/)).toBeTruthy();
+    expect(within(screen.getByTestId('from-node/10')).queryByText(/μακριά/)).toBeNull();
+  });
+
+  it('says nothing about distance when no other end is chosen', async () => {
+    (api.places as jest.Mock).mockResolvedValue({
+      places: [{ id: 'node/9', area: 'Άρτας', kind: 'village', name: 'Αύρα', lon: 20.99, lat: 39.15 }],
+    });
+    setup();
+    await type('αυρα');
+    await waitFor(() => expect(screen.getByTestId('from-node/9')).toBeTruthy());
+    expect(screen.queryByText(/μακριά/)).toBeNull();
+  });
 });

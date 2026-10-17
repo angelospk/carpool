@@ -97,3 +97,40 @@ test('a typed coordinate is not asked about', () => {
   );
   expect(api.meetingPoints).not.toHaveBeenCalled();
 });
+
+// F12: the header says the choice is optional, a label that repeats the town
+// shows once, and a bare OSM abbreviation gets its kind.
+test('the header says the choice is optional', async () => {
+  (api.meetingPoints as jest.Mock).mockResolvedValue([ktel]);
+  render(
+    wrap(<MeetingPointField testID="mp" place={alexandroupoli} value={null} onChange={jest.fn()} />),
+  );
+  expect(await screen.findByText('Πού ακριβώς; (προαιρετικό)')).toBeTruthy();
+});
+
+test('a label that repeats the town shows the town once', async () => {
+  (api.meetingPoints as jest.Mock).mockResolvedValue([
+    { ...ktel, id: 'node/2', kind: 'port', name: 'Αλεξανδρούπολη, Αλεξανδρούπολη Λιμάνι' },
+  ]);
+  render(
+    wrap(<MeetingPointField testID="mp" place={alexandroupoli} value={null} onChange={jest.fn()} />),
+  );
+  expect(await screen.findByText('Αλεξανδρούπολη Λιμάνι')).toBeTruthy();
+  expect(screen.queryByText('Αλεξανδρούπολη, Αλεξανδρούπολη Λιμάνι')).toBeNull();
+});
+
+test('a bare abbreviation gets its kind, once', async () => {
+  (api.meetingPoints as jest.Mock).mockResolvedValue([
+    { ...ktel, id: 'node/3', kind: 'fuel', name: 'EKO' },
+    { ...ktel, id: 'node/4', kind: 'parking', name: 'Α.Π.' },
+    { ...ktel, id: 'node/5', kind: 'other', name: 'ΑΠ' },
+  ]);
+  render(
+    wrap(<MeetingPointField testID="mp" place={alexandroupoli} value={null} onChange={jest.fn()} />),
+  );
+  expect(await screen.findByText('EKO · βενζινάδικο')).toBeTruthy();
+  expect(screen.getByText('Α.Π. · πάρκινγκ')).toBeTruthy();
+  // No kind worth saying: left as it is, with the generic label beside it.
+  expect(screen.getByText('ΑΠ')).toBeTruthy();
+  expect(screen.queryByText('βενζινάδικο')).toBeNull();
+});

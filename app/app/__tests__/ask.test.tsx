@@ -33,6 +33,14 @@ const theAsk = {
   id: 'ask-1',
   occurrence_id: 'occ-1',
   passenger_name: 'Ελένη',
+  passenger_photo_url: null,
+  passenger_rating: 4.5,
+  passenger_rating_count: 2,
+  shared_groups: ['Σχολή Α'],
+  luggage: 'suitcase',
+  luggage_count: 2,
+  window_start: '2026-10-01T03:00:00Z',
+  window_end: '2026-10-01T07:00:00Z',
   origin_label: 'Αλεξανδρούπολη',
   destination_label: 'Φέρες',
   detour_min: 6,
@@ -188,4 +196,24 @@ test('«Πάρ\' τον» accepts and hands the pickup to the maps app', async (
   expect(open.mock.calls[0][0]).toContain('40.86%2C26');
   expect(mockReplace).toHaveBeenCalledWith({ pathname: '/trip/[id]', params: { id: 'occ-1' } });
   expect(api.acceptAsk).toHaveBeenCalledTimes(1);
+});
+
+// One minute is «λεπτό», and a detour is never shown as zero minutes beside a
+// distance.
+test('the detour says «1 λεπτό» for a minute', async () => {
+  (api.ask as jest.Mock).mockResolvedValue({ ...theAsk, detour_min: 0.4, detour_km: 0.6 });
+  render(wrap(<AskScreen />));
+
+  const detour = String((await screen.findByTestId('ask-detour')).props.children);
+  expect(detour).toContain('+1 λεπτό,');
+});
+
+test('shows who is asking and the price per seat', async () => {
+  (api.ask as jest.Mock).mockResolvedValue({ ...theAsk, seats: 3 });
+  render(wrap(<AskScreen />));
+
+  expect(await screen.findByTestId('ask-rating')).toHaveTextContent(/★ 4,5 \(2\)/);
+  expect(screen.getByTestId('ask-window')).toBeTruthy();
+  expect(screen.getByTestId('ask-luggage')).toHaveTextContent(/2 × Κανονική βαλίτσα/);
+  expect(screen.getByText(/ανά θέση · σύνολο/)).toBeTruthy();
 });
