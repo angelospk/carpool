@@ -25,6 +25,7 @@ func TestEveryAskFailureReachesTheDriverAsItself(t *testing.T) {
 	seen := map[string]error{}
 	for _, err := range []error{
 		asks.ErrNotYours,
+		asks.ErrAskNotFound,
 		asks.ErrAskExpired,
 		asks.ErrAskNotPending,
 		asks.ErrNoSeats,
@@ -45,7 +46,11 @@ func TestEveryAskFailureReachesTheDriverAsItself(t *testing.T) {
 			// Distinct, not merely non-500. Two failures sharing a code is the
 			// same loss of meaning one step further along: the app cannot show
 			// a different message for something it cannot tell apart.
-			if other, ok := seen[code]; ok {
+			//
+			// The one intended exception: somebody else's ask and a missing one
+			// share a code, so that an id cannot be probed for existence (QA
+			// 2026-10-17 finding 7).
+			if other, ok := seen[code]; ok && !(errors.Is(other, asks.ErrNotYours) && errors.Is(err, asks.ErrAskNotFound)) {
 				t.Fatalf("%v and %v both arrive as %q", other, err, code)
 			}
 			seen[code] = err

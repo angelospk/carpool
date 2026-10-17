@@ -17,8 +17,10 @@ import (
 // different message for each, so they must not collapse into one code.
 func askErrorStatus(err error) (int, string, string) {
 	switch {
-	case errors.Is(err, asks.ErrNotYours):
-		return http.StatusForbidden, "not_yours", "this request was not sent to you"
+	// Somebody else's ask and one that does not exist are one answer: a 403
+	// here would tell a caller holding an id which of the two it is.
+	case errors.Is(err, asks.ErrNotYours), errors.Is(err, asks.ErrAskNotFound):
+		return http.StatusNotFound, "not_found", "no such request"
 	case errors.Is(err, asks.ErrAskExpired):
 		return http.StatusConflict, "ask_expired", "this request has expired"
 	case errors.Is(err, asks.ErrAskNotPending):

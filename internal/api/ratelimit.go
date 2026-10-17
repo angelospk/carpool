@@ -58,6 +58,13 @@ func (p *perIP) allow(addr string) bool {
 // middleware refuses a client over the limit with 429. The address is the one
 // the connection came from; behind Caddy that is Caddy, so X-Real-IP — which
 // Caddy sets and a client cannot, because Caddy overwrites it — is preferred.
+//
+// Trusting the header is safe in production: deploy/vps/Caddyfile sets
+// X-Real-IP from Cf-Connecting-Ip with header_up, which replaces any value the
+// client sent, and the API listens on 127.0.0.1 only (deploy/vps/compose.yml),
+// so nothing reaches it without passing Caddy. A development listener on a LAN
+// (scripts/dev-lan.sh) has no proxy in front and trusts whatever the client
+// sends, so a client there can pick its own address.
 func (p *perIP) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		addr := r.Header.Get("X-Real-IP")

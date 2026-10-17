@@ -56,3 +56,18 @@ describe('signing out', () => {
     expect(mockSignOut).toHaveBeenCalledTimes(1);
   });
 });
+
+// QA A14: erasing the account asks first, then goes to the screen that asks for
+// the SMS code.
+describe('deleting the account', () => {
+  test('asks first and does not navigate on the tap alone', () => {
+    render(screenUnderTest());
+    fireEvent.press(screen.getByTestId('delete-account'));
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    const opts = (confirm as jest.Mock).mock.calls[0][0];
+    expect(opts.confirmLabel).toBe(el.profile.deleteAccount);
+    expect(opts.destructive).toBe(true);
+    expect(mockSignOut).not.toHaveBeenCalled();
+  });
+});

@@ -618,6 +618,14 @@ export const api = {
       body: { challenge_id: challengeId, code },
     }),
 
+  /** Texts the code that deleting the account requires. */
+  requestDeleteCode: () =>
+    request<{ dev_code?: string } | undefined>('/v1/me/delete-code', { method: 'POST' }),
+
+  /** Erases the account. Needs the code from requestDeleteCode. */
+  deleteAccount: (code: string) =>
+    request<void>('/v1/me', { method: 'DELETE', body: { code } }),
+
   /** A driver calling off one departure. Retiring a route is the other act. */
   cancelTrip: (id: string) => request<void>(`/v1/trips/${id}`, { method: 'DELETE' }),
   /** A passenger gives back their own seat. The trip carries on for the rest. */

@@ -115,6 +115,8 @@ func rules() []rule {
 			`t.created_at < $1::timestamptz - interval '6 months'`)},
 		{"phone-change challenges", batch("phone_change_challenges",
 			`t.created_at < $1::timestamptz - interval '6 months'`)},
+		{"account-deletion codes", batch("account_delete_codes",
+			`t.created_at < $1::timestamptz - interval '6 months'`)},
 
 		// Refresh tokens are not in the policy's table because they are not a
 		// record of anything: they are credentials, and one that can no longer

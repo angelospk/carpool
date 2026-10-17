@@ -1100,3 +1100,23 @@ conservative bound for the arc, so the floor could in principle reject an
 off-corridor candidate it should keep. Changing it changes who gets matched,
 which is a different question from what they are asked to contribute, and it
 wants its own change with its own recall evidence.
+
+## An access token outlives logout by up to 15 minutes (found 2026-10-17, accepted)
+
+The adversarial QA pass (docs/qa/2026-10-17-adversarial.md, section 10) showed
+that an access token keeps working after the user logs out, until it expires.
+`AccessTokenTTL` is 15 minutes (internal/auth/token.go), and nothing checks a
+token against the session on each request.
+
+**Why this is accepted.** The token is short-lived by design: its lifetime is
+its revocation story, and logout does revoke the refresh token, so nobody can
+mint a new one. A stolen phone or copied token buys at most 15 minutes of the
+same access the owner had, and nothing is more dangerous in that window than at
+any other moment the owner is signed in. Checking the session on every request
+would put a database read on every call to close a window this small.
+
+**What would close it.** Either a denylist of revoked token ids held in memory
+until each would have expired (the service is one process, so this is cheap),
+or a session version in the token that is compared with the stored one on each
+request. Do it if the TTL is ever lengthened, or if an account takeover shows
+15 minutes is enough to hurt.

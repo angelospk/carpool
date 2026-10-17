@@ -2,16 +2,29 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"carpool/internal/domain"
+
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// maxMessageLen mirrors the schema's check constraint.
-const maxMessageLen = 2000
+// Errors the handlers turn into a fixed sentence; anything else is a fault.
+var (
+	ErrMessageEmpty   = errors.New("store: a message cannot be empty")
+	ErrMessageTooLong = errors.New("store: a message is too long")
+	ErrMessageInvalid = errors.New("store: a message holds characters that are not allowed")
+	ErrSelfBlock      = errors.New("store: a user cannot block themselves")
+	ErrUserNotFound   = errors.New("store: no such user")
+)
+
+// foreignKeyViolation is Postgres SQLSTATE 23503.
+const foreignKeyViolation = "23503"
 
 // Message is one chat message on a trip thread.
 type Message struct {
@@ -25,16 +38,18 @@ type Message struct {
 // PostMessage appends to a trip's thread. Authorization is the caller's job;
 // every route reaching here has already checked participation.
 func PostMessage(ctx context.Context, pool *pgxpool.Pool, occurrenceID, senderID uuid.UUID, body string) (Message, error) {
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return Message{}, fmt.Errorf("store: a message cannot be empty")
-	}
-	if len(body) > maxMessageLen {
-		return Message{}, fmt.Errorf("store: a message may be at most %d characters", maxMessageLen)
+	body, err := domain.NormaliseChat(body)
+	switch {
+	case errors.Is(err, domain.ErrChatEmpty):
+		return Message{}, ErrMessageEmpty
+	case errors.Is(err, domain.ErrChatTooLong):
+		return Message{}, ErrMessageTooLong
+	case err != nil:
+		return Message{}, ErrMessageInvalid
 	}
 
 	var m Message
-	err := pool.QueryRow(ctx, `
+	err = pool.QueryRow(ctx, `
 		INSERT INTO trip_messages (occurrence_id, sender_id, body)
 		VALUES ($1, $2, $3)
 		RETURNING id, sender_id, body, created_at,
@@ -91,11 +106,15 @@ func ListMessages(ctx context.Context, pool *pgxpool.Pool, occurrenceID uuid.UUI
 // It is idempotent.
 func BlockUser(ctx context.Context, pool *pgxpool.Pool, blockerID, blockedID uuid.UUID) error {
 	if blockerID == blockedID {
-		return fmt.Errorf("store: a user cannot block themselves")
+		return ErrSelfBlock
 	}
 	_, err := pool.Exec(ctx, `
 		INSERT INTO blocks (blocker_id, blocked_id) VALUES ($1, $2)
 		ON CONFLICT DO NOTHING`, blockerID, blockedID)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation {
+		return ErrUserNotFound
+	}
 	if err != nil {
 		return fmt.Errorf("store: blocking user: %w", err)
 	}

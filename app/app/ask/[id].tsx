@@ -86,6 +86,7 @@ export default function AskScreen() {
         return setOutcome(t('ask.noLuggageRoom'));
       case 'trip_departed':
       case 'not_yours':
+      case 'not_found':
         setClosed(true);
         return setOutcome(refusalText(e) ?? t('ask.closed'));
       default:

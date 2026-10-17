@@ -257,6 +257,23 @@ export default function ProfileScreen() {
         </Card>
 
         <Button
+          testID="delete-account"
+          label={t('profile.deleteAccount')}
+          variant="danger"
+          // Cannot be undone, so it asks first and then again with a code.
+          onPress={() =>
+            confirm({
+              title: t('profile.deleteAccount'),
+              message: t('profile.deleteAccountConfirm'),
+              confirmLabel: t('profile.deleteAccount'),
+              cancelLabel: t('common.cancel'),
+              destructive: true,
+              onConfirm: () => router.push('/profile/deleteAccount'),
+            })
+          }
+        />
+
+        <Button
           testID="sign-out"
           label={t('profile.signOut')}
           variant="danger"

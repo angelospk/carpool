@@ -146,6 +146,14 @@ func (s *Service) Cancel(ctx context.Context, bookingID, userID uuid.UUID) error
 		return fmt.Errorf("bookings: cancelling: %w", err)
 	}
 
+	// The passenger is no longer on the trip, so their last position goes with
+	// the seat rather than waiting for the janitor.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM trip_live_positions WHERE occurrence_id = $1 AND user_id = $2`,
+		occurrenceID, passengerID); err != nil {
+		return fmt.Errorf("bookings: dropping the passenger's position: %w", err)
+	}
+
 	// A seat coming back is a trip becoming available again, and somebody on
 	// this corridor may have been told there was no room on it.
 	if err := outbox.WakeAll(ctx, tx, freed, "seat_returned", now); err != nil {
@@ -305,6 +313,12 @@ func (s *Service) CancelOccurrence(ctx context.Context, occurrenceID, userID uui
 
 	if err := s.withdrawOffers(ctx, tx, occurrenceID, now); err != nil {
 		return err
+	}
+
+	// Nobody is sharing a position on a departure that is not happening.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM trip_live_positions WHERE occurrence_id = $1`, occurrenceID); err != nil {
+		return fmt.Errorf("bookings: dropping the positions: %w", err)
 	}
 
 	for _, c := range affected {

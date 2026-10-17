@@ -177,7 +177,8 @@ func TestDeletingAnAccountLeavesItsGroupsInOtherHands(t *testing.T) {
 	g := h.createGroup(admin, "ΔΠΘ")
 	h.joinGroup(member, *g.Code)
 
-	if rec := h.do(http.MethodDelete, "/v1/me", nil, admin); rec.Code/100 != 2 {
+	h.do(http.MethodPost, "/v1/me/delete-code", nil, admin)
+	if rec := h.do(http.MethodDelete, "/v1/me", map[string]any{"code": h.sms.LastCode()}, admin); rec.Code/100 != 2 {
 		t.Fatalf("delete account: %d %s", rec.Code, rec.Body.String())
 	}
 

@@ -138,6 +138,17 @@ test('the buttons are disabled after the ask is answered', async () => {
   expect(api.acceptAsk).toHaveBeenCalledTimes(1);
 });
 
+// Somebody else's ask and a missing one answer alike (QA 2026-10-17 A7):
+// either way there is nothing on this phone to answer.
+test('an ask that is not there closes the screen', async () => {
+  (api.acceptAsk as jest.Mock).mockRejectedValue(new ApiError(404, 'not_found', 'no such request'));
+
+  render(wrap(<AskScreen />));
+  fireEvent.press(await screen.findByTestId('ask-accept'));
+  await waitFor(() => expect(screen.getByTestId('ask-outcome')).toBeTruthy());
+  expect(screen.queryByTestId('ask-accept')).toBeNull();
+});
+
 // A notification opens this screen with only an id. The driver has to see who
 // is asking and for which journey, not a detour of zero minutes.
 test('opened by id, it says who is asking and for which journey', async () => {

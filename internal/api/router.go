@@ -74,6 +74,8 @@ type Deps struct {
 	// PhoneChange moves an account to another number, which is a change of
 	// credential rather than of profile: see internal/auth/phone_change.go.
 	PhoneChange *auth.PhoneChangeService
+	// DeleteCode issues and spends the SMS code that DELETE /me requires.
+	DeleteCode *auth.DeleteCodeService
 
 	// Router snaps published routes to the road network.
 	Router *geo.OSRM
@@ -166,6 +168,16 @@ func NewRouter(deps Deps) http.Handler {
 	// script filling the schedule with recurring routes, each of which
 	// materialises three weeks of departures.
 	publishing := newPerIP(20, time.Hour, time.Now)
+	// A search box asks on every keystroke or two, so a person typing fast
+	// stays well under two a second. The ceiling is for a script walking the
+	// list, which costs a linear scan each time.
+	places := newPerIP(120, time.Minute, time.Now)
+	// An estimate routes through OSRM. A person moves pins around a little;
+	// thirty a minute is a lot of that.
+	estimates := newPerIP(30, time.Minute, time.Now)
+	// The app sends a position every few seconds and the service keeps at most
+	// one per five, so sixty a minute is five times what a phone sends.
+	positions := newPerIP(60, time.Minute, time.Now)
 	if deps.Pool != nil {
 		// A route link, as tapped in a chat. Outside /v1 because it is a page
 		// for a person, not an API for the app.
@@ -195,9 +207,9 @@ func NewRouter(deps Deps) http.Handler {
 		// OpenStreetMap, embedded in the binary — public data, and a search
 		// through it is a linear scan of 12k rows measured at under a
 		// millisecond, so there is neither a secret nor a cost to protect.
-		r.Get("/places", deps.handlePlaces)
+		r.With(places.middleware).Get("/places", deps.handlePlaces)
 		// The same list, asked by coordinate instead: «Από εδώ» on a form.
-		r.Post("/places/near", handlePlaceNear)
+		r.With(places.middleware).Post("/places/near", handlePlaceNear)
 
 		// What a route link says, for the app to show before anybody has an
 		// account. Only what the page says; see store.SharedRoute.
@@ -226,8 +238,9 @@ func NewRouter(deps Deps) http.Handler {
 
 			r.Get("/me", deps.handleGetMe)
 			r.Patch("/me", deps.handlePatchMe)
-			if deps.Account != nil {
+			if deps.Account != nil && deps.DeleteCode != nil {
 				r.Get("/me/export", deps.handleExportMe)
+				r.Post("/me/delete-code", deps.handleRequestDeleteCode)
 				r.Delete("/me", deps.handleDeleteMe)
 			}
 			r.Put("/me/push-token", deps.handlePutPushToken)
@@ -309,7 +322,7 @@ func NewRouter(deps Deps) http.Handler {
 				// A POST because it carries coordinates: a query string ends up
 				// in proxy logs, analytics and history, and a pair of
 				// coordinates is where somebody lives and where they go.
-				r.Post("/estimates", deps.handleEstimate)
+				r.With(estimates.perUser).Post("/estimates", deps.handleEstimate)
 			}
 			if deps.Asks != nil {
 				r.Post("/requests", deps.handleCreateRequest)
@@ -374,7 +387,7 @@ func NewRouter(deps Deps) http.Handler {
 				}
 				if deps.Live != nil {
 					r.Get("/live", deps.handleLive)
-					r.Put("/position", deps.handlePutPosition)
+					r.With(positions.perUser).Put("/position", deps.handlePutPosition)
 					r.Delete("/position", deps.handleStopPosition)
 				}
 			})

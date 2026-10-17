@@ -1,13 +1,16 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/google/uuid"
 
 	"carpool/internal/account"
 	"carpool/internal/asks"
+	"carpool/internal/auth"
 	"carpool/internal/bookings"
 	"carpool/internal/standing"
 	"carpool/internal/store"
@@ -123,11 +126,9 @@ func (d Deps) handleCancelBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch err := d.Bookings.Cancel(r.Context(), bookingID, userID); {
-	case errors.Is(err, bookings.ErrNotFound):
+	// Somebody else's seat answers as a missing one, so an id cannot be probed.
+	case errors.Is(err, bookings.ErrNotFound), errors.Is(err, bookings.ErrNotYours):
 		writeError(w, http.StatusNotFound, "not_found", "no such booking")
-		return
-	case errors.Is(err, bookings.ErrNotYours):
-		writeError(w, http.StatusForbidden, "not_yours", "that seat is not yours")
 		return
 	case errors.Is(err, bookings.ErrDeparted):
 		writeError(w, http.StatusConflict, "departed", "that trip has already left")
@@ -222,12 +223,11 @@ func (d Deps) handleAgain(w http.ResponseWriter, r *http.Request) {
 
 	requestID, askID, err := d.Asks.Again(r.Context(), bookingID, userID)
 	switch {
-	case errors.Is(err, asks.ErrNothingToRepeat):
+	// Somebody else's booking answers as a missing one, so an id cannot be
+	// probed.
+	case errors.Is(err, asks.ErrNothingToRepeat), errors.Is(err, asks.ErrNotYours):
 		writeError(w, http.StatusConflict, "nothing_to_repeat",
 			"that route has no next trip with a free seat")
-		return
-	case errors.Is(err, asks.ErrNotYours):
-		writeError(w, http.StatusForbidden, "not_yours", "that ride is not yours")
 		return
 	case errors.Is(err, asks.ErrNoCandidates):
 		// The request stands; that particular day simply did not work out.
@@ -280,11 +280,65 @@ func (d Deps) handleExportMe(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
-// handleDeleteMe erases the caller.
+// handleRequestDeleteCode texts the caller the code that DELETE /me demands.
+func (d Deps) handleRequestDeleteCode(w http.ResponseWriter, r *http.Request) {
+	userID, ok := callerID(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
+		return
+	}
+
+	code, err := d.DeleteCode.Request(r.Context(), userID)
+	switch {
+	case errors.Is(err, auth.ErrTooManyDeleteCodes):
+		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many attempts; try again later")
+		return
+	case errors.Is(err, auth.ErrDeleteCodeFailed):
+		writeError(w, http.StatusNotFound, "not_found", "no such account")
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "the code could not be sent")
+		return
+	}
+
+	if d.DevMode && !d.DevOTPLogOnly {
+		// Same rule as sign-in: the code comes back only where the log already
+		// prints it.
+		writeJSON(w, http.StatusOK, map[string]any{"dev_code": code})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDeleteMe erases the caller, once they have shown a fresh SMS code.
 func (d Deps) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
 	userID, ok := callerID(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "a bearer token is required")
+		return
+	}
+
+	// An access token alone is not enough to erase an account (QA 2026-10-17
+	// A14). An absent body is "no code", not a malformed request.
+	var body struct {
+		Code string `json:"code"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "the request body is not valid JSON")
+		return
+	}
+	if body.Code == "" {
+		writeError(w, http.StatusBadRequest, "code_required", "a code sent to your phone is required")
+		return
+	}
+	switch err := d.DeleteCode.Spend(r.Context(), userID, body.Code); {
+	case errors.Is(err, auth.ErrDeleteCodeFailed):
+		writeError(w, http.StatusForbidden, "bad_code", "that code is not valid or has expired")
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "could not check your code")
 		return
 	}
 

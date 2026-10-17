@@ -116,6 +116,7 @@ func newHarnessDeps(t *testing.T, devMode bool, matcher func(*asks.Service) *ask
 		Signup:        auth.NewSignupService(pool, c),
 		Sessions:      sessions,
 		PhoneChange:   auth.NewPhoneChangeService(pool, c, sms, sessions, []byte(testSecret)),
+		DeleteCode:    auth.NewDeleteCodeService(pool, c, sms, []byte(testSecret)),
 		Asks:          askService,
 		Standing:      standing.NewService(pool, c),
 		Bookings:      bookings.NewService(pool, c),

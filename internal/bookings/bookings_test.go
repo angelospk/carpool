@@ -255,3 +255,72 @@ func TestTheOtherSideIsToldOnce(t *testing.T) {
 		t.Fatalf("%d notifications queued, want exactly 1", queued)
 	}
 }
+
+// QA 2026-10-17 finding 11: a seat given back takes the passenger's last
+// position with it, in the same transaction.
+func (w *world) sharePosition(t *testing.T, occurrenceID, userID uuid.UUID) {
+	t.Helper()
+	if _, err := w.pool.Exec(context.Background(), `
+		INSERT INTO trip_live_positions (occurrence_id, user_id, lat, lon, updated_at, accuracy_m, observed_at)
+		VALUES ($1, $2, 40.85, 25.82, $3, 20, $3)`, occurrenceID, userID, testNow); err != nil {
+		t.Fatalf("seeding a position: %v", err)
+	}
+}
+
+func (w *world) positions(t *testing.T, occurrenceID uuid.UUID) int {
+	t.Helper()
+	var n int
+	if err := w.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM trip_live_positions WHERE occurrence_id = $1`, occurrenceID).Scan(&n); err != nil {
+		t.Fatalf("counting positions: %v", err)
+	}
+	return n
+}
+
+func TestCancellingASeatDeletesThePassengersPosition(t *testing.T) {
+	for _, by := range []string{"passenger", "driver"} {
+		t.Run(by, func(t *testing.T) {
+			w := newWorld(t)
+			w.sharePosition(t, w.occurrenceID, w.passengerID)
+			w.sharePosition(t, w.occurrenceID, w.driverID)
+			who := w.passengerID
+			if by == "driver" {
+				who = w.driverID
+			}
+
+			if err := w.svc.Cancel(context.Background(), w.fromAsk, who); err != nil {
+				t.Fatalf("Cancel: %v", err)
+			}
+
+			var left int
+			if err := w.pool.QueryRow(context.Background(),
+				`SELECT count(*) FROM trip_live_positions WHERE occurrence_id = $1 AND user_id = $2`,
+				w.occurrenceID, w.passengerID).Scan(&left); err != nil {
+				t.Fatal(err)
+			}
+			if left != 0 {
+				t.Fatalf("the cancelled passenger's position is still stored")
+			}
+			if got := w.positions(t, w.occurrenceID); got != 1 {
+				t.Fatalf("%d positions left, want only the driver's", got)
+			}
+		})
+	}
+}
+
+func TestCallingOffADepartureDeletesEveryonesPosition(t *testing.T) {
+	w := newWorld(t)
+	w.sharePosition(t, w.occurrenceID, w.passengerID)
+	w.sharePosition(t, w.secondOccurrence, w.passengerID)
+
+	if err := w.svc.CancelOccurrence(context.Background(), w.occurrenceID, w.driverID); err != nil {
+		t.Fatalf("CancelOccurrence: %v", err)
+	}
+
+	if got := w.positions(t, w.occurrenceID); got != 0 {
+		t.Fatalf("%d positions left on the called-off departure", got)
+	}
+	if got := w.positions(t, w.secondOccurrence); got != 1 {
+		t.Fatalf("a position on another departure was touched")
+	}
+}

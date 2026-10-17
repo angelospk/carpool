@@ -230,6 +230,7 @@ func run() error {
 		// rather than a bare hash, and this is the key that makes a leaked
 		// table useless without it.
 		PhoneChange: auth.NewPhoneChangeService(pool, clk, sms, sessions, []byte(cfg.JWTSecret)).WithAsyncSMS(),
+		DeleteCode:  auth.NewDeleteCodeService(pool, clk, sms, []byte(cfg.JWTSecret)).WithAsyncSMS(),
 
 		Router:          router,
 		Materializer:    materializer,

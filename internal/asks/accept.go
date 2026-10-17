@@ -35,6 +35,10 @@ var (
 	ErrAskNotPending = errors.New("asks: the ask is no longer pending")
 	// ErrAskExpired means the TTL passed before the driver answered.
 	ErrAskExpired = errors.New("asks: the ask has expired")
+	// ErrAskNotFound means there is no such ask. The API answers it exactly as
+	// it answers ErrNotYours: an ask that belongs to somebody else must not be
+	// told apart from one that does not exist.
+	ErrAskNotFound = errors.New("asks: no such ask")
 	// ErrNoSeats means the occurrence filled up first.
 	ErrNoSeats = errors.New("asks: the trip has no free seats")
 	// ErrNoLuggageRoom means the seats are there but the boot is not. A separate
@@ -156,7 +160,7 @@ func (s *Service) accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		WHERE a.id = $1`, askID).Scan(&quotedVersion, &planVersion, &preOccurrence,
 		&preState, &preExpiresAt, &preDriver, &prePassenger)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, ErrAskNotPending
+		return uuid.Nil, ErrAskNotFound
 	}
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("asks: loading ask: %w", err)
@@ -169,6 +173,11 @@ func (s *Service) accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	// lock below; this is a cheap filter, not the authority.
 	if preDriver != driverID {
 		return uuid.Nil, ErrNotYours
+	}
+	// Once the sweeper has run the row says 'expired' and nothing else; the
+	// driver answering a late push is told so, not that somebody answered it.
+	if preState == "expired" {
+		return uuid.Nil, ErrAskExpired
 	}
 	if preState != "pending" {
 		return uuid.Nil, ErrAskNotPending
@@ -312,6 +321,9 @@ func (s *Service) accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	// Revalidate everything now that the rows are held.
 	if templateDriver != driverID {
 		return uuid.Nil, ErrNotYours
+	}
+	if askState == "expired" {
+		return uuid.Nil, ErrAskExpired
 	}
 	if askState != "pending" {
 		return uuid.Nil, ErrAskNotPending
@@ -508,7 +520,7 @@ func (s *Service) Decline(ctx context.Context, askID, driverID uuid.UUID) error 
 	err = tx.QueryRow(ctx,
 		`SELECT request_id, occurrence_id FROM asks WHERE id = $1`, askID).Scan(&requestID, &occurrenceID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrAskNotPending
+		return ErrAskNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("asks: loading ask: %w", err)
@@ -536,6 +548,9 @@ func (s *Service) Decline(ctx context.Context, askID, driverID uuid.UUID) error 
 
 	if templateDriver != driverID {
 		return ErrNotYours
+	}
+	if askState == "expired" {
+		return ErrAskExpired
 	}
 	if askState != "pending" {
 		return ErrAskNotPending

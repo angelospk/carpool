@@ -2,8 +2,11 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -205,6 +208,23 @@ func (d Deps) handleConfirmTrip(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// maxRatingTagRunes bounds the free-text tag on a rating.
+const maxRatingTagRunes = 40
+
+// validRatingTag accepts a short tag with no control or invisible formatting
+// characters (Cc, Cf), which covers NUL, line breaks and bidi overrides.
+func validRatingTag(tag string) bool {
+	if !utf8.ValidString(tag) || utf8.RuneCountInString(tag) > maxRatingTagRunes {
+		return false
+	}
+	for _, r := range tag {
+		if unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r) {
+			return false
+		}
+	}
+	return true
+}
+
 func (d Deps) handleRateTrip(w http.ResponseWriter, r *http.Request) {
 	userID, occurrenceID, role, ok := d.tripParams(w, r)
 	if !ok {
@@ -233,6 +253,12 @@ func (d Deps) handleRateTrip(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Stars < 1 || body.Stars > 5 {
 		writeError(w, http.StatusBadRequest, "invalid_request", "stars must be between 1 and 5")
+		return
+	}
+
+	if body.Tag != nil && !validRatingTag(*body.Tag) {
+		writeError(w, http.StatusBadRequest, "invalid_request",
+			fmt.Sprintf("tag may be at most %d characters, with no control characters", maxRatingTagRunes))
 		return
 	}
 
@@ -310,8 +336,19 @@ func (d Deps) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m, err := store.PostMessage(r.Context(), d.Pool, occurrenceID, userID, body.Body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	switch {
+	case errors.Is(err, store.ErrMessageEmpty):
+		writeError(w, http.StatusBadRequest, "invalid_request", "a message cannot be empty")
+		return
+	case errors.Is(err, store.ErrMessageTooLong):
+		writeError(w, http.StatusBadRequest, "invalid_request",
+			fmt.Sprintf("a message may be at most %d characters", domain.MaxChatRunes))
+		return
+	case errors.Is(err, store.ErrMessageInvalid):
+		writeError(w, http.StatusBadRequest, "invalid_request", "that message holds characters that are not allowed")
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "could not post the message")
 		return
 	}
 
@@ -336,11 +373,17 @@ func (d Deps) handleBlockUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := store.BlockUser(r.Context(), d.Pool, callerID, targetID); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+	err := store.BlockUser(r.Context(), d.Pool, callerID, targetID)
+	switch {
+	case errors.Is(err, store.ErrSelfBlock):
+		writeError(w, http.StatusBadRequest, "invalid_request", "you cannot block yourself")
+	case errors.Is(err, store.ErrUserNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "no such user")
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "could not block")
+	default:
+		w.WriteHeader(http.StatusNoContent)
 	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (d Deps) handleUnblockUser(w http.ResponseWriter, r *http.Request) {
