@@ -218,3 +218,54 @@ func TestADriverCancellingAnArrangedSeatQueuesNothing(t *testing.T) {
 		t.Fatalf("%d recovery events for an arranged seat", queued)
 	}
 }
+
+// QA 2026-10-17 F2: an offer still waiting for the driver's answer on a
+// departure the driver calls off. It used to stay pending on a cancelled trip
+// for half an hour, holding its passenger (one live offer per request) while
+// another car could have taken them.
+func TestCallingOffADepartureWithdrawsItsPendingOffers(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	var other, requestID, askID uuid.UUID
+	scanRow := func(dest *uuid.UUID, sql string, args ...any) {
+		t.Helper()
+		if err := w.pool.QueryRow(ctx, sql, args...).Scan(dest); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	scanRow(&other, `INSERT INTO users (date_of_birth, phone, name, home_region_id)
+		VALUES (DATE '1990-01-01', '+306900000009', 'Τρίτος',
+		        (SELECT home_region_id FROM users WHERE id = $1)) RETURNING id`, w.passengerID)
+	scanRow(&requestID, `INSERT INTO ride_requests (passenger_id, origin, destination,
+		window_start, window_end, seats, kind, status)
+		VALUES ($1, ST_SetSRID(ST_MakePoint(25.82,40.85),4326), ST_SetSRID(ST_MakePoint(25.98,40.85),4326),
+		'2026-08-04T03:00:00Z','2026-08-04T07:00:00Z', 1, 'open', 'asking') RETURNING id`, other)
+	scanRow(&askID, `INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km,
+		pickup_point, dropoff_point, suggested_price_eur, itinerary_version, status, expires_at)
+		VALUES ($1, $2, 5, 2, ST_SetSRID(ST_MakePoint(25.82,40.85),4326),
+		ST_SetSRID(ST_MakePoint(25.98,40.85),4326), 2.50, 0, 'pending', '2026-08-04T06:30:00Z')
+		RETURNING id`, requestID, w.occurrenceID)
+
+	if err := w.svc.CancelOccurrence(ctx, w.occurrenceID, w.driverID); err != nil {
+		t.Fatalf("CancelOccurrence: %v", err)
+	}
+
+	var askState, requestState string
+	var asked int
+	if err := w.pool.QueryRow(ctx, `
+		SELECT (SELECT status FROM asks WHERE id = $1),
+		       (SELECT status FROM ride_requests WHERE id = $2),
+		       (SELECT count(*) FROM outbox WHERE kind = 'ask_next' AND payload->>'request_id' = $2::text)`,
+		askID, requestID).Scan(&askState, &requestState, &asked); err != nil {
+		t.Fatalf("reading back: %v", err)
+	}
+	if askState != "cancelled" {
+		t.Errorf("offer on the cancelled departure = %q, want cancelled", askState)
+	}
+	if requestState != "open" {
+		t.Errorf("its request = %q, want open", requestState)
+	}
+	if asked != 1 {
+		t.Errorf("%d ask_next queued for its passenger, want 1", asked)
+	}
+}

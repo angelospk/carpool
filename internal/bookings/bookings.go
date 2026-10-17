@@ -303,6 +303,10 @@ func (s *Service) CancelOccurrence(ctx context.Context, occurrenceID, userID uui
 		return fmt.Errorf("bookings: writing the day off the schedule: %w", err)
 	}
 
+	if err := s.withdrawOffers(ctx, tx, occurrenceID, now); err != nil {
+		return err
+	}
+
 	for _, c := range affected {
 		notice, err := notices.BookingCancelled(
 			notices.BookingCancelledForPassenger, c.passenger, c.booking)
@@ -322,6 +326,71 @@ func (s *Service) CancelOccurrence(ctx context.Context, occurrenceID, userID uui
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("bookings: commit: %w", err)
+	}
+	return nil
+}
+
+// withdrawOffers ends the offers still waiting on a departure that is called
+// off, and puts their passengers back in the queue (QA 2026-10-17 F2). Left
+// alone they stayed pending on a cancelled trip until they expired, and one
+// live offer per request meant no other car could be asked meanwhile.
+//
+// The caller holds the occurrence. Requests are locked before their asks, the
+// order Accept and the sweeper use.
+func (s *Service) withdrawOffers(ctx context.Context, tx pgx.Tx, occurrenceID uuid.UUID, now time.Time) error {
+	rows, err := tx.Query(ctx, `
+		SELECT id, request_id FROM asks
+		 WHERE occurrence_id = $1 AND status = 'pending' ORDER BY request_id`, occurrenceID)
+	if err != nil {
+		return fmt.Errorf("bookings: finding the offers on the trip: %w", err)
+	}
+	type offer struct{ ask, request uuid.UUID }
+	var offers []offer
+	for rows.Next() {
+		var o offer
+		if err := rows.Scan(&o.ask, &o.request); err != nil {
+			rows.Close()
+			return fmt.Errorf("bookings: reading an offer: %w", err)
+		}
+		offers = append(offers, o)
+	}
+	rows.Close()
+	if rows.Err() != nil {
+		return fmt.Errorf("bookings: reading the offers: %w", rows.Err())
+	}
+	for _, o := range offers {
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM ride_requests WHERE id = $1 FOR UPDATE`, o.request); err != nil {
+			return fmt.Errorf("bookings: locking an offer's request: %w", err)
+		}
+		tag, err := tx.Exec(ctx, `
+			UPDATE asks SET status = 'cancelled', responded_at = $2
+			 WHERE id = $1 AND status = 'pending'`, o.ask, now)
+		if err != nil {
+			return fmt.Errorf("bookings: withdrawing an offer: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			continue // answered or swept while the lock was awaited
+		}
+		reopened, err := tx.Exec(ctx, `
+			UPDATE ride_requests SET status = 'open', updated_at = now()
+			 WHERE id = $1 AND status IN ('open', 'asking')`, o.request)
+		if err != nil {
+			return fmt.Errorf("bookings: reopening a request: %w", err)
+		}
+		if reopened.RowsAffected() == 0 {
+			continue
+		}
+		payload, err := json.Marshal(map[string]any{"request_id": o.request, "reason": "trip_cancelled"})
+		if err != nil {
+			return fmt.Errorf("bookings: encoding ask_next: %w", err)
+		}
+		if err := outbox.Enqueue(ctx, tx, outbox.Message{
+			Kind:           "ask_next",
+			IdempotencyKey: "ask_next:" + o.request.String() + ":trip_cancelled:" + o.ask.String(),
+			Payload:        payload,
+		}, now); err != nil {
+			return err
+		}
 	}
 	return nil
 }
