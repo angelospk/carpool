@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"carpool/internal/asks"
+	"carpool/internal/match"
 )
 
 // Every way answering an ask can fail has to reach the driver as itself.
@@ -30,6 +31,7 @@ func TestEveryAskFailureReachesTheDriverAsItself(t *testing.T) {
 		asks.ErrNoLuggageRoom,
 		asks.ErrStaleItinerary,
 		asks.ErrTripDeparted,
+		match.ErrPartyCapReached,
 	} {
 		t.Run(err.Error(), func(t *testing.T) {
 			status, code, message := askErrorStatus(err)

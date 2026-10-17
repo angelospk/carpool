@@ -111,23 +111,43 @@ func (s *Service) WithRouter(r match.Router) *Service {
 // backstop: mutation-testing this function with the lock removed still produced
 // exactly one booking, because the constraint rejects the second decrement.
 // The lock buys the good error message; the constraint buys the invariant.
+//
+// Every other pending offer on the departure is re-quoted against the plan
+// this accept makes, in the same transaction: moved onto the new itinerary
+// version with its new detour and price if it still fits, withdrawn and its
+// passenger looked for elsewhere if not. The routing is done before any lock
+// and checked against the version found under it; if the plan moved in
+// between, the whole accept starts again.
 func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.UUID, error) {
-	// Read the version the ask was quoted against, then verify outside any
-	// transaction.
+	for attempt := 0; attempt < acceptAttempts; attempt++ {
+		bookingID, err := s.accept(ctx, askID, driverID)
+		if !errors.Is(err, errPlanMoved) {
+			return bookingID, err
+		}
+	}
+	return uuid.Nil, ErrStaleItinerary
+}
+
+func (s *Service) accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.UUID, error) {
+	// Read the version the ask was quoted against and the one the plan is at,
+	// then verify and route outside any transaction.
 	var (
 		quotedVersion int
+		planVersion   int
+		preOccurrence uuid.UUID
 		preState      string
 		preExpiresAt  time.Time
 		preDriver     uuid.UUID
 		prePassenger  uuid.UUID
 	)
 	err := s.pool.QueryRow(ctx, `
-		SELECT a.itinerary_version, a.status, a.expires_at, t.driver_id, rr.passenger_id
+		SELECT a.itinerary_version, o.itinerary_version, o.id, a.status, a.expires_at, t.driver_id, rr.passenger_id
 		FROM asks a
 		JOIN trip_occurrences o ON o.id = a.occurrence_id
 		JOIN route_templates  t ON t.id = o.template_id
 		JOIN ride_requests   rr ON rr.id = a.request_id
-		WHERE a.id = $1`, askID).Scan(&quotedVersion, &preState, &preExpiresAt, &preDriver, &prePassenger)
+		WHERE a.id = $1`, askID).Scan(&quotedVersion, &planVersion, &preOccurrence,
+		&preState, &preExpiresAt, &preDriver, &prePassenger)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, ErrAskNotPending
 	}
@@ -154,6 +174,11 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		if err := s.verifier.Verify(ctx, askID, quotedVersion); err != nil {
 			return uuid.Nil, err
 		}
+	}
+
+	plan, err := s.planRequotes(ctx, preOccurrence, askID, planVersion)
+	if err != nil {
+		return uuid.Nil, err
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -263,13 +288,13 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 
 	// 4. ask
 	var (
-		askState  string
-		expiresAt time.Time
-		price     float64
+		askState   string
+		expiresAt  time.Time
+		askVersion int
 	)
 	err = tx.QueryRow(ctx, `
-		SELECT status, expires_at, suggested_price_eur FROM asks WHERE id = $1 FOR UPDATE`,
-		askID).Scan(&askState, &expiresAt, &price)
+		SELECT status, expires_at, itinerary_version FROM asks WHERE id = $1 FOR UPDATE`,
+		askID).Scan(&askState, &expiresAt, &askVersion)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("asks: locking ask: %w", err)
 	}
@@ -336,15 +361,40 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	if aboard {
 		return uuid.Nil, ErrAlreadyAboard
 	}
+	if version != plan.version {
+		// The plan moved while the re-quotes were being routed.
+		return uuid.Nil, errPlanMoved
+	}
+	// Quoted against another plan: something else moved it (a drive, a
+	// standing arrangement) and this offer was not re-quoted then. It was
+	// routed against the plan as it stands before the lock.
+	if askVersion != version {
+		if plan.self == nil {
+			return uuid.Nil, errPlanMoved
+		}
+		if !plan.self.fits {
+			return s.refuse(ctx, tx, askID, requestID, occurrenceID, now, ErrStaleItinerary)
+		}
+	}
+	var parties int
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*) FROM bookings
+		 WHERE occurrence_id = $1 AND status IN ('confirmed', 'completed')`, occurrenceID).Scan(&parties); err != nil {
+		return uuid.Nil, fmt.Errorf("asks: counting the groups aboard: %w", err)
+	}
+	if parties >= match.MaxConcurrentParties {
+		return s.refuse(ctx, tx, askID, requestID, occurrenceID, now, match.ErrPartyCapReached)
+	}
 	if seatsFree < seats {
-		return uuid.Nil, ErrNoSeats
+		return s.refuse(ctx, tx, askID, requestID, occurrenceID, now, ErrNoSeats)
 	}
 	if luggageFree < luggage {
-		return uuid.Nil, ErrNoLuggageRoom
+		return s.refuse(ctx, tx, askID, requestID, occurrenceID, now, ErrNoLuggageRoom)
 	}
-	if version != quotedVersion {
-		// The plan moved under us while OSRM was being consulted.
-		return uuid.Nil, ErrStaleItinerary
+	if askVersion != version {
+		if err := applyQuote(ctx, tx, askID, *plan.self, version); err != nil {
+			return uuid.Nil, err
+		}
 	}
 
 	var bookingID uuid.UUID
@@ -364,6 +414,10 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 		SET seats_free = seats_free - $2, itinerary_version = itinerary_version + 1, updated_at = now()
 		WHERE id = $1`, occurrenceID, seats); err != nil {
 		return uuid.Nil, fmt.Errorf("asks: reserving seats: %w", err)
+	}
+	if err := s.requoteOthers(ctx, tx, occurrenceID, askID, plan,
+		version+1, seatsFree-seats, luggageFree-luggage, now); err != nil {
+		return uuid.Nil, err
 	}
 
 	if _, err := tx.Exec(ctx,

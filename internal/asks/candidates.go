@@ -365,7 +365,10 @@ func (s *Service) pricingInputs(ctx context.Context, occurrenceID uuid.UUID, tri
 // dataset does not know all come back as zero rather than as an error: a
 // suggested contribution that is missing its toll component is worth far more
 // to a pilot than an ask that never reaches a driver.
-func (s *Service) tollShare(ctx context.Context, occurrenceID uuid.UUID, req request) (int, error) {
+//
+// also are passengers not booked yet who will be aboard: the one an accept is
+// about to let on, when the other offers are re-quoted against it.
+func (s *Service) tollShare(ctx context.Context, occurrenceID uuid.UUID, req request, also ...rider) (int, error) {
 	if s.tolls == nil {
 		return 0, nil
 	}
@@ -400,6 +403,11 @@ func (s *Service) tollShare(ctx context.Context, occurrenceID uuid.UUID, req req
 	if err != nil {
 		return 0, err
 	}
+	for _, a := range also {
+		if f, t, err := tolls.Segment(route, a.pickup, a.dropoff); err == nil {
+			riders = append(riders, tolls.Rider{ID: a.id, FromMetres: f, ToMetres: t})
+		}
+	}
 	riders = append(riders, tolls.Rider{ID: req.ID.String(), FromMetres: from, ToMetres: to})
 
 	shares, err := tolls.Split(gates, riders)
@@ -407,6 +415,12 @@ func (s *Service) tollShare(ctx context.Context, occurrenceID uuid.UUID, req req
 		return 0, nil // a backwards segment is the matcher's problem, not the price's
 	}
 	return shares.Riders[req.ID.String()], nil
+}
+
+// rider is a passenger placed by their two stops.
+type rider struct {
+	id              string
+	pickup, dropoff geo.Point
 }
 
 // ridersAboard is everyone already booked onto this occurrence, placed along

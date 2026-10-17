@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"carpool/internal/asks"
+	"carpool/internal/match"
 	"carpool/internal/store"
 )
 
@@ -30,7 +31,9 @@ func askErrorStatus(err error) (int, string, string) {
 	case errors.Is(err, asks.ErrAlreadyAboard):
 		return http.StatusConflict, "already_aboard", "this passenger already has a seat on this trip"
 	case errors.Is(err, asks.ErrStaleItinerary):
-		return http.StatusConflict, "itinerary_changed", "your route changed; please reopen the request"
+		return http.StatusConflict, "itinerary_changed", "the trip changed and this passenger no longer fits it"
+	case errors.Is(err, match.ErrPartyCapReached):
+		return http.StatusConflict, "party_cap", "the trip already carries the most groups it can"
 	default:
 		// Anything unnamed above is a failure nobody planned for; the sentence
 		// the driver sees says nothing, so the log has to.

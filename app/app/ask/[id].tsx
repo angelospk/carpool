@@ -71,6 +71,17 @@ export default function AskScreen() {
       case 'ask_closed':
         setClosed(true);
         return setOutcome(t('ask.closed'));
+      // The offer was withdrawn and its passenger is being looked for
+      // elsewhere: nothing is left on this phone to answer.
+      case 'party_cap':
+        setClosed(true);
+        return setOutcome(t('ask.partyCap'));
+      case 'itinerary_changed':
+        setClosed(true);
+        return setOutcome(t('ask.noLongerFits'));
+      case 'no_luggage_room':
+        setClosed(true);
+        return setOutcome(t('ask.noLuggageRoom'));
       case 'trip_departed':
       case 'not_yours':
         setClosed(true);
