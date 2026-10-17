@@ -360,6 +360,47 @@ func TestAnUploadRacingTheEndOfTheDriveIsNotWritten(t *testing.T) {
 	}
 }
 
+// An upload already past its participation check when the passenger's seat is
+// cancelled must not put the position back after the cancellation deleted it.
+func TestAnUploadRacingACancelledSeatIsNotWritten(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	cancel, err := w.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cancel.Rollback(ctx) }()
+	if _, err := cancel.Exec(ctx, `SELECT 1 FROM trip_occurrences WHERE id = $1 FOR UPDATE`, w.trip); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- w.svc.Put(ctx, w.trip, w.other, 40.85, 25.9) }()
+	time.Sleep(300 * time.Millisecond) // the upload has passed its check and waits on the row
+
+	if _, err := cancel.Exec(ctx,
+		`UPDATE bookings SET status = 'cancelled_by_passenger' WHERE id = $1`, w.otherBooking); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cancel.Exec(ctx,
+		`DELETE FROM trip_live_positions WHERE occurrence_id = $1 AND user_id = $2`, w.trip, w.other); err != nil {
+		t.Fatal(err)
+	}
+	if err := cancel.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := <-done; !errors.Is(err, live.ErrNotOnTrip) {
+		t.Fatalf("the racing upload: %v, want ErrNotOnTrip", err)
+	}
+	var rows int
+	_ = w.pool.QueryRow(ctx, `SELECT count(*) FROM trip_live_positions WHERE user_id = $1`, w.other).Scan(&rows)
+	if rows != 0 {
+		t.Fatalf("the position came back after the seat was cancelled")
+	}
+}
+
 // A fix that does not say how good it is may not replace a fresh one that
 // does: a foreground upload still in flight when the drive's background task
 // took over would otherwise put an unqualified position over the car's.

@@ -1,8 +1,15 @@
 package api_test
 
 import (
+	"context"
+	"errors"
 	"net/http"
+	"sync"
 	"testing"
+
+	"github.com/google/uuid"
+
+	"carpool/internal/auth"
 )
 
 // QA 2026-10-17 A14. Deleting an account used to need only the access token, so
@@ -106,6 +113,141 @@ func TestADeleteCodeWorksOnce(t *testing.T) {
 	}
 	if rec := h.do(http.MethodGet, "/v1/me", nil, token2); rec.Code != http.StatusOK {
 		t.Fatalf("the new account was erased by an old code: %d", rec.Code)
+	}
+}
+
+// Spent twice for the same user, with the service itself: through the API the
+// first spend erases the account, so a second request would be refused for that
+// reason rather than because the code was used.
+func TestTheSameUsersDeleteCodeCannotBeSpentTwice(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000809", "Γιώργος")
+	var userID uuid.UUID
+	h.mustQuery(`SELECT id FROM users WHERE phone = '+306900000809'`, &userID)
+	code := requestDeleteCode(h, token)
+
+	svc := auth.NewDeleteCodeService(h.pool, h.clock, h.sms, []byte(testSecret))
+	if err := svc.Spend(context.Background(), userID, code); err != nil {
+		t.Fatalf("first spend: %v", err)
+	}
+	if err := svc.Spend(context.Background(), userID, code); !errors.Is(err, auth.ErrDeleteCodeFailed) {
+		t.Fatalf("second spend: %v, want ErrDeleteCodeFailed", err)
+	}
+}
+
+func TestTwoRedemptionsOfOneDeleteCodeAtOnceLetExactlyOneThrough(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000810", "Γιώργος")
+	var userID uuid.UUID
+	h.mustQuery(`SELECT id FROM users WHERE phone = '+306900000810'`, &userID)
+	code := requestDeleteCode(h, token)
+
+	svc := auth.NewDeleteCodeService(h.pool, h.clock, h.sms, []byte(testSecret))
+	const n = 2
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs[i] = svc.Spend(context.Background(), userID, code)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	won := 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			won++
+		case !errors.Is(err, auth.ErrDeleteCodeFailed):
+			t.Errorf("unexpected error: %v", err)
+		}
+	}
+	if won != 1 {
+		t.Fatalf("%d spends succeeded, want exactly 1: %v", won, errs)
+	}
+}
+
+// A failed erasure must not burn the code: the person tries again.
+func TestAFailedErasureLeavesTheDeleteCodeUsable(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000811", "Γιώργος")
+	code := requestDeleteCode(h, token)
+
+	h.mustExec(`
+		CREATE FUNCTION test_refuse_erasure() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN RAISE EXCEPTION 'erasure refused for the test'; END $$`)
+	h.mustExec(`
+		CREATE TRIGGER test_refuse_erasure BEFORE UPDATE ON users
+		FOR EACH ROW WHEN (NEW.status = 'deleted' AND OLD.phone = '+306900000811')
+		EXECUTE FUNCTION test_refuse_erasure()`)
+	dropped := false
+	drop := func() {
+		if dropped {
+			return
+		}
+		dropped = true
+		h.mustExec(`DROP TRIGGER test_refuse_erasure ON users`)
+		h.mustExec(`DROP FUNCTION test_refuse_erasure()`)
+	}
+	t.Cleanup(drop)
+
+	rec := h.do(http.MethodDelete, "/v1/me", map[string]any{"code": code}, token)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("failing erasure: %d %s, want 500", rec.Code, rec.Body.String())
+	}
+	drop()
+
+	rec = h.do(http.MethodDelete, "/v1/me", map[string]any{"code": code}, token)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("retry with the same code: %d %s, want 204", rec.Code, rec.Body.String())
+	}
+}
+
+// A code texted to the number the account has since left must not erase it.
+func TestADeleteCodeSentToTheOldNumberDiesWithTheChange(t *testing.T) {
+	h := newHarnessWith(t, true)
+	token, _ := h.signUp("+306900000812", "Γιώργος")
+	oldCode := requestDeleteCode(h, token)
+
+	rec, ch := requestChange(h, token, "+306900000813")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("request: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = h.do(http.MethodPost, "/v1/me/phone/confirm", map[string]any{
+		"challenge_id": ch.ChallengeID, "code": ch.DevCode,
+	}, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("confirm: %d %s", rec.Code, rec.Body.String())
+	}
+	var pair struct {
+		AccessToken string `json:"access_token"`
+	}
+	h.decode(rec, &pair)
+
+	rec = h.do(http.MethodDelete, "/v1/me", map[string]any{"code": oldCode}, pair.AccessToken)
+	if rec.Code != http.StatusForbidden || h.errorCode(rec) != "bad_code" {
+		t.Fatalf("code for the old number: %d %s, want 403 bad_code", rec.Code, rec.Body.String())
+	}
+	if rec := h.do(http.MethodGet, "/v1/me", nil, pair.AccessToken); rec.Code != http.StatusOK {
+		t.Fatalf("the account was erased: %d", rec.Code)
+	}
+}
+
+// Even if the old code row were still live, it is tied to the number it went to.
+func TestADeleteCodeIsTiedToTheNumberItWasSentTo(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000814", "Γιώργος")
+	code := requestDeleteCode(h, token)
+	h.mustExec(`UPDATE users SET phone = '+306900000815' WHERE phone = '+306900000814'`)
+
+	rec := h.do(http.MethodDelete, "/v1/me", map[string]any{"code": code}, token)
+	if rec.Code != http.StatusForbidden || h.errorCode(rec) != "bad_code" {
+		t.Fatalf("code for another number: %d %s, want 403 bad_code", rec.Code, rec.Body.String())
 	}
 }
 

@@ -204,13 +204,30 @@ func (s *Service) PutFix(ctx context.Context, occurrenceID, userID uuid.UUID, f 
 		return fmt.Errorf("live: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var ended bool
+	// The seat is read again under that lock. The check above ran before it,
+	// and a cancellation that committed in between has already deleted this
+	// person's position: writing it now would put it back for a stranger to see.
+	//
+	// Two statements: the seat is read by a statement that starts after the
+	// lock is held. One statement would read it from a snapshot taken before
+	// the wait, and see the seat that was just cancelled.
+	var ended, called, hasSeat bool
 	if err := tx.QueryRow(ctx, `
-		SELECT drive_ended_at IS NOT NULL FROM trip_occurrences WHERE id = $1 FOR SHARE`,
-		occurrenceID).Scan(&ended); err != nil {
+		SELECT drive_ended_at IS NOT NULL, status = 'cancelled'
+		FROM trip_occurrences WHERE id = $1 FOR SHARE`,
+		occurrenceID).Scan(&ended, &called); err != nil {
 		return fmt.Errorf("live: holding the trip: %w", err)
 	}
-	if t.isDriver && ended {
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM bookings
+		               WHERE occurrence_id = $1 AND passenger_id = $2 AND status = 'confirmed')`,
+		occurrenceID, userID).Scan(&hasSeat); err != nil {
+		return fmt.Errorf("live: checking the seat: %w", err)
+	}
+	if !t.isDriver && !hasSeat {
+		return ErrNotOnTrip
+	}
+	if called || (t.isDriver && ended) {
 		return ErrOutsideWindow
 	}
 	if _, err := tx.Exec(ctx, `

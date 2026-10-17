@@ -312,6 +312,14 @@ func (s *PhoneChangeService) Confirm(ctx context.Context, userID, challengeID uu
 		return TokenPair{}, fmt.Errorf("auth: clearing codes: %w", err)
 	}
 
+	// A code to delete the account, sent to the number it is leaving, is dead
+	// too.
+	if _, err := tx.Exec(ctx,
+		`UPDATE account_delete_codes SET consumed_at = $2 WHERE user_id = $1 AND consumed_at IS NULL`,
+		userID, now); err != nil {
+		return TokenPair{}, fmt.Errorf("auth: clearing delete codes: %w", err)
+	}
+
 	// Issued inside the same transaction as the revocation above, so there is
 	// no instant where the account has no way in and no instant where an old
 	// token and a new one are both live.

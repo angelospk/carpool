@@ -56,7 +56,8 @@ export default function DeleteAccountScreen() {
   return (
     <Screen>
       <Title>{t('profile.deleteAccount')}</Title>
-      <Hint>{t('profile.deleteCodeSent')}</Hint>
+      {/* Only once the text has gone: before that it would be untrue. */}
+      {request.isSuccess ? <Hint>{t('profile.deleteCodeSent')}</Hint> : null}
 
       <Card>
         <Field

@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"carpool/internal/account"
 	"carpool/internal/asks"
@@ -75,6 +77,11 @@ func (d Deps) handleRepeatBooking(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id, err := d.Standing.Repeat(r.Context(), bookingID, userID)
+	if errors.Is(err, standing.ErrNotYours) {
+		// Somebody else's booking answers as a missing one, so an id cannot be
+		// probed.
+		err = standing.ErrNotRepeatable
+	}
 	if err != nil {
 		d.writeStandingError(w, err)
 		return
@@ -333,16 +340,14 @@ func (d Deps) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "code_required", "a code sent to your phone is required")
 		return
 	}
-	switch err := d.DeleteCode.Spend(r.Context(), userID, body.Code); {
+	// The code is spent in the same transaction as the erasure, so an erasure
+	// that fails leaves the code usable.
+	err := d.DeleteCode.SpendThen(r.Context(), userID, body.Code,
+		func(ctx context.Context, tx pgx.Tx) error { return d.Account.DeleteIn(ctx, tx, userID) })
+	switch {
 	case errors.Is(err, auth.ErrDeleteCodeFailed):
 		writeError(w, http.StatusForbidden, "bad_code", "that code is not valid or has expired")
 		return
-	case err != nil:
-		writeError(w, http.StatusInternalServerError, "internal", "could not check your code")
-		return
-	}
-
-	switch err := d.Account.Delete(r.Context(), userID); {
 	case errors.Is(err, account.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "no such account")
 		return

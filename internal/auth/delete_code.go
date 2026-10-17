@@ -112,9 +112,9 @@ func (s *DeleteCodeService) Request(ctx context.Context, userID uuid.UUID) (stri
 			UPDATE account_delete_codes SET consumed_at = $3
 			 WHERE user_id = $1 AND consumed_at IS NULL
 		)
-		INSERT INTO account_delete_codes (user_id, code_hmac, expires_at, created_at)
-		VALUES ($1, $2, $4, $3)`,
-		userID, s.digest(userID, code), now, now.Add(DeleteCodeTTL)); err != nil {
+		INSERT INTO account_delete_codes (user_id, phone, code_hmac, expires_at, created_at)
+		VALUES ($1, $5, $2, $4, $3)`,
+		userID, s.digest(userID, code), now, now.Add(DeleteCodeTTL), phone); err != nil {
 		return "", fmt.Errorf("auth: storing the code: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -142,6 +142,14 @@ func (s *DeleteCodeService) Request(ctx context.Context, userID uuid.UUID) (stri
 // that has been guessed at maxConfirmAttempts times is dead even if the next
 // guess is right.
 func (s *DeleteCodeService) Spend(ctx context.Context, userID uuid.UUID, code string) error {
+	return s.SpendThen(ctx, userID, code, nil)
+}
+
+// SpendThen is Spend with work done in the same transaction once the code has
+// checked out. If then fails, the code is not used up: an erasure that fails
+// must not cost the person their code. then may be nil.
+func (s *DeleteCodeService) SpendThen(ctx context.Context, userID uuid.UUID, code string,
+	then func(ctx context.Context, tx pgx.Tx) error) error {
 	now := s.clock.Now()
 
 	tx, err := s.pool.Begin(ctx)
@@ -150,6 +158,21 @@ func (s *DeleteCodeService) Spend(ctx context.Context, userID uuid.UUID, code st
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// The account first, then its code: the order a phone change takes them in,
+	// so the two cannot wait on each other. Two spends of the same code queue
+	// here, and the second finds nothing left to spend.
+	var phone string
+	err = tx.QueryRow(ctx,
+		`SELECT phone FROM users WHERE id = $1 AND status = 'active' FOR UPDATE`, userID).Scan(&phone)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrDeleteCodeFailed
+	}
+	if err != nil {
+		return fmt.Errorf("auth: reading the account: %w", err)
+	}
+
+	// Only a code sent to the number the account has now: one sent to a number
+	// the account has since left must not erase it.
 	var (
 		id       uuid.UUID
 		stored   []byte
@@ -158,10 +181,10 @@ func (s *DeleteCodeService) Spend(ctx context.Context, userID uuid.UUID, code st
 	err = tx.QueryRow(ctx, `
 		SELECT id, code_hmac, attempts
 		  FROM account_delete_codes
-		 WHERE user_id = $1 AND consumed_at IS NULL AND expires_at > $2
+		 WHERE user_id = $1 AND phone = $3 AND consumed_at IS NULL AND expires_at > $2
 		 ORDER BY created_at DESC
 		 LIMIT 1
-		 FOR UPDATE`, userID, now).Scan(&id, &stored, &attempts)
+		 FOR UPDATE`, userID, now, phone).Scan(&id, &stored, &attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrDeleteCodeFailed
 	}
@@ -187,6 +210,11 @@ func (s *DeleteCodeService) Spend(ctx context.Context, userID uuid.UUID, code st
 	if _, err := tx.Exec(ctx,
 		`UPDATE account_delete_codes SET consumed_at = $2 WHERE id = $1`, id, now); err != nil {
 		return fmt.Errorf("auth: consuming the code: %w", err)
+	}
+	if then != nil {
+		if err := then(ctx, tx); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("auth: committing: %w", err)

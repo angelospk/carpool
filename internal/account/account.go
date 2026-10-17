@@ -49,16 +49,29 @@ func NewService(pool *pgxpool.Pool, c clock.Clock) *Service {
 // It is idempotent: a second call on an account already erased changes nothing
 // and reports success, because the answer to "erase me" is the same either way.
 func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
-	now := s.clock.Now()
-
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("account: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := s.DeleteIn(ctx, tx, userID); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("account: commit: %w", err)
+	}
+	return nil
+}
+
+// DeleteIn is Delete inside a transaction the caller owns, and commits nothing:
+// the caller can then make something else, such as spending the code that
+// authorised the erasure, stand or fall with it.
+func (s *Service) DeleteIn(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error {
+	now := s.clock.Now()
+
 	var status string
-	err = tx.QueryRow(ctx,
+	err := tx.QueryRow(ctx,
 		`SELECT status FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
@@ -335,9 +348,6 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID) error {
 		return fmt.Errorf("account: recording the request: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("account: commit: %w", err)
-	}
 	return nil
 }
 

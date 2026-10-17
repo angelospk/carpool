@@ -16,6 +16,9 @@
 CREATE TABLE account_delete_codes (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id      uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    -- The number the code was sent to. A code only counts while the account
+    -- still has that number.
+    phone        text NOT NULL,
     code_hmac    bytea NOT NULL,
     attempts     integer NOT NULL DEFAULT 0,
     expires_at   timestamptz NOT NULL,
