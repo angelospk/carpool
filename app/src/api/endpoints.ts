@@ -388,6 +388,8 @@ export type OpenRequest = {
   } | null;
   /** The driver took the seat back and the request is being matched again. */
   stranded?: boolean;
+  /** The first day of the journey this is another day of; null for that day. */
+  alternative_of?: string | null;
   created_at: string;
 };
 
@@ -710,7 +712,9 @@ export const api = {
   requestAlternatives: (id: string) =>
     request<{ alternatives: Alternative[] }>(`/v1/requests/${id}/alternatives`),
 
-  cancelRequest: (id: string) => request<void>(`/v1/requests/${id}`, { method: 'DELETE' }),
+  /** allDays takes every other live day of the same journey with it. */
+  cancelRequest: (id: string, allDays?: boolean) =>
+    request<void>(`/v1/requests/${id}${allDays ? '?days=all' : ''}`, { method: 'DELETE' }),
 
   /** Whether at least three drivers go this way on a day. Never how many. */
   supply: (body: {

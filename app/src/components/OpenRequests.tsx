@@ -22,7 +22,7 @@ import { useSession } from '../state/session';
 import { Card } from './ui';
 import { colors, space, type } from '../design/tokens';
 import { JourneySummary } from './JourneySummary';
-import { athensTime } from '../design/format';
+import { athensDay, athensTime } from '../design/format';
 
 /**
  * What the caller is waiting on, asked the same way everywhere.
@@ -73,24 +73,59 @@ export function OpenRequests() {
   return (
     <View testID="open-requests" style={styles.wrap}>
       <Text style={styles.heading}>{t('home.requests')}</Text>
-      {open.map((request) => (
-        <Card
-          key={request.id}
-          testID={`request-${request.id}`}
-          onPress={() => router.push(`/request/${request.id}`)}
-        >
-          <JourneySummary
-            from={request.origin_label}
-            to={request.destination_label}
-            start={request.window_start}
-            end={request.window_end}
-            status={requestProgress(request, t)}
-            statusTestID={`request-${request.id}-progress`}
-          />
-        </Card>
-      ))}
+      {journeyGroups(open).map((group) => {
+        const request = leadOf(group);
+        return (
+          <Card
+            key={request.id}
+            testID={`request-${request.id}`}
+            onPress={() => router.push(`/request/${request.id}`)}
+          >
+            {group.length > 1 ? (
+              <Text testID={`request-${request.id}-days`} style={styles.days}>
+                {daysLine(group, t('home.daysOr'))}
+              </Text>
+            ) : null}
+            <JourneySummary
+              from={request.origin_label}
+              to={request.destination_label}
+              start={request.window_start}
+              end={request.window_end}
+              status={requestProgress(request, t)}
+              statusTestID={`request-${request.id}-progress`}
+            />
+          </Card>
+        );
+      })}
     </View>
   );
+}
+
+/**
+ * The open requests as journeys: the days of one journey ("Thursday, or else
+ * Friday") together, earliest day first. Two cards with the same sentence read
+ * as two trips (QA 2026-10-17 U F6). Journeys keep the list's order, by their
+ * first appearance in it.
+ */
+export function journeyGroups(requests: OpenRequest[]): OpenRequest[][] {
+  const byRoot = new Map<string, OpenRequest[]>();
+  for (const r of requests) {
+    const root = r.alternative_of ?? r.id;
+    byRoot.set(root, [...(byRoot.get(root) ?? []), r]);
+  }
+  return [...byRoot.values()].map((g) =>
+    [...g].sort((a, b) => Date.parse(a.window_start) - Date.parse(b.window_start)),
+  );
+}
+
+/** The day a journey's card speaks for: the one being asked about now, else the earliest. */
+export function leadOf(group: OpenRequest[]): OpenRequest {
+  return group.find((r) => r.asking_now) ?? group[0];
+}
+
+/** "Κυρ 18 Οκτ ή Κυρ 25 Οκτ". */
+export function daysLine(group: OpenRequest[], or = ' ή '): string {
+  return group.map((r) => athensDay(r.window_start)).join(or);
 }
 
 /**
@@ -187,5 +222,6 @@ function progressOf(request: OpenRequest, t: TFunction): string {
 const styles = StyleSheet.create({
   wrap: { gap: space.sm },
   heading: { ...type.caption, color: colors.muted, marginLeft: space.xs },
+  days: { ...type.label, color: colors.ink },
   failed: { ...type.caption, color: colors.muted, marginLeft: space.xs },
 });

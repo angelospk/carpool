@@ -183,3 +183,54 @@ func TestADayAddedDuringAnAcceptFindsTheJourneyTaken(t *testing.T) {
 		t.Errorf("a day added during the accept: %d %s, want 409 request_closed", a.status, a.code)
 	}
 }
+
+// QA 2026-10-17 U F6: the days of one journey are one thing to the passenger.
+// The list says which day belongs to which journey, and cancelling can take
+// all of them at once or only the one.
+func TestTheDaysOfOneJourneyCancelTogetherOrAlone(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000841", "Επιβάτης")
+	d := days{h: h, token: token}
+	_, first, _ := d.post(0, "")
+	_, second, _ := d.post(1, first)
+	_, third, _ := d.post(2, first)
+
+	var mine struct {
+		Requests []struct {
+			ID            string  `json:"id"`
+			AlternativeOf *string `json:"alternative_of"`
+		} `json:"requests"`
+	}
+	h.decode(h.do(http.MethodGet, "/v1/requests/mine", nil, token), &mine)
+	roots := map[string]string{}
+	for _, r := range mine.Requests {
+		root := r.ID
+		if r.AlternativeOf != nil {
+			root = *r.AlternativeOf
+		}
+		roots[r.ID] = root
+	}
+	if roots[first] != first || roots[second] != first || roots[third] != first {
+		t.Fatalf("roots %v, want every day pointing at %s", roots, first)
+	}
+
+	status := func(id string) string {
+		var s string
+		h.mustQuery(`SELECT status FROM ride_requests WHERE id = $1`, &s, id)
+		return s
+	}
+	// Only this day.
+	if rec := h.do(http.MethodDelete, "/v1/requests/"+second, nil, token); rec.Code != http.StatusNoContent {
+		t.Fatalf("cancelling one day: %d", rec.Code)
+	}
+	if status(second) != "cancelled" || status(first) == "cancelled" || status(third) == "cancelled" {
+		t.Fatalf("one day: %s %s %s", status(first), status(second), status(third))
+	}
+	// Every day, named through any of them.
+	if rec := h.do(http.MethodDelete, "/v1/requests/"+third+"?days=all", nil, token); rec.Code != http.StatusNoContent {
+		t.Fatalf("cancelling every day: %d", rec.Code)
+	}
+	if status(first) != "cancelled" || status(third) != "cancelled" {
+		t.Fatalf("every day: %s %s", status(first), status(third))
+	}
+}

@@ -21,7 +21,7 @@ import { shareText } from '../../src/components/shareText';
 import { shareRequestMessage } from '../../src/design/shareRequest';
 import { ktelFor } from '../../src/design/ktel';
 import { usePushReach } from '../../src/push/reach';
-import { confirm } from '../../src/components/confirm';
+import { choose, confirm } from '../../src/components/confirm';
 
 export default function RequestScreen() {
   const { t } = useTranslation();
@@ -58,8 +58,15 @@ export default function RequestScreen() {
     enabled: stranded,
   });
 
+  // The other live days of the same journey (QA 2026-10-17 U F6).
+  const root = mine ? (mine.alternative_of ?? mine.id) : null;
+  const days = (requests.data?.requests ?? []).filter(
+    (q) => root !== null && (q.alternative_of ?? q.id) === root,
+  ).length;
+
   const cancel = useMutation({
-    mutationFn: () => api.cancelRequest(id),
+    mutationFn: (allDays?: boolean) =>
+      allDays === undefined ? api.cancelRequest(id) : api.cancelRequest(id, allDays),
     onSuccess: () => {
       // The home screen lists what is still being waited on, and this is not
       // one of those any more.
@@ -230,14 +237,30 @@ export default function RequestScreen() {
               label={t('request.cancel')}
               variant="secondary"
               onPress={() =>
-                confirm({
-                  title: t('request.cancel'),
-                  message: t('request.cancelConfirm'),
-                  confirmLabel: t('request.cancel'),
-                  cancelLabel: t('request.keep'),
-                  destructive: true,
-                  onConfirm: () => cancel.mutate(),
-                })
+                days > 1
+                  ? choose({
+                      title: t('request.cancel'),
+                      message: t('request.cancelWhich', { count: days }),
+                      cancelLabel: t('request.keep'),
+                      first: {
+                        label: t('request.cancelThisDay'),
+                        web: t('request.cancelThisDayWeb'),
+                        onPress: () => cancel.mutate(false),
+                      },
+                      second: {
+                        label: t('request.cancelAllDays'),
+                        web: t('request.cancelAllDaysWeb'),
+                        onPress: () => cancel.mutate(true),
+                      },
+                    })
+                  : confirm({
+                      title: t('request.cancel'),
+                      message: t('request.cancelConfirm'),
+                      confirmLabel: t('request.cancel'),
+                      cancelLabel: t('request.keep'),
+                      destructive: true,
+                      onConfirm: () => cancel.mutate(undefined),
+                    })
               }
               disabled={cancel.isPending}
             />

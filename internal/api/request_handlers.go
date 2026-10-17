@@ -427,6 +427,7 @@ func (d Deps) handleMyRequests(w http.ResponseWriter, r *http.Request) {
 			"drivers_departing":      q.DriversDeparting,
 			"nearest_departure":      q.NearestDeparture,
 			"missed":                 missedJSON(q),
+			"alternative_of":         q.AlternativeOf,
 			"stranded":               q.Stranded,
 			"created_at":             q.CreatedAt,
 		})
@@ -493,20 +494,27 @@ func (d Deps) handleCancelRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		defer func() { _ = tx.Rollback(r.Context()) }()
 
+		// ?days=all takes every live day of the same journey with it (QA
+		// 2026-10-17 U F6); without it only the day named goes. The named day
+		// is still the one whose row decides the answer below.
 		var cancelled uuid.UUID
 		var freed []uuid.UUID
 		err = tx.QueryRow(r.Context(), `
-			WITH cancelled AS (
+			WITH me AS (
+				SELECT COALESCE(alternative_of, id) AS root FROM ride_requests
+				 WHERE id = $1 AND passenger_id = $2
+			), cancelled AS (
 				UPDATE ride_requests SET status = 'cancelled', updated_at = now()
-				WHERE id = $1 AND passenger_id = $2 AND status IN ('open','asking')
+				WHERE passenger_id = $2 AND status IN ('open','asking')
+				  AND (id = $1 OR ($3 AND COALESCE(alternative_of, id) = (SELECT root FROM me)))
 				RETURNING id
 			), killed AS (
 				UPDATE asks SET status = 'cancelled', responded_at = now()
 				WHERE request_id IN (SELECT id FROM cancelled) AND status = 'pending'
 				RETURNING occurrence_id
 			)
-			SELECT id, ARRAY(SELECT DISTINCT occurrence_id FROM killed) FROM cancelled`,
-			requestID, userID).Scan(&cancelled, &freed)
+			SELECT id, ARRAY(SELECT DISTINCT occurrence_id FROM killed) FROM cancelled WHERE id = $1`,
+			requestID, userID, r.URL.Query().Get("days") == "all").Scan(&cancelled, &freed)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Released first: reportCancelRace reads through the pool, and
 			// holding this connection while it waits for another can starve a

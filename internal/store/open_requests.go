@@ -83,7 +83,10 @@ type OpenRequest struct {
 	// the queue. The passenger needs to hear that the search restarted on its
 	// own, not find a request looking exactly like one never answered.
 	Stranded  bool
-	CreatedAt time.Time
+	// AlternativeOf is the first day of the journey this request is another
+	// day of; nil for the first day itself. The app shows a journey once.
+	AlternativeOf *uuid.UUID
+	CreatedAt     time.Time
 }
 
 // OpenRequests lists what the caller is still waiting on, newest first.
@@ -115,7 +118,7 @@ func OpenRequests(
 			SELECT r.id, r.origin_label, r.destination_label, r.origin, r.destination,
 			       r.window_start, r.window_end, r.seats, r.status,
 			       r.passenger_id, r.created_at,
-			       r.missed_reason, r.missed_need, r.missed_limit
+			       r.missed_reason, r.missed_need, r.missed_limit, r.alternative_of
 			FROM ride_requests r
 			WHERE r.passenger_id = $1
 			  AND r.status IN ('open','asking')
@@ -135,7 +138,7 @@ func OpenRequests(
 		       coalesce((SELECT lb.status = 'cancelled_by_driver' FROM bookings lb
 		                 WHERE lb.request_id = r.id
 		                 ORDER BY lb.created_at DESC, lb.id DESC LIMIT 1), false),
-		       r.created_at
+		       r.alternative_of, r.created_at
 		FROM mine r
 		LEFT JOIN asks a             ON a.request_id = r.id
 		LEFT JOIN trip_occurrences o ON o.id = a.occurrence_id
@@ -222,7 +225,7 @@ func OpenRequests(
 		GROUP BY r.id, r.origin_label, r.destination_label,
 		         r.window_start, r.window_end, r.seats, r.status,
 		         r.created_at, corridor.drivers, corridor.untried, corridor.most_seats, corridor.departing, corridor.nearest,
-		         r.missed_reason, r.missed_need, r.missed_limit
+		         r.missed_reason, r.missed_need, r.missed_limit, r.alternative_of
 		ORDER BY r.created_at DESC, r.id DESC`, userID, now, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: loading open requests: %w", err)
@@ -235,7 +238,7 @@ func OpenRequests(
 		if err := rows.Scan(&q.ID, &q.OriginLabel, &q.DestinationLabel,
 			&q.WindowStart, &q.WindowEnd, &q.Seats, &q.Status,
 			&q.DriversAsked, &q.DriversDeclined, &q.AskingNow, &q.AskExpiresAt, &q.DriversOnCorridor, &q.DriversUntried, &q.MostSeatsOnCorridor, &q.DriversDeparting, &q.NearestDeparture,
-			&q.MissedReason, &q.MissedNeed, &q.MissedLimit, &q.Stranded, &q.CreatedAt); err != nil {
+			&q.MissedReason, &q.MissedNeed, &q.MissedLimit, &q.Stranded, &q.AlternativeOf, &q.CreatedAt); err != nil {
 			return nil, fmt.Errorf("store: scanning an open request: %w", err)
 		}
 		out = append(out, q)

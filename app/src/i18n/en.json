@@ -133,6 +133,7 @@
     "missedDetourMin": "A car passes, but picking you up takes a {{need}}-minute detour. The driver takes up to {{limit}}. A point closer to the road may help.",
     "missedDetourKm": "A car passes, but picking you up takes a {{need}} km detour. The driver takes up to {{limit}} km. A point closer to the road may help.",
     "missedNoStops": "A car passes, but its driver makes no stops on this route.",
+    "daysOr": " or ",
     "missedFull": "A car passes, but it is full. If a seat comes free, we will ask.",
     "missedPartyCap": "A car passes, but it already carries two groups of passengers, as many as it takes. If one leaves, we will ask.",
     "missedLuggage": "A car passes, but your luggage does not fit. With less or smaller luggage you may fit.",
@@ -357,6 +358,11 @@
     "backHome": "Back to home",
     "cancel": "Cancel request",
     "cancelConfirm": "We stop looking for a driver for this journey.",
+    "cancelWhich": "You asked for this trip on {{count}} days. Which do we cancel?",
+    "cancelAllDays": "Every day",
+    "cancelThisDay": "Only this one",
+    "cancelAllDaysWeb": "Cancel every day? (Cancel: we ask about this one only)",
+    "cancelThisDayWeb": "Cancel only this day?",
     "keep": "Keep it",
     "closed": "This request is no longer open.",
     "leaveOk": "You can close the app. We will notify you as soon as a driver accepts.",
@@ -500,6 +506,8 @@
     "summary": "{{day}}, {{from}}–{{to}}",
     "other": "Another day",
     "more": "Other days work too",
+    "morePick": "Pick one or more days. Without them we ask only for the one above.",
+    "moreChosen": "Also asking for: {{days}}",
     "moreHint": "We ask drivers for these as well, at the same time of day. Once one says yes for a day, the others are cancelled."
   },
   "groups": {

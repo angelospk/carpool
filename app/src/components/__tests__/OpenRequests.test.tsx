@@ -2,7 +2,7 @@ import i18n from '../../i18n';
 import el from '../../i18n/el.json';
 import en from '../../i18n/en.json';
 
-import { requestProgress } from '../OpenRequests';
+import { daysLine, journeyGroups, leadOf, requestProgress } from '../OpenRequests';
 import type { OpenRequest } from '../../api/endpoints';
 
 // requestProgress is a pure function, but it lives beside the card that draws
@@ -226,4 +226,24 @@ test('a new driver after one who passed is still somebody to look for', () => {
   );
 
   expect(line).toContain(el.home.requestSearching);
+});
+
+// QA 2026-10-17 U F6: the days of one journey were two cards with the same
+// sentence, the newest first. They are one card, saying the days.
+test('the days of one journey are one entry, earliest day first', () => {
+  const groups = journeyGroups([
+    waiting({ id: 'b', window_start: '2026-10-25T05:00:00Z', alternative_of: 'a' }),
+    waiting({ id: 'a', window_start: '2026-10-18T05:00:00Z' }),
+    waiting({ id: 'c', window_start: '2026-10-19T05:00:00Z' }),
+  ]);
+  expect(groups.map((g) => g.map((r) => r.id))).toEqual([['a', 'b'], ['c']]);
+  expect(daysLine(groups[0])).toBe('Κυρ 18 Οκτ ή Κυρ 25 Οκτ');
+});
+
+test('the entry speaks for the day being asked about now', () => {
+  const [group] = journeyGroups([
+    waiting({ id: 'a', window_start: '2026-10-18T05:00:00Z' }),
+    waiting({ id: 'b', window_start: '2026-10-25T05:00:00Z', alternative_of: 'a', asking_now: true }),
+  ]);
+  expect(leadOf(group).id).toBe('b');
 });

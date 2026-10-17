@@ -286,3 +286,29 @@ test('the bus fallback is the ΚΤΕΛ of the town the trip starts from', async 
   fireEvent.press(bus);
   expect(open).toHaveBeenCalledWith('https://ktelrodopis.gr/');
 });
+
+// QA 2026-10-17 U F6: cancelling one day of a journey asked for on several
+// left the others asking. Now it asks which: every day, or only this one.
+describe('a journey on more than one day', () => {
+  const sibling = { ...asking, id: 'req-2', alternative_of: 'req-1', window_start: '2026-08-05T04:30:00Z' };
+  type Button = { text?: string; onPress?: () => void };
+
+  test('cancelling every day says so to the server', async () => {
+    (api.cancelRequest as jest.Mock).mockResolvedValue(undefined);
+    (api.myRequests as jest.Mock).mockResolvedValue({ requests: [asking, sibling] });
+    render(wrap(<RequestScreen />));
+    fireEvent.press(await screen.findByTestId('cancel-request'));
+    await waitFor(() => expect(api.cancelRequest).toHaveBeenCalledWith('req-1', true));
+    const buttons = alert.mock.calls[0][2] as Button[];
+    expect(buttons).toHaveLength(3);
+  });
+
+  test('cancelling only this day leaves the others', async () => {
+    (api.cancelRequest as jest.Mock).mockResolvedValue(undefined);
+    (api.myRequests as jest.Mock).mockResolvedValue({ requests: [asking, sibling] });
+    alert.mockImplementation((_t, _m, buttons?: Button[]) => buttons?.[1]?.onPress?.());
+    render(wrap(<RequestScreen />));
+    fireEvent.press(await screen.findByTestId('cancel-request'));
+    await waitFor(() => expect(api.cancelRequest).toHaveBeenCalledWith('req-1', false));
+  });
+});

@@ -199,6 +199,13 @@ export function WhenPicker({
                     );
                   })}
               </View>
+              {/* In words, because a chip tapped twice is off again and the
+                  difference is a shade (QA 2026-10-17 U F6). */}
+              <Text testID={testID ? `${testID}-extra-summary` : undefined} style={styles.chosen}>
+                {others.length === 0
+                  ? t('when.morePick')
+                  : t('when.moreChosen', { days: others.map(calendarDay).join(', ') })}
+              </Text>
               <Text style={styles.summary}>{t('when.moreHint')}</Text>
             </>
           ) : null}
@@ -216,4 +223,5 @@ const styles = StyleSheet.create({
   label: { ...type.label, color: colors.ink },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
   summary: { ...type.caption, color: colors.muted },
+  chosen: { ...type.label, color: colors.ink },
 });
