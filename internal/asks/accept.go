@@ -56,6 +56,9 @@ var (
 	// database refuses a second booking, and before this was checked here that
 	// refusal reached the driver as "something went wrong".
 	ErrAlreadyAboard = errors.New("asks: the passenger already has a seat on this trip")
+	// ErrBusy means the departure's plan kept moving under every attempt to
+	// accept. The ask is still open and pressing again is the answer.
+	ErrBusy = errors.New("asks: the trip kept changing; try again")
 )
 
 // Verifier re-checks that a detour still fits the driver's budget, given the
@@ -129,7 +132,7 @@ func (s *Service) Accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 			return bookingID, err
 		}
 	}
-	return uuid.Nil, ErrStaleItinerary
+	return uuid.Nil, ErrBusy
 }
 
 func (s *Service) accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.UUID, error) {

@@ -254,15 +254,16 @@ func (v staleVerifier) Verify(ctx context.Context, _ uuid.UUID, _ int) error {
 
 // The detour is verified outside the transaction, so the itinerary can move
 // underneath it. The version check must catch that rather than committing a
-// booking against a stale quote.
+// booking against a stale quote. Here it moves under every attempt, so the
+// driver is told to try again: the ask is still open.
 func TestAcceptRejectsAStaleItineraryVersion(t *testing.T) {
 	f := newFixture(t)
 	svc := asks.NewService(f.pool, f.clock, staleVerifier{pool: f.pool, occurrenceID: f.occurrenceID})
 
 	_, err := svc.Accept(context.Background(), f.askID, f.driverID)
 
-	if !errors.Is(err, asks.ErrStaleItinerary) {
-		t.Fatalf("error = %v, want ErrStaleItinerary", err)
+	if !errors.Is(err, asks.ErrBusy) {
+		t.Fatalf("error = %v, want ErrBusy", err)
 	}
 	if got := f.seatsFree(); got != 3 {
 		t.Errorf("seats_free = %d; a stale accept must not reserve a seat", got)

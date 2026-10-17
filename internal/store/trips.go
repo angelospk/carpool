@@ -61,7 +61,10 @@ func UpcomingTrips(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, no
 		FROM trip_occurrences o
 		JOIN route_templates t ON t.id = o.template_id
 		WHERE t.driver_id = $1
-		  AND o.status IN ('scheduled','started')
+		  -- Completed too: both sides may confirm once the car has left, which
+		  -- completes the occurrence while it is still on the road. Time, not
+		  -- status, says when a trip is over.
+		  AND o.status IN ('scheduled','started','completed')
 		  AND `+tripEndsAt("o")+` >= $2
 
 		UNION ALL
@@ -75,7 +78,7 @@ func UpcomingTrips(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, no
 		  -- Completed too: confirming is allowed once the car has left, and a
 		  -- ride confirmed on the way is still on the road.
 		  AND b.status IN ('confirmed','completed')
-		  AND o.status IN ('scheduled','started')
+		  AND o.status IN ('scheduled','started','completed')
 		  AND `+tripEndsAt("o")+` >= $2
 
 		ORDER BY 3`, userID, now)

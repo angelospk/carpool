@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -129,6 +130,26 @@ func TestARequestSaysWhyTheCarThatPassesWasNotAsked(t *testing.T) {
 		}
 		if need.Float64 < 7 || need.Float64 > 9 || limit.Float64 != 2 {
 			t.Errorf("need %v km, limit %v km; want about 7.8 and 2", need, limit)
+		}
+	})
+	// Codex review, wave 1: a drive the passenger could make is a car that
+	// passes too, and a full one says so. One the passenger cannot reach in
+	// time says nothing.
+	t.Run("full drive", func(t *testing.T) {
+		f := open(t)
+		departs := f.clock.Now().Add(10 * time.Minute)
+		mustExec(t, f, `UPDATE trip_occurrences
+			SET scheduled_earliest = depart_earliest, scheduled_latest = depart_latest,
+			    depart_earliest = $1, depart_latest = $1, drive_set_at = $2, seats_free = 0,
+			    offers_until = $1::timestamptz + route_min * interval '1 minute'`, departs, f.clock.Now())
+		mustExec(t, f, `UPDATE ride_requests SET window_start = $1, window_end = $2`,
+			f.clock.Now().Add(-time.Hour), departs.Add(time.Hour))
+		if r, _, _ := missed(t, f); r.String != "full" {
+			t.Fatalf("missed_reason = %v, want full", r)
+		}
+		mustExec(t, f, `UPDATE ride_requests SET window_start = $1, window_end = $2`, departs.Add(-time.Hour), departs.Add(-time.Minute))
+		if r, _, _ := missed(t, f); r.Valid {
+			t.Fatalf("missed_reason = %v for a drive gone before the passenger is ready, want none", r)
 		}
 	})
 	t.Run("nobody near", func(t *testing.T) {

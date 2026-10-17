@@ -22,8 +22,8 @@ type Miss struct {
 
 // missSQL looks at the departures the gross filter would consider if it did
 // not ask about room or about the driver's radius, and says which of those
-// two turned each one away. Same window, people, direction and overlap floor
-// as grossSQL, drives left out; the parameters are grossArgs.
+// two turned each one away. Same window, people, direction, overlap floor
+// and DriveReady as grossSQL; the parameters are grossArgs.
 var missSQL = `
 WITH near AS (
 	SELECT ST_DWithin(o.route_geom::geography, $1::geography, d.notify_radius_km * 1000)
@@ -41,14 +41,16 @@ WITH near AS (
 	JOIN route_templates  t ON t.id = o.template_id
 	JOIN driver_profiles  d ON d.user_id = t.driver_id
 	JOIN users du ON du.id = t.driver_id AND du.status = 'active'
+	` + DriveCar("o", "$13") + `
 	WHERE o.status = 'scheduled'
 	  AND t.active
-	  -- Not a drive: whether one could have taken the passenger turns on when
-	  -- the car reaches them (DriveReady), which is not a reason the passenger
-	  -- can act on, and a wrong one is worse than none.
-	  AND o.drive_set_at IS NULL
-	  AND o.depart_earliest <= $4 AND o.depart_latest >= $3
+	  AND (o.drive_set_at IS NOT NULL OR (o.depart_earliest <= $4 AND o.depart_latest >= $3))
 	  AND ` + DriveOpen("o", "$13") + `
+	  -- A drive the passenger cannot be at the road for, or has stopped
+	  -- waiting by, is not a car that passes them.
+	  AND (o.drive_set_at IS NULL OR ` + DriveReady(driveFromAt, "o.route_min",
+	"(ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, $1)) - "+driveFromF+")",
+	"ST_Distance(o.route_geom::geography, $1::geography)", "GREATEST($3, $13)", "$4", DriveLateBy("o.")) + `)
 	  -- Not a car the passenger is on, or one overlapping a trip they hold:
 	  -- the matcher would not have offered it with room to spare.
 	  AND ($7::uuid IS NULL OR NOT EXISTS (

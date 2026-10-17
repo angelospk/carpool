@@ -32,6 +32,8 @@ func askErrorStatus(err error) (int, string, string) {
 		return http.StatusConflict, "already_aboard", "this passenger already has a seat on this trip"
 	case errors.Is(err, asks.ErrStaleItinerary):
 		return http.StatusConflict, "itinerary_changed", "the trip changed and this passenger no longer fits it"
+	case errors.Is(err, asks.ErrBusy):
+		return http.StatusConflict, "try_again", "the trip is changing; try again"
 	case errors.Is(err, match.ErrPartyCapReached):
 		return http.StatusConflict, "party_cap", "the trip already carries the most groups it can"
 	default:

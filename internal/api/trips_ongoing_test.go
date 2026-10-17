@@ -49,9 +49,17 @@ func TestATripOnTheRoadIsStillUpcoming(t *testing.T) {
 		t.Errorf("a trip still on the road is listed as past")
 	}
 	// Confirmed by both on the way: still on the road, still the next trip.
-	h.mustExec(`UPDATE bookings SET status = 'completed'`)
-	if !h.listed(t, "/v1/trips/upcoming", passenger, id) {
-		t.Errorf("a trip confirmed on the road is missing from upcoming")
+	// Through the real endpoint: both sides confirming also completes the
+	// occurrence itself.
+	for _, token := range []string{driver, passenger} {
+		if rec := h.do(http.MethodPost, "/v1/trips/"+id+"/confirm", nil, token); rec.Code != http.StatusOK && rec.Code != http.StatusNoContent {
+			t.Fatalf("confirm: status %d; body %s", rec.Code, rec.Body.String())
+		}
+	}
+	for name, token := range map[string]string{"driver": driver, "passenger": passenger} {
+		if !h.listed(t, "/v1/trips/upcoming", token, id) {
+			t.Errorf("%s: a trip confirmed on the road is missing from upcoming", name)
+		}
 	}
 
 	// Arrived: it is past.

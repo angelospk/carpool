@@ -32,6 +32,7 @@ func TestEveryAskFailureReachesTheDriverAsItself(t *testing.T) {
 		asks.ErrStaleItinerary,
 		asks.ErrTripDeparted,
 		match.ErrPartyCapReached,
+		asks.ErrBusy,
 	} {
 		t.Run(err.Error(), func(t *testing.T) {
 			status, code, message := askErrorStatus(err)

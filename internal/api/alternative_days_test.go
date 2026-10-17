@@ -234,3 +234,56 @@ func TestTheDaysOfOneJourneyCancelTogetherOrAlone(t *testing.T) {
 		t.Fatalf("every day: %s %s", status(first), status(third))
 	}
 }
+
+// Codex review, wave 1: cancelling every day waits for whoever holds the
+// passenger, as adding a day and accepting do. A day added under that lock is
+// then seen and cancelled with the rest, rather than left asking for a
+// journey the passenger has called off.
+func TestCancellingEveryDayWaitsForADayBeingAdded(t *testing.T) {
+	h := newHarness(t)
+	token, _ := h.signUp("+306900000851", "Επιβάτης")
+	var passenger string
+	h.mustQuery(`SELECT id::text FROM users WHERE phone = '+306900000851'`, &passenger)
+	d := days{h, token}
+	_, first, _ := d.post(0, "")
+
+	ctx := context.Background()
+	adding, err := h.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = adding.Rollback(ctx) }()
+	if _, err := adding.Exec(ctx, match.PassengerLockSQL, passenger); err != nil {
+		t.Fatal(err)
+	}
+	var added string
+	if err := adding.QueryRow(ctx, `
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end,
+		                           seats, kind, status, alternative_of)
+		SELECT passenger_id, origin, destination, window_start + interval '1 day', window_end + interval '1 day',
+		       seats, kind, 'open', id
+		  FROM ride_requests WHERE id = $1 RETURNING id::text`, first).Scan(&added); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan int, 1)
+	go func() {
+		done <- h.do(http.MethodDelete, "/v1/requests/"+first+"?days=all", nil, token).Code
+	}()
+	select {
+	case code := <-done:
+		t.Fatalf("cancelled (%d) while a day was still being added", code)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := adding.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if code := <-done; code != http.StatusNoContent {
+		t.Fatalf("cancel: %d", code)
+	}
+	var status string
+	h.mustQuery(`SELECT status FROM ride_requests WHERE id = $1`, &status, added)
+	if status != "cancelled" {
+		t.Errorf("the day added during the cancel is %s, want cancelled", status)
+	}
+}
