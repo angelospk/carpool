@@ -40,6 +40,9 @@ type Trip struct {
 	Seats *int
 	// Repeats is whether the route runs again: its schedule is recurring.
 	Repeats bool
+	// TemplateID is the route the departure belongs to; two routes can share
+	// their place labels.
+	TemplateID uuid.UUID
 }
 
 // tripEndsAt is when the departure o is over, for listing it as next or as
@@ -62,7 +65,7 @@ func tripEndsAt(o string) string {
 func UpcomingTrips(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, now time.Time) ([]Trip, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT o.id, 'driver', o.depart_earliest, o.depart_latest, o.status, o.route_km,
-		       t.origin_label, t.destination_label, 0::numeric, o.seats_free, NULL::int
+		       t.origin_label, t.destination_label, 0::numeric, o.seats_free, NULL::int, o.template_id
 		FROM trip_occurrences o
 		JOIN route_templates t ON t.id = o.template_id
 		WHERE t.driver_id = $1
@@ -75,7 +78,7 @@ func UpcomingTrips(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, no
 		UNION ALL
 
 		SELECT o.id, 'passenger', o.depart_earliest, o.depart_latest, o.status, o.route_km,
-		       t.origin_label, t.destination_label, b.price_eur, o.seats_free, b.seats
+		       t.origin_label, t.destination_label, b.price_eur, o.seats_free, b.seats, o.template_id
 		FROM bookings b
 		JOIN trip_occurrences o ON o.id = b.occurrence_id
 		JOIN route_templates t  ON t.id = o.template_id
@@ -96,7 +99,7 @@ func UpcomingTrips(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, no
 	for rows.Next() {
 		var t Trip
 		if err := rows.Scan(&t.OccurrenceID, &t.Role, &t.DepartEarliest, &t.DepartLatest,
-			&t.Status, &t.RouteKm, &t.OriginLabel, &t.DestLabel, &t.PriceEUR, &t.SeatsFree, &t.Seats); err != nil {
+			&t.Status, &t.RouteKm, &t.OriginLabel, &t.DestLabel, &t.PriceEUR, &t.SeatsFree, &t.Seats, &t.TemplateID); err != nil {
 			return nil, fmt.Errorf("store: scanning trip: %w", err)
 		}
 		out = append(out, t)

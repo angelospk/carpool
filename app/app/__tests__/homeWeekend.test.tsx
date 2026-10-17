@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
@@ -133,4 +133,81 @@ test('a driver’s offer is on the home screen', async () => {
 
   expect(await screen.findByTestId('seat-offer-ask-1')).toBeTruthy();
   await waitFor(() => expect(api.offers).toHaveBeenCalled());
+});
+
+// Offers are amber and several can stack: outside the list they pushed the
+// trips off the screen with nothing to scroll.
+test('the offers scroll with the rest of the home screen', async () => {
+  const offer = (id: string) => ({
+    id,
+    request_id: `r-${id}`,
+    occurrence_id: 'occ-1',
+    driver_name: 'Γιώργος',
+    driver_photo_url: null,
+    driver_rating: null,
+    driver_rating_count: 0,
+    car: { make: 'Toyota', model: 'Yaris', colour: '' },
+    depart_earliest: '2099-10-16T12:00:00Z',
+    price_eur: 8,
+    seats: 1,
+    detour_min: 0,
+    detour_km: 0,
+    origin_label: 'Αλεξανδρούπολη',
+    destination_label: 'Θεσσαλονίκη',
+    expires_at: '2099-10-16T09:00:00Z',
+  });
+  (api.offers as jest.Mock).mockResolvedValue({ offers: [offer('ask-1'), offer('ask-2')] });
+  (api.upcomingTrips as jest.Mock).mockResolvedValue({
+    trips: [
+      {
+        id: 't1',
+        role: 'passenger',
+        depart_earliest: '2099-07-29T04:30:00Z',
+        depart_latest: '2099-07-29T05:00:00Z',
+        status: 'confirmed',
+        route_km: 50,
+        origin_label: 'Α',
+        destination_label: 'Β',
+        price_eur: 1,
+        seats_free: 1,
+      },
+    ],
+  });
+  render(wrap(<HomeScreen />));
+
+  const list = await screen.findByTestId('trip-list');
+  expect(await within(list).findByTestId('seat-offers')).toBeTruthy();
+  expect(within(list).getByTestId('seat-offer-ask-2')).toBeTruthy();
+});
+
+// An offer is something to answer, so it must not vanish into the first-run
+// screen when it is all the passenger has.
+test('an offer alone is still inside the list, not under «δεν έχεις»', async () => {
+  (api.offers as jest.Mock).mockResolvedValue({
+    offers: [
+      {
+        id: 'ask-1',
+        request_id: 'r1',
+        occurrence_id: 'occ-1',
+        driver_name: 'Γιώργος',
+        driver_photo_url: null,
+        driver_rating: null,
+        driver_rating_count: 0,
+        car: { make: 'Toyota', model: 'Yaris', colour: '' },
+        depart_earliest: '2099-10-16T12:00:00Z',
+        price_eur: 8,
+        seats: 1,
+        detour_min: 0,
+        detour_km: 0,
+        origin_label: 'Α',
+        destination_label: 'Β',
+        expires_at: '2099-10-16T09:00:00Z',
+      },
+    ],
+  });
+  render(wrap(<HomeScreen />));
+
+  const list = await screen.findByTestId('trip-list');
+  expect(await within(list).findByTestId('seat-offer-ask-1')).toBeTruthy();
+  expect(screen.queryByTestId('empty-weekend')).toBeNull();
 });

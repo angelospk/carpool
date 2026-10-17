@@ -5,7 +5,7 @@
 // this screen asks for what a request asks for — the two ends, the day and
 // hours, seats and bags — plus whether to come back and whether to repeat.
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
@@ -66,13 +66,15 @@ export default function NewWeekendPlanScreen() {
     returnAt !== null &&
     `${isoOf(returnDow)}${returnAt}` <= `${isoOf(departDow)}${departAt}`;
 
-  // One key per visit to this screen, so a save sent again after a timeout is
-  // the plan the first one made, not a second.
-  const [clientKey] = useState(() => newAttemptId());
+  // The key belongs to what is sent: a save sent again unchanged after a
+  // timeout is the plan the first one made, not a second. If the passenger
+  // edits the form after a failure, the first save may still have gone
+  // through, and the old key would hand back that plan and call it this one.
+  const attempt = useRef<{ key: string; payload: string } | null>(null);
 
   const save = useMutation({
-    mutationFn: () =>
-      api.createWeekendPlan({
+    mutationFn: () => {
+      const plan = {
         origin_lon: (from as Pin).lon,
         origin_lat: (from as Pin).lat,
         destination_lon: (to as Pin).lon,
@@ -86,8 +88,11 @@ export default function NewWeekendPlanScreen() {
         luggage,
         luggage_count: luggageCount,
         every_week: everyWeek,
-        client_key: clientKey,
-      }),
+      };
+      const payload = JSON.stringify(plan);
+      if (attempt.current?.payload !== payload) attempt.current = { key: newAttemptId(), payload };
+      return api.createWeekendPlan({ ...plan, client_key: attempt.current.key });
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['weekend-plans'] });
       router.replace('/(tabs)');

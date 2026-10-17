@@ -114,6 +114,26 @@ func TestUpcomingTripsShowsTheTripToBothSides(t *testing.T) {
 	}
 }
 
+func TestUpcomingTripsNamesTheTemplateOfEachTrip(t *testing.T) {
+	h := newHarness(t)
+	driver, passenger, occurrenceID := h.bookedTrip(t)
+	var template string
+	h.mustQuery(`SELECT template_id::text FROM trip_occurrences WHERE id = $1`, &template, occurrenceID)
+
+	for name, token := range map[string]string{"driver": driver, "passenger": passenger} {
+		rec := h.do(http.MethodGet, "/v1/trips/upcoming", nil, token)
+		var body struct {
+			Trips []struct {
+				TemplateID string `json:"template_id"`
+			} `json:"trips"`
+		}
+		h.decode(rec, &body)
+		if len(body.Trips) != 1 || body.Trips[0].TemplateID != template {
+			t.Errorf("%s: trips = %+v, want template_id %s", name, body.Trips, template)
+		}
+	}
+}
+
 func TestTripDetailIsHiddenFromStrangers(t *testing.T) {
 	h := newHarness(t)
 	_, _, occurrenceID := h.bookedTrip(t)

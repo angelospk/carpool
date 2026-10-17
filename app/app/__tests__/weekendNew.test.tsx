@@ -162,3 +162,24 @@ test('a save sent again carries the same key, so the server makes one plan', asy
   expect(calls[0][0].client_key).toBeTruthy();
   expect(calls[0][0].client_key).toBe(calls[1][0].client_key);
 });
+
+test('a save sent again after an edit is a different plan, so it carries a new key', async () => {
+  (api.createWeekendPlan as jest.Mock).mockRejectedValueOnce(new ApiError(503, 'unavailable', 'x'));
+  render(wrap(<NewWeekendPlan />));
+  await pickEnds();
+
+  fireEvent.press(screen.getByTestId('weekend-submit'));
+  await waitFor(() => expect(api.createWeekendPlan).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.getByTestId('weekend-submit')).toBeEnabled());
+
+  // The first save may have gone through with its response lost: the edited
+  // plan must not be answered with that one.
+  fireEvent.press(screen.getByTestId('weekend-out-day-6'));
+  fireEvent.press(screen.getByTestId('weekend-submit'));
+  await waitFor(() => expect(api.createWeekendPlan).toHaveBeenCalledTimes(2));
+
+  const calls = (api.createWeekendPlan as jest.Mock).mock.calls;
+  expect(calls[1][0].depart_dow).toBe(6);
+  expect(calls[1][0].client_key).toBeTruthy();
+  expect(calls[1][0].client_key).not.toBe(calls[0][0].client_key);
+});

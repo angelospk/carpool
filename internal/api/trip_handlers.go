@@ -74,6 +74,7 @@ func (d Deps) handleUpcomingTrips(w http.ResponseWriter, r *http.Request) {
 			"price_eur":         t.PriceEUR,
 			"seats_free":        t.SeatsFree,
 			"seats":             t.Seats,
+			"template_id":       t.TemplateID,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"trips": out})

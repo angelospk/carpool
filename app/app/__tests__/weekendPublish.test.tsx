@@ -70,6 +70,7 @@ beforeEach(() => {
         destination_label: 'Θεσσαλονίκη',
         price_eur: 8,
         seats_free: 3,
+        template_id: 'r1',
       },
     ],
   });

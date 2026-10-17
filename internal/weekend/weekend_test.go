@@ -646,6 +646,16 @@ func TestThursdayQuestionIsNotAskedWhenItHasNoPoint(t *testing.T) {
 			t.Errorf("AskThursday = %d, %v", n, err)
 		}
 	})
+	t.Run("they said yes already", func(t *testing.T) {
+		w := newWorld(t)
+		plan := w.create(t, fridayToSunday())
+		_, _ = w.svc.Generate(ctx, w.clock.Now())
+		_, err := w.svc.ThisWeek(ctx, w.passenger, plan, true)
+		must(t, err)
+		if n, err := w.svc.AskThursday(ctx, thursday); err != nil || n != 0 || len(w.pushes(t)) != 0 {
+			t.Errorf("AskThursday = %d, %v, %d pushes", n, err, len(w.pushes(t)))
+		}
+	})
 	t.Run("a driver already has them", func(t *testing.T) {
 		w := newWorld(t)
 		plan := w.create(t, fridayToSunday())

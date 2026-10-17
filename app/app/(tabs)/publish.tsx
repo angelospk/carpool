@@ -675,8 +675,8 @@ export default function PublishScreen() {
             {done.detail ? <Text style={styles.hint}>{done.detail}</Text> : null}
             {/* People waiting for a weekend on this road, now that there is a
                 car for them: the driver says yes first. */}
-            {published !== null ? (
-              <WeekendDepartures from={published.origin_label} to={published.destination_label} />
+            {published?.id ? (
+              <WeekendDepartures templateId={published.id} />
             ) : null}
             {published !== null ? (
               <ShareRouteButton

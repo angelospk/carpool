@@ -709,6 +709,7 @@ func (s *Service) AskThursday(ctx context.Context, now time.Time) (int, error) {
 const askable = `p.active AND u.status = 'active'
 		   AND p.created_at <= $2
 		   AND p.last_asked_for IS DISTINCT FROM $1::date
+		   AND p.answered_for IS DISTINCT FROM $1::date
 		   AND NOT EXISTS (SELECT 1 FROM ride_requests r
 		                    WHERE r.weekend_plan_id = p.id AND r.weekend_of = $1 AND r.status = 'matched')
 		   AND EXISTS (SELECT 1 FROM ride_requests r

@@ -143,9 +143,10 @@ const styles = StyleSheet.create({
 /**
  * The weekend departures of a route just published, each with its own waiting
  * list. The publish answer names no departures except a trip leaving now, so
- * they are found among the driver's upcoming trips by the route's two ends.
+ * they are found among the driver's upcoming trips by the route's template:
+ * place labels are not enough, another route can share both ends.
  */
-export function WeekendDepartures({ from, to }: { from: string; to: string }) {
+export function WeekendDepartures({ templateId }: { templateId: string }) {
   const signedIn = useSession((s) => s.status === 'signedIn');
   // Always asked again on mount: the route that was just published is not in
   // a list fetched a minute ago.
@@ -161,8 +162,7 @@ export function WeekendDepartures({ from, to }: { from: string; to: string }) {
     .filter(
       (x) =>
         x.role === 'driver' &&
-        x.origin_label === from &&
-        x.destination_label === to &&
+        x.template_id === templateId &&
         Date.parse(x.depart_earliest) > now &&
         isWeekendDay(new Date(x.depart_earliest)),
     )

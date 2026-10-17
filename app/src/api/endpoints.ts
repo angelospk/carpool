@@ -195,6 +195,8 @@ export type TripSummary = {
   destination_label: string;
   price_eur: number;
   seats_free: number;
+  /** The route the departure belongs to; two routes can share their place labels. Absent from older servers. */
+  template_id?: string;
   /** Seats the caller's own booking holds; price_eur is per seat. Absent for the driver. */
   seats?: number | null;
 };

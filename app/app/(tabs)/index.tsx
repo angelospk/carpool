@@ -66,6 +66,9 @@ export default function HomeScreen() {
   // The same for a weekend plan: until the hourly job makes its requests, the
   // plan is all there is, and it must not be hidden behind «δεν έχεις».
   const plans = useWeekendPlans();
+  // An offer is a question to answer, so it too keeps the screen from reading
+  // as empty. The same key as the card, so the one query serves both.
+  const offers = useQuery({ queryKey: ['offers'], queryFn: () => api.offers(), enabled: signedIn });
 
   const all = trips.data?.trips ?? [];
   const [next, ...upcoming] = all;
@@ -80,6 +83,7 @@ export default function HomeScreen() {
     !(past.data?.trips.length ?? 0) &&
     !(requests.data?.requests.length ?? 0) &&
     !(plans.data?.plans.length ?? 0) &&
+    !(offers.data?.offers.length ?? 0) &&
     !plans.isLoading &&
     // Neither still asking nor having failed to ask. A query that broke
     // knows nothing about whether there is anything there, and "δεν έχεις
@@ -107,6 +111,10 @@ export default function HomeScreen() {
       showsVerticalScrollIndicator={false}
       ListHeaderComponent={
         <View style={styles.listHeader}>
+          {/* A seat a driver offered is a question too, and it lapses. Inside
+              the list, so several of them scroll away instead of pushing the
+              trips off the screen. */}
+          <SeatOffers />
           {next ? <NextTrip trip={next} onPress={() => router.push(`/trip/${next.id}`)} /> : null}
           {wide ? null : (
             <>
@@ -156,8 +164,6 @@ export default function HomeScreen() {
       {/* A question waiting on this driver comes before anything else here:
           it lapses, and everything below it will still be there later. */}
       <PendingAsks />
-      {/* A seat a driver offered is a question too, and it lapses. */}
-      <SeatOffers />
       <DrivingPrompt trips={all} />
 
       <AsyncState
