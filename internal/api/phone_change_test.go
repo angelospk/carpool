@@ -1,11 +1,17 @@
 package api_test
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+
+	"carpool/internal/api"
+	"carpool/internal/auth"
 )
 
 type challenge struct {
@@ -276,5 +282,35 @@ func TestChangingANumberNeedsASession(t *testing.T) {
 	if rec := h.do(http.MethodPost, "/v1/me/phone/confirm",
 		map[string]any{"challenge_id": uuid.NewString(), "code": "123456"}, ""); rec.Code != http.StatusUnauthorized {
 		t.Errorf("confirm: status %d, want 401", rec.Code)
+	}
+}
+
+// slowFailingSMS takes its time and then fails, as a provider having a bad day.
+type slowFailingSMS struct{}
+
+func (slowFailingSMS) Send(ctx context.Context, _, _ string) error {
+	select {
+	case <-time.After(2 * time.Second):
+	case <-ctx.Done():
+	}
+	return errors.New("provider down")
+}
+
+// Codex review, wave 1: a free number waited for the SMS provider and a taken
+// one did not, so the response time (and a provider failure) still said
+// which was which. The code goes out after the answer.
+func TestTheAnswerDoesNotWaitForTheSMS(t *testing.T) {
+	h := newHarnessDeps(t, true, nil, func(d *api.Deps) {
+		d.PhoneChange = auth.NewPhoneChangeService(d.Pool, d.Clock, slowFailingSMS{}, d.Sessions, []byte(testSecret)).WithAsyncSMS()
+	})
+	token, _ := h.signUp("+306900000991", "Γιώργος")
+
+	start := time.Now()
+	rec, _ := requestChange(h, token, "+306900000992")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200 whatever the provider does", rec.Code)
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("the answer took %v: it waited for the SMS", took)
 	}
 }

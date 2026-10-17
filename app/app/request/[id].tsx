@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Linking, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -15,7 +15,7 @@ import {
   Spacer,
 } from '../../src/components/ui';
 import { colors, space, type } from '../../src/design/tokens';
-import { athensTime } from '../../src/design/format';
+import { athensDay, athensTime } from '../../src/design/format';
 import { JourneySummary } from '../../src/components/JourneySummary';
 import { shareText } from '../../src/components/shareText';
 import { shareRequestMessage } from '../../src/design/shareRequest';
@@ -60,9 +60,10 @@ export default function RequestScreen() {
 
   // The other live days of the same journey (QA 2026-10-17 U F6).
   const root = mine ? (mine.alternative_of ?? mine.id) : null;
-  const days = (requests.data?.requests ?? []).filter(
+  const siblings = (requests.data?.requests ?? []).filter(
     (q) => root !== null && (q.alternative_of ?? q.id) === root,
-  ).length;
+  );
+  const days = siblings.length;
 
   const cancel = useMutation({
     mutationFn: (allDays?: boolean) =>
@@ -127,6 +128,27 @@ export default function RequestScreen() {
                 {requestProgress(mine, t)}
               </Text>
             </View>
+            {/* The home card leads to one day of the journey. Each other day
+                opens its own request, so it can be cancelled on its own. */}
+            {days > 1 ? (
+              <View style={styles.days}>
+                <Hint>{t('request.otherDays')}</Hint>
+                {siblings
+                  .filter((q) => q.id !== mine.id)
+                  .map((q) => (
+                    <Pressable
+                      key={q.id}
+                      testID={`request-day-${q.id}`}
+                      accessibilityRole="link"
+                      onPress={() => router.push(`/request/${q.id}`)}
+                    >
+                      <Text style={styles.day}>
+                        {athensDay(q.window_start)} · {athensTime(q.window_start)}–{athensTime(q.window_end)}
+                      </Text>
+                    </Pressable>
+                  ))}
+              </View>
+            ) : null}
           </>
         ) : (
           // Matched, cancelled or expired: it left the open list on purpose,
@@ -279,4 +301,6 @@ const styles = StyleSheet.create({
   progress: { ...type.label, fontSize: 13, color: colors.ink, flex: 1 },
   outcome: { ...type.body, color: colors.danger },
   actions: { gap: space.sm },
+  days: { marginTop: space.md, gap: space.xs },
+  day: { ...type.body, color: colors.ink, textDecorationLine: 'underline' },
 });

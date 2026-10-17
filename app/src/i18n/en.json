@@ -358,6 +358,7 @@
     "backHome": "Back to home",
     "cancel": "Cancel request",
     "cancelConfirm": "We stop looking for a driver for this journey.",
+    "otherDays": "The other days of the same journey:",
     "cancelWhich": "You asked for this trip on {{count}} days. Which do we cancel?",
     "cancelAllDays": "Every day",
     "cancelThisDay": "Only this one",

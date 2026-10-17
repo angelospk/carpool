@@ -75,6 +75,10 @@ type Service struct {
 	clock    clock.Clock
 	verifier Verifier
 	router   match.Router
+	// afterRequote, when set, runs inside Accept's transaction once the other
+	// offers are re-quoted. Tests only: it holds two accepts at the point where
+	// they would deadlock.
+	afterRequote func()
 	// tolls is the shipped toll network. Nil when the dataset failed to load,
 	// which costs the toll component of the suggested contribution and nothing
 	// else — the app must still match rides.
@@ -188,9 +192,12 @@ func (s *Service) accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Before any row lock, as in createAsk: one passenger's seats and offers
-	// are given out one at a time.
-	if _, err := tx.Exec(ctx, match.PassengerLockSQL, prePassenger); err != nil {
-		return uuid.Nil, fmt.Errorf("asks: locking the passenger's offers: %w", err)
+	// are given out one at a time. With the passengers of the offers about to
+	// be re-quoted, in one sorted order.
+	for _, p := range plan.lockOrder(prePassenger) {
+		if _, err := tx.Exec(ctx, match.PassengerLockSQL, p); err != nil {
+			return uuid.Nil, fmt.Errorf("asks: locking the passenger's offers: %w", err)
+		}
 	}
 
 	// Read the ask's foreign keys without locking so the locks below can be
@@ -418,6 +425,9 @@ func (s *Service) accept(ctx context.Context, askID, driverID uuid.UUID) (uuid.U
 	if err := s.requoteOthers(ctx, tx, occurrenceID, askID, plan,
 		version+1, seatsFree-seats, luggageFree-luggage, now); err != nil {
 		return uuid.Nil, err
+	}
+	if s.afterRequote != nil {
+		s.afterRequote()
 	}
 
 	if _, err := tx.Exec(ctx,

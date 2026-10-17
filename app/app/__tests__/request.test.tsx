@@ -10,10 +10,11 @@ import { usePushReach } from '../../src/push/reach';
 import { Alert, Linking } from 'react-native';
 
 const mockReplace = jest.fn();
+const mockPush = jest.fn();
 
 jest.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ id: 'req-1' }),
-  useRouter: () => ({ replace: mockReplace, push: jest.fn() }),
+  useRouter: () => ({ replace: mockReplace, push: mockPush }),
 }));
 
 jest.mock('../../src/api/endpoints', () => ({
@@ -310,5 +311,15 @@ describe('a journey on more than one day', () => {
     render(wrap(<RequestScreen />));
     fireEvent.press(await screen.findByTestId('cancel-request'));
     await waitFor(() => expect(api.cancelRequest).toHaveBeenCalledWith('req-1', false));
+  });
+
+  // Codex review: the home card leads to one day only, so each other day must
+  // be reachable from here to be cancelled on its own.
+  test('the other days open their own request', async () => {
+    (api.myRequests as jest.Mock).mockResolvedValue({ requests: [asking, sibling] });
+    render(wrap(<RequestScreen />));
+    fireEvent.press(await screen.findByTestId('request-day-req-2'));
+    expect(mockPush).toHaveBeenCalledWith('/request/req-2');
+    expect(screen.queryByTestId('request-day-req-1')).toBeNull();
   });
 });

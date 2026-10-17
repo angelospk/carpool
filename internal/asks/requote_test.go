@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -277,5 +278,104 @@ func TestTwoAcceptsAtOnceOnOneTripBothLand(t *testing.T) {
 	}
 	if got := f.seatsFree(); got != 1 {
 		t.Errorf("seats_free = %d, want 1", got)
+	}
+}
+
+// Codex review, wave 1: two passengers, each asking for the same two days,
+// each with an offer on each day. Accepting X on day one and Y on day two at
+// once makes each accept re-quote the other's offer and withdraw its own
+// passenger's other day: without the passengers' locks taken in one order,
+// the two deadlock.
+func TestCrossDayAcceptsDoNotDeadlock(t *testing.T) {
+	for i := 0; i < 3; i++ {
+		f := newFixture(t)
+		ctx := context.Background()
+		mustExec(t, f, `UPDATE trip_occurrences SET seats_total = 4, seats_free = 4`)
+		var day2 uuid.UUID
+		must(t, f.pool.QueryRow(ctx, `
+			INSERT INTO trip_occurrences (template_id, vehicle_id, service_date, depart_earliest, depart_latest,
+				seats_total, seats_free, template_revision, route_geom, route_km, route_min, pricing_mode)
+			SELECT template_id, vehicle_id, '2026-07-31', '2026-07-31T04:30:00Z', '2026-07-31T05:00:00Z',
+				4, 4, 1, route_geom, 17, 20, 'formula' FROM trip_occurrences WHERE id = $1
+			RETURNING id`, f.occurrenceID).Scan(&day2), "day two")
+
+		x, xReq1, xAsk1 := f.placedAsk(fmt20("+3069000002", i, 0), 1, onRoadFrom, onRoadTo)
+		y, yReq1, _ := f.placedAsk(fmt20("+3069000002", i, 1), 1, onRoadFrom, onRoadTo)
+		xAsk2 := f.otherDay(x, xReq1, day2)
+		yAsk2 := f.otherDay(y, yReq1, day2)
+		_ = xAsk2
+
+		// Each accept waits here, briefly, for the other to have re-quoted
+		// too: that is when both hold the other's request.
+		var arrived sync.WaitGroup
+		arrived.Add(2)
+		svc := f.service().WithAfterRequote(func() {
+			arrived.Done()
+			done := make(chan struct{})
+			go func() { arrived.Wait(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(500 * time.Millisecond):
+			}
+		})
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		start := make(chan struct{})
+		for k, ask := range []uuid.UUID{xAsk1, yAsk2} {
+			wg.Add(1)
+			go func(k int, ask uuid.UUID) {
+				defer wg.Done()
+				<-start
+				_, errs[k] = svc.Accept(ctx, ask, f.driverID)
+			}(k, ask)
+		}
+		close(start)
+		wg.Wait()
+		for k, err := range errs {
+			if err != nil {
+				t.Fatalf("run %d accept %d: %v", i, k, err)
+			}
+		}
+	}
+}
+
+func fmt20(prefix string, i, k int) string {
+	return prefix + string(rune('0'+i)) + string(rune('0'+k))
+}
+
+// otherDay adds another day of the passenger's request rootReq, with a
+// pending offer on occurrence.
+func (f *fixture) otherDay(passenger, rootReq, occurrence uuid.UUID) uuid.UUID {
+	f.t.Helper()
+	ctx := context.Background()
+	var req, ask uuid.UUID
+	must(f.t, f.pool.QueryRow(ctx, `
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end, seats, kind, status, alternative_of)
+		SELECT passenger_id, origin, destination, window_start + interval '1 day', window_end + interval '1 day',
+		       seats, kind, 'asking', id FROM ride_requests WHERE id = $1
+		RETURNING id`, rootReq).Scan(&req), "other day")
+	must(f.t, f.pool.QueryRow(ctx, `
+		INSERT INTO asks (request_id, occurrence_id, detour_min, detour_km, pickup_point, dropoff_point,
+			suggested_price_eur, itinerary_version, status, expires_at)
+		SELECT $1, $2, 5, 2, origin, destination, 2.50, 0, 'pending', $3 FROM ride_requests WHERE id = $1
+		RETURNING id`, req, occurrence, f.clock.Now().Add(asks.DefaultTTL)).Scan(&ask), "other day's ask")
+	_ = passenger
+	return ask
+}
+
+// Codex review, wave 1: an offer that has lapsed but not been swept yet holds
+// no seat, so it must not crowd a live offer out at re-quote.
+func TestALapsedOfferDoesNotCrowdOutALiveOne(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	_, _, lapsed := f.placedAsk("+306900000051", 2, onRoadFrom, onRoadTo)
+	_, _, live := f.placedAsk("+306900000052", 1, onRoadFrom, onRoadTo)
+	mustExec(t, f, `UPDATE asks SET expires_at = $2 WHERE id = $1`, lapsed, f.clock.Now().Add(-time.Minute))
+
+	if _, err := f.matcher().Accept(ctx, f.askID, f.driverID); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if got := f.askStatus(live); got != "pending" {
+		t.Errorf("live offer = %q, want pending: the lapsed one took its seats", got)
 	}
 }

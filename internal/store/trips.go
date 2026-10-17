@@ -72,7 +72,9 @@ func UpcomingTrips(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, no
 		JOIN trip_occurrences o ON o.id = b.occurrence_id
 		JOIN route_templates t  ON t.id = o.template_id
 		WHERE b.passenger_id = $1
-		  AND b.status = 'confirmed'
+		  -- Completed too: confirming is allowed once the car has left, and a
+		  -- ride confirmed on the way is still on the road.
+		  AND b.status IN ('confirmed','completed')
 		  AND o.status IN ('scheduled','started')
 		  AND `+tripEndsAt("o")+` >= $2
 

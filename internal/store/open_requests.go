@@ -82,7 +82,7 @@ type OpenRequest struct {
 	// latest booking was cancelled from the driver's side, and it is back in
 	// the queue. The passenger needs to hear that the search restarted on its
 	// own, not find a request looking exactly like one never answered.
-	Stranded  bool
+	Stranded bool
 	// AlternativeOf is the first day of the journey this request is another
 	// day of; nil for the first day itself. The app shows a journey once.
 	AlternativeOf *uuid.UUID

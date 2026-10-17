@@ -48,6 +48,11 @@ func TestATripOnTheRoadIsStillUpcoming(t *testing.T) {
 	if h.listed(t, "/v1/trips/past", passenger, id) {
 		t.Errorf("a trip still on the road is listed as past")
 	}
+	// Confirmed by both on the way: still on the road, still the next trip.
+	h.mustExec(`UPDATE bookings SET status = 'completed'`)
+	if !h.listed(t, "/v1/trips/upcoming", passenger, id) {
+		t.Errorf("a trip confirmed on the road is missing from upcoming")
+	}
 
 	// Arrived: it is past.
 	h.mustExec(`UPDATE trip_occurrences SET depart_earliest = $1, depart_latest = $1`, now.Add(-30*time.Minute))

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,10 +56,32 @@ type requotePlan struct {
 	// overCap is set when the accepted passenger fills the last party slot, so
 	// no other offer can be taken whatever it costs.
 	overCap bool
+	// passengers are the people behind the other offers. Accept takes their
+	// passenger locks, with its own, in one sorted order before any row lock:
+	// re-quoting touches their requests, and two accepts on different days
+	// each touching the other's passenger would otherwise deadlock. An offer
+	// whose passenger is not here is left alone.
+	passengers map[uuid.UUID]bool
+}
+
+// lockOrder is the passenger locks Accept takes for plan, its own included,
+// sorted so that every Accept takes them in the same order.
+func (p requotePlan) lockOrder(own uuid.UUID) []uuid.UUID {
+	set := map[uuid.UUID]bool{own: true}
+	for id := range p.passengers {
+		set[id] = true
+	}
+	out := make([]uuid.UUID, 0, len(set))
+	for id := range set {
+		out = append(out, id)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
+	return out
 }
 
 type pendingOffer struct {
 	askID, requestID uuid.UUID
+	passengerID      uuid.UUID
 	version          int
 	pickup, dropoff  geo.Point
 	tripKm           *float64
@@ -67,7 +90,7 @@ type pendingOffer struct {
 // planRequotes routes the accepted ask (if stale) and every other pending ask
 // on the occurrence against the plan they would join.
 func (s *Service) planRequotes(ctx context.Context, occurrenceID, askID uuid.UUID, version int) (requotePlan, error) {
-	plan := requotePlan{version: version, others: map[uuid.UUID]quote{}}
+	plan := requotePlan{version: version, others: map[uuid.UUID]quote{}, passengers: map[uuid.UUID]bool{}}
 
 	var budget match.Budget
 	if err := s.pool.QueryRow(ctx, `
@@ -78,12 +101,12 @@ func (s *Service) planRequotes(ctx context.Context, occurrenceID, askID uuid.UUI
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT a.id, a.request_id, a.itinerary_version,
+		SELECT a.id, a.request_id, rr.passenger_id, a.itinerary_version,
 		       ST_X(a.pickup_point), ST_Y(a.pickup_point), ST_X(a.dropoff_point), ST_Y(a.dropoff_point),
 		       (a.pricing_basis->>'trip_km')::float8
-		  FROM asks a
-		 WHERE a.occurrence_id = $1 AND a.status = 'pending'
-		 ORDER BY a.created_at, a.id`, occurrenceID)
+		  FROM asks a JOIN ride_requests rr ON rr.id = a.request_id
+		 WHERE a.occurrence_id = $1 AND a.status = 'pending' AND (a.id = $2 OR a.expires_at > $3)
+		 ORDER BY a.created_at, a.id`, occurrenceID, askID, s.clock.Now())
 	if err != nil {
 		return plan, fmt.Errorf("asks: loading pending offers: %w", err)
 	}
@@ -91,7 +114,7 @@ func (s *Service) planRequotes(ctx context.Context, occurrenceID, askID uuid.UUI
 	var self *pendingOffer
 	for rows.Next() {
 		var o pendingOffer
-		if err := rows.Scan(&o.askID, &o.requestID, &o.version,
+		if err := rows.Scan(&o.askID, &o.requestID, &o.passengerID, &o.version,
 			&o.pickup.Lon, &o.pickup.Lat, &o.dropoff.Lon, &o.dropoff.Lat, &o.tripKm); err != nil {
 			rows.Close()
 			return plan, fmt.Errorf("asks: scanning a pending offer: %w", err)
@@ -105,6 +128,8 @@ func (s *Service) planRequotes(ctx context.Context, occurrenceID, askID uuid.UUI
 	for i := range offers {
 		if offers[i].askID == askID {
 			self = &offers[i]
+		} else {
+			plan.passengers[offers[i].passengerID] = true
 		}
 	}
 	if self == nil {
@@ -246,18 +271,21 @@ func (s *Service) requoteOthers(
 	ctx context.Context, tx pgx.Tx, occurrenceID, acceptedAsk uuid.UUID, plan requotePlan,
 	version, seatsLeft, luggageLeft int, now time.Time,
 ) error {
+	// A lapsed offer holds nothing: it is the sweeper's, and counting its
+	// seats here would withdraw a live offer behind it.
 	rows, err := tx.Query(ctx, `
-		SELECT a.id, a.request_id FROM asks a
-		 WHERE a.occurrence_id = $1 AND a.status = 'pending' AND a.id <> $2
-		 ORDER BY a.created_at, a.id`, occurrenceID, acceptedAsk)
+		SELECT a.id, a.request_id, rr.passenger_id FROM asks a
+		  JOIN ride_requests rr ON rr.id = a.request_id
+		 WHERE a.occurrence_id = $1 AND a.status = 'pending' AND a.id <> $2 AND a.expires_at > $3
+		 ORDER BY a.created_at, a.id`, occurrenceID, acceptedAsk, now)
 	if err != nil {
 		return fmt.Errorf("asks: finding the other offers: %w", err)
 	}
-	type pair struct{ askID, requestID uuid.UUID }
+	type pair struct{ askID, requestID, passengerID uuid.UUID }
 	var others []pair
 	for rows.Next() {
 		var p pair
-		if err := rows.Scan(&p.askID, &p.requestID); err != nil {
+		if err := rows.Scan(&p.askID, &p.requestID, &p.passengerID); err != nil {
 			rows.Close()
 			return fmt.Errorf("asks: scanning an offer: %w", err)
 		}
@@ -269,6 +297,20 @@ func (s *Service) requoteOthers(
 	}
 
 	for _, p := range others {
+		if !plan.passengers[p.passengerID] {
+			// Made after the plan, so its passenger's lock is not held: its
+			// request is not ours to touch. It keeps its seats against the
+			// rest and is re-quoted at its own accept.
+			var seats, luggage int
+			if err := tx.QueryRow(ctx,
+				`SELECT seats, luggage_count FROM ride_requests WHERE id = $1`, p.requestID).
+				Scan(&seats, &luggage); err != nil {
+				return fmt.Errorf("asks: reading an offer's request: %w", err)
+			}
+			seatsLeft -= seats
+			luggageLeft -= luggage
+			continue
+		}
 		// Canonical order: request, then ask.
 		var seats, luggage int
 		if err := tx.QueryRow(ctx,

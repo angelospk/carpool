@@ -31,14 +31,27 @@ describe('tripPollInterval', () => {
     ).toBe(15_000);
   });
 
-  it('leaves alone a trip further off, one with nobody else, and a cancelled one', () => {
+  // Codex review: a driver's empty trip gets its first passenger on another
+  // device, and the change of a clock must not move "tomorrow".
+  it('polls a driver trip with nobody on it yet, and tomorrow across the clock change', () => {
+    expect(tripPollInterval(trip({ passengers: [] }), NOW)).toBe(15_000);
+    // 00:30 on 25 October in Athens, the night the clocks go back.
+    const lateNight = Date.parse('2026-10-24T21:30:00Z');
+    expect(
+      tripPollInterval(
+        trip({ depart_earliest: '2026-10-26T05:00:00Z', depart_latest: '2026-10-26T05:30:00Z' }),
+        lateNight,
+      ),
+    ).toBe(15_000);
+  });
+
+  it('leaves alone a trip further off and a cancelled one', () => {
     expect(
       tripPollInterval(
         trip({ depart_earliest: '2026-10-20T05:00:00Z', depart_latest: '2026-10-20T05:30:00Z' }),
         NOW,
       ),
     ).toBe(false);
-    expect(tripPollInterval(trip({ passengers: [] }), NOW)).toBe(false);
     expect(tripPollInterval(trip({ status: 'cancelled' }), NOW)).toBe(false);
     expect(tripPollInterval(undefined, NOW)).toBe(false);
   });

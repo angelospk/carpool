@@ -1,13 +1,18 @@
 import type { TripDetail } from '../api/endpoints';
 
-/** A trip of today or tomorrow with somebody else on it. */
+/** A trip of today or tomorrow. */
 export const LIVE_POLL_MS = 15_000;
 /** After the trip, while the other side has still to confirm. */
 export const AWAIT_POLL_MS = 30_000;
 
 const athensDate = (at: number) =>
   new Date(at).toLocaleDateString('en-CA', { timeZone: 'Europe/Athens' });
-const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The calendar day after a YYYY-MM-DD date. Not now + 24 h: a day can be 25. */
+function nextDate(date: string): string {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+}
 
 /**
  * How often the trip screen refetches, or false for not at all.
@@ -21,10 +26,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export function tripPollInterval(trip: TripDetail | undefined, now: number): number | false {
   if (!trip || trip.status === 'cancelled') return false;
   if (awaitingOthers(trip, now)) return AWAIT_POLL_MS;
-  const others = trip.role === 'driver' ? trip.passengers.length > 0 : true;
-  if (!others) return false;
+  // A driver's trip with nobody on it yet polls too: its first passenger may
+  // be let on from another device.
   const day = athensDate(Date.parse(trip.depart_earliest));
-  const soon = day === athensDate(now) || day === athensDate(now + DAY_MS);
+  const today = athensDate(now);
+  const soon = day === today || day === nextDate(today);
   return soon ? LIVE_POLL_MS : false;
 }
 

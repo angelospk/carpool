@@ -494,6 +494,15 @@ func (d Deps) handleCancelRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		defer func() { _ = tx.Rollback(r.Context()) }()
 
+		// The passenger's matching lock first, as Accept and adding a day take
+		// it: a day added while this runs is then either seen and cancelled or
+		// refused as closed, and the requests below are not locked against an
+		// Accept that holds them in the other order.
+		if _, err := tx.Exec(r.Context(), match.PassengerLockSQL, userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "could not cancel the request")
+			return
+		}
+
 		// ?days=all takes every live day of the same journey with it (QA
 		// 2026-10-17 U F6); without it only the day named goes. The named day
 		// is still the one whose row decides the answer below.

@@ -229,7 +229,7 @@ func run() error {
 		// Keyed on the JWT secret: the phone-change codes are stored as an HMAC
 		// rather than a bare hash, and this is the key that makes a leaked
 		// table useless without it.
-		PhoneChange: auth.NewPhoneChangeService(pool, clk, sms, sessions, []byte(cfg.JWTSecret)),
+		PhoneChange: auth.NewPhoneChangeService(pool, clk, sms, sessions, []byte(cfg.JWTSecret)).WithAsyncSMS(),
 
 		Router:          router,
 		Materializer:    materializer,

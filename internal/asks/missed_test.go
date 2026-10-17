@@ -6,6 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"carpool/internal/asks"
 )
 
@@ -136,4 +138,28 @@ func TestARequestSaysWhyTheCarThatPassesWasNotAsked(t *testing.T) {
 			t.Fatalf("missed_reason = %v for a car 28 km away, want none", r)
 		}
 	})
+}
+
+// Codex review, wave 1: the reason is only for a car the matcher could have
+// offered. A passenger already on this very car is not told it is full.
+func TestAPassengerAlreadyAboardIsNotToldTheCarIsFull(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if _, err := f.service().Accept(ctx, f.askID, f.driverID); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	mustExec(t, f, `UPDATE trip_occurrences SET seats_free = 0`)
+	var again uuid.UUID
+	must(t, f.pool.QueryRow(ctx, `
+		INSERT INTO ride_requests (passenger_id, origin, destination, window_start, window_end, seats, kind, status)
+		SELECT passenger_id, origin, destination, window_start, window_end, 1, 'open', 'open'
+		  FROM ride_requests WHERE id = $1 RETURNING id`, f.requestID).Scan(&again), "again")
+	if _, err := f.matcher().AskNext(ctx, again); !errors.Is(err, asks.ErrNoCandidates) {
+		t.Fatalf("AskNext = %v", err)
+	}
+	var reason sql.NullString
+	must(t, f.pool.QueryRow(ctx, `SELECT missed_reason FROM ride_requests WHERE id = $1`, again).Scan(&reason), "missed")
+	if reason.Valid {
+		t.Fatalf("missed_reason = %q for the passenger's own car", reason.String)
+	}
 }

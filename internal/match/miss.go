@@ -22,8 +22,8 @@ type Miss struct {
 
 // missSQL looks at the departures the gross filter would consider if it did
 // not ask about room or about the driver's radius, and says which of those
-// two turned each one away. Same window, same people, same direction as
-// grossSQL; the parameters are grossArgs.
+// two turned each one away. Same window, people, direction and overlap floor
+// as grossSQL, drives left out; the parameters are grossArgs.
 var missSQL = `
 WITH near AS (
 	SELECT ST_DWithin(o.route_geom::geography, $1::geography, d.notify_radius_km * 1000)
@@ -43,8 +43,20 @@ WITH near AS (
 	JOIN users du ON du.id = t.driver_id AND du.status = 'active'
 	WHERE o.status = 'scheduled'
 	  AND t.active
-	  AND (o.drive_set_at IS NOT NULL OR (o.depart_earliest <= $4 AND o.depart_latest >= $3))
+	  -- Not a drive: whether one could have taken the passenger turns on when
+	  -- the car reaches them (DriveReady), which is not a reason the passenger
+	  -- can act on, and a wrong one is worse than none.
+	  AND o.drive_set_at IS NULL
+	  AND o.depart_earliest <= $4 AND o.depart_latest >= $3
 	  AND ` + DriveOpen("o", "$13") + `
+	  -- Not a car the passenger is on, or one overlapping a trip they hold:
+	  -- the matcher would not have offered it with room to spare.
+	  AND ($7::uuid IS NULL OR NOT EXISTS (
+	        SELECT 1 FROM bookings bk WHERE bk.occurrence_id = o.id AND bk.passenger_id = $7::uuid))
+	  AND ($7::uuid IS NULL OR NOT ` + PassengerHolds("o", "$7::uuid", "$13", "NULL") + `)
+	  -- The overlap is worth an offer, as in the gross filter.
+	  AND (ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, $2))
+	     - ST_LineLocatePoint(o.route_geom, ST_ClosestPoint(o.route_geom, $1))) * o.route_km >= GREATEST(1.0, 0.2 * $6)
 	  AND NOT d.notifications_muted
 	  AND ST_DWithin(o.route_geom::geography, $1::geography, ` + fmt.Sprint(OffCorridorKm*1000) + `)
 	  AND ST_DWithin(o.route_geom::geography, $2::geography, ` + fmt.Sprint(OffCorridorKm*1000) + `)
@@ -63,8 +75,8 @@ WITH near AS (
 	  AND ($11::uuid IS NULL OR NOT EXISTS (
 	        SELECT 1 FROM asks a WHERE a.request_id = $11::uuid AND a.occurrence_id = o.id))
 	  AND ($12::uuid IS NULL OR o.id = $12::uuid)
-	  -- $6 and $8 are the gross filter's floor and limit; unused here.
-	  AND $6::float8 IS NOT NULL AND $8::int IS NOT NULL
+	  -- $8 is the gross filter's limit; unused here.
+	  AND $8::int IS NOT NULL
 )
 SELECT coalesce(bool_or(in_radius AND seats_ok AND luggage_ok AND parties >= ` + fmt.Sprint(MaxConcurrentParties) + `), false),
        coalesce(bool_or(in_radius AND NOT seats_ok), false),

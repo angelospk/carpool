@@ -28,6 +28,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -74,6 +75,19 @@ type PhoneChangeService struct {
 	// million possibilities, which a laptop walks through in seconds against a
 	// bare SHA-256 of a leaked table.
 	key []byte
+	// async sends the code after answering, so neither the time the provider
+	// takes nor its failures tell a free number from a taken one, which gets
+	// no SMS at all (QA 2026-10-17 A 3).
+	async bool
+}
+
+// WithAsyncSMS returns a copy of s that sends the code in the background,
+// after the request has been answered. Production uses it; a failure to send
+// is logged, and the person asks for the code again.
+func (s *PhoneChangeService) WithAsyncSMS() *PhoneChangeService {
+	out := *s
+	out.async = true
+	return &out
 }
 
 func NewPhoneChangeService(pool *pgxpool.Pool, c clock.Clock, sms SMSSender, sessions *SessionService, key []byte) *PhoneChangeService {
@@ -175,6 +189,16 @@ func (s *PhoneChangeService) Request(ctx context.Context, userID uuid.UUID, newP
 	}
 
 	if taken {
+		return id, code, nil
+	}
+	if s.async {
+		go func() {
+			sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			if err := s.sms.Send(sendCtx, newPhone, code+" is your carpool verification code. It expires in 10 minutes."); err != nil {
+				slog.Warn("sending a phone-change code", "error", err)
+			}
+		}()
 		return id, code, nil
 	}
 	if err := s.sms.Send(ctx, newPhone, code+" is your carpool verification code. It expires in 10 minutes."); err != nil {
