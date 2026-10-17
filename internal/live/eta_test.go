@@ -256,3 +256,48 @@ func TestSimultaneousPollsAfterAMinuteAndANewFixAskTheRoadOnceMore(t *testing.T)
 		}
 	}
 }
+
+// ctxRouter gives up when its caller's context does, as an HTTP router does.
+type ctxRouter struct {
+	countingRouter
+	release chan struct{}
+}
+
+func (r *ctxRouter) Route(ctx context.Context, wp []geo.Point) (geo.Route, error) {
+	select {
+	case <-r.release:
+		return r.countingRouter.Route(ctx, wp)
+	case <-ctx.Done():
+		r.mu.Lock()
+		r.calls++
+		r.mu.Unlock()
+		return geo.Route{}, ctx.Err()
+	}
+}
+
+// Codex review: a poll that goes away mid-ask must not free the key for an
+// immediate second ask; the road is still asked at most once a minute.
+func TestACancelledPollKeepsTheMinute(t *testing.T) {
+	w := newWorld(t)
+	r := &ctxRouter{release: make(chan struct{})}
+	w.svc.WithRouter(r)
+	w.everybodyShares(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = w.svc.DriverETA(ctx, w.trip, w.rider)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	close(r.release)
+	<-done
+
+	if _, err := w.svc.DriverETA(context.Background(), w.trip, w.rider); err != nil {
+		t.Fatal(err)
+	}
+	if r.count() != 1 {
+		t.Fatalf("router called %d times within the minute, want 1", r.count())
+	}
+}

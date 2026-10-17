@@ -38,6 +38,9 @@ type ETA struct {
 
 type etaKey struct{ occurrence, passenger uuid.UUID }
 
+// etaRouteTimeout bounds one ask of the road.
+const etaRouteTimeout = 10 * time.Second
+
 type etaEntry struct {
 	eta        ETA
 	ok         bool // false: the router failed, remembered so it is not asked again at once
@@ -140,13 +143,16 @@ func (s *Service) DriverETA(ctx context.Context, occurrenceID, userID uuid.UUID)
 	}
 
 	entry := etaEntry{computedAt: now, fixAt: fixAt}
-	route, err := s.router.Route(ctx, []geo.Point{fix, pickup})
+	// Not the poll's own context: a poll that goes away mid-ask would otherwise
+	// leave no answer, and the next poll would ask the road again within the
+	// minute. The ask is bounded on its own instead, and whatever it ends in,
+	// failure included, holds the key for the minute.
+	routeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), etaRouteTimeout)
+	defer cancel()
+	route, err := s.router.Route(routeCtx, []geo.Point{fix, pickup})
 	if err == nil {
 		entry.ok = true
 		entry.eta = ETA{Minutes: int((route.Duration + 30*time.Second) / time.Minute), At: now}
-	} else if ctx.Err() != nil {
-		// The caller went away; that says nothing about the road.
-		return nil, ctx.Err()
 	}
 	s.eta.finish(key, entry)
 	settled = true
