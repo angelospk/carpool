@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -302,6 +303,11 @@ func TestAResendReplacesTheEarlierDeleteCode(t *testing.T) {
 
 // Codex review, wave 3: a resend and a redemption at the same moment take the
 // account and the code rows in one order, so neither deadlocks the other.
+//
+// Two goroutines racing almost never hit the window, so the test makes the bad
+// interleaving happen. It holds the account the way Spend does, waits until the
+// resend is stuck behind it, and then takes the code rows, as Spend does next.
+// A resend that had already locked those rows would now deadlock with it.
 func TestAResendDuringARedemptionDoesNotDeadlock(t *testing.T) {
 	h := newHarness(t)
 	token, _ := h.signUp("+306900000811", "Γιώργος")
@@ -310,29 +316,58 @@ func TestAResendDuringARedemptionDoesNotDeadlock(t *testing.T) {
 	requestDeleteCode(h, token)
 
 	svc := auth.NewDeleteCodeService(h.pool, h.clock, h.sms, []byte(testSecret))
-	ctx := context.Background()
-	for round := 0; round < 4; round++ {
-		var wg sync.WaitGroup
-		start := make(chan struct{})
-		var resendErr, spendErr error
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			<-start
-			_, resendErr = svc.Request(ctx, userID)
-		}()
-		go func() {
-			defer wg.Done()
-			<-start
-			spendErr = svc.Spend(ctx, userID, "000000")
-		}()
-		close(start)
-		wg.Wait()
-		if resendErr != nil {
-			t.Fatalf("round %d: resend: %v", round, resendErr)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	spend, err := h.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = spend.Rollback(context.Background()) }()
+	var spendPID int
+	if err := spend.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&spendPID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := spend.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+		t.Fatal(err)
+	}
+
+	resendErr := make(chan error, 1)
+	go func() {
+		_, err := svc.Request(ctx, userID)
+		resendErr <- err
+	}()
+
+	// The resend is stuck once some backend waits on the one holding the account.
+	for {
+		var waiting int
+		if err := h.pool.QueryRow(ctx,
+			`SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`,
+			spendPID).Scan(&waiting); err != nil {
+			t.Fatal(err)
 		}
-		if spendErr != nil && !errors.Is(spendErr, auth.ErrDeleteCodeFailed) {
-			t.Fatalf("round %d: spend: %v", round, spendErr)
+		if waiting > 0 {
+			break
 		}
+		select {
+		case err := <-resendErr:
+			t.Fatalf("resend finished while the account was held: %v", err)
+		case <-ctx.Done():
+			t.Fatal("the resend never waited on the account")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	if _, err := spend.Exec(ctx, `
+		SELECT 1 FROM account_delete_codes
+		 WHERE user_id = $1 AND consumed_at IS NULL
+		   FOR UPDATE`, userID); err != nil {
+		t.Fatalf("redemption taking the codes after the account: %v", err)
+	}
+	if err := spend.Commit(ctx); err != nil {
+		t.Fatalf("redemption commit: %v", err)
+	}
+	if err := <-resendErr; err != nil {
+		t.Fatalf("resend: %v", err)
 	}
 }
