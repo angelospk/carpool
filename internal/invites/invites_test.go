@@ -241,3 +241,85 @@ func containsRune(s string, r rune) bool {
 // adult is a birth date old enough to sign up with. These tests are about
 // invite codes, not about age, so it is the same date everywhere and says so.
 var adult = domain.Date{Year: 1990, Month: time.January, Day: 1}
+
+// A fresh link posted to several chats is fetched by their preview bots at
+// once, each asking for the driver's code before one exists. They have to
+// agree on one code, or the driver hands out five uses per fetch.
+func TestFirstAsksAtOnceMakeOneCode(t *testing.T) {
+	svc, pool, regionID := newWorld(t, false)
+	ctx := context.Background()
+	user, err := svc.Admit(ctx, "+306900000001", "Γιάννης", regionID, adult, "")
+	if err != nil {
+		t.Fatalf("Admit: %v", err)
+	}
+
+	const n = 20
+	codes := make([]string, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			if i%2 == 0 {
+				codes[i], _, errs[i] = svc.ForLink(ctx, user.ID)
+				return
+			}
+			var c invites.Code
+			c, errs[i] = svc.Mine(ctx, user.ID)
+			codes[i] = c.Code
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i := range codes {
+		if errs[i] != nil {
+			t.Fatalf("ask %d: %v", i, errs[i])
+		}
+		if codes[i] == "" || codes[i] != codes[0] {
+			t.Fatalf("ask %d got %q, ask 0 got %q", i, codes[i], codes[0])
+		}
+	}
+	var made int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM invite_codes WHERE created_by = $1`, user.ID).Scan(&made); err != nil {
+		t.Fatal(err)
+	}
+	if made != 1 {
+		t.Fatalf("%d codes made for one member, want 1", made)
+	}
+}
+
+// A withdrawn code stays withdrawn for a link: somebody opening the page must
+// not be what gives the driver a fresh one.
+func TestALinkDoesNotReplaceAWithdrawnCode(t *testing.T) {
+	svc, pool, regionID := newWorld(t, false)
+	ctx := context.Background()
+	user, err := svc.Admit(ctx, "+306900000001", "Γιάννης", regionID, adult, "")
+	if err != nil {
+		t.Fatalf("Admit: %v", err)
+	}
+	mine, err := svc.Mine(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("Mine: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE invite_codes SET disabled_at = $2 WHERE code = $1`, mine.Code, testNow); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, usable, err := svc.ForLink(ctx, user.ID); err != nil || usable {
+		t.Fatalf("ForLink after withdrawal: usable=%v err=%v, want unusable", usable, err)
+	}
+	var made int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM invite_codes WHERE created_by = $1`, user.ID).Scan(&made); err != nil {
+		t.Fatal(err)
+	}
+	if made != 1 {
+		t.Fatalf("%d codes after a link was opened, want the 1 withdrawn one", made)
+	}
+}

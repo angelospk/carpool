@@ -159,6 +159,7 @@ a.quiet{background:#e7e5df;color:#1d2521}
 <p>{{.Schedule}} · {{.Route.DepartEarliest}}–{{.Route.DepartLatest}}</p>
 <p>{{.Route.Seats}} θέσεις προσφέρονται{{if .Route.ForGroup}}, μόνο για τα μέλη μιας ομάδας{{end}}.</p>
 <p class="muted">Ο οδηγός μοιράζεται τα έξοδα, δεν πουλάει διαδρομή. Για να ζητήσεις θέση, άνοιξε την εφαρμογή.</p>
+{{if .Invite}}<p>Η εφαρμογή δέχεται νέα μέλη μόνο με πρόσκληση. Ο κωδικός πρόσκλησης του οδηγού: <strong>{{.Invite}}</strong>. Θα σου ζητηθεί στην εγγραφή.</p>{{else if .InvitesSpent}}<p class="muted">Οι προσκλήσεις του οδηγού τελείωσαν. Ζήτα του μία.</p>{{end}}
 <a class="button" href="{{.AppLink}}">Άνοιγμα στην εφαρμογή</a>
 {{if .WebLink}}<a class="button quiet" href="{{.WebLink}}">Συνέχισε στον browser</a>{{end}}
 {{if .InstallURL}}<a class="button quiet" href="{{.InstallURL}}">Κατέβασε την εφαρμογή για Android</a>{{end}}
@@ -207,6 +208,20 @@ func (d Deps) handleRoutePage(w http.ResponseWriter, r *http.Request) {
 				`UPDATE route_templates SET share_opens = share_opens + 1 WHERE share_token = $1`,
 				token); err != nil {
 				slog.Warn("counting a link open", "error", err)
+			}
+		}
+		// The link is how a stranger arrives, so in an invite-only pilot it is
+		// where the driver's code has to be. Only then: opening a link in an
+		// open pilot must not mint a code for somebody who never asked.
+		if d.Invites != nil && d.Invites.Required() {
+			code, usable, err := d.Invites.ForLink(r.Context(), s.DriverID)
+			switch {
+			case err != nil:
+				slog.Warn("loading the driver's invite for a link", "error", err)
+			case usable:
+				data["Invite"] = code
+			default:
+				data["InvitesSpent"] = true
 			}
 		}
 	}

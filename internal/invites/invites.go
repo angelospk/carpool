@@ -57,6 +57,29 @@ func NewService(pool *pgxpool.Pool, c clock.Clock, required bool) *Service {
 	return &Service{pool: pool, clock: c, required: required}
 }
 
+// Required reports whether the pilot is invite-only, which decides both
+// whether a new account needs a code and whether a link may hand one out.
+func (s *Service) Required() bool {
+	return s.required
+}
+
+// ForLink returns a member's invite code for a link they shared, and whether
+// that code can still admit anybody.
+//
+// It creates the code on first use, because a driver who shares a link has
+// vouched for whoever takes it up and must not land on an empty page for a
+// step they never took. A spent, expired or withdrawn code comes back with the
+// flag down rather than as an error: the page still has something honest to
+// say to the stranger. A withdrawn code is never replaced from here; opening a
+// public page must not be what hands the driver a fresh one.
+func (s *Service) ForLink(ctx context.Context, userID uuid.UUID) (string, bool, error) {
+	c, usable, err := s.ensure(ctx, userID, false)
+	if err != nil {
+		return "", false, err
+	}
+	return c.Code, usable, nil
+}
+
 // Admit signs someone in, creating the account if this phone is new.
 //
 // The code is checked, the account created and the use spent in one
@@ -165,16 +188,48 @@ type Code struct {
 
 // Mine returns the caller's code, creating one the first time they ask.
 func (s *Service) Mine(ctx context.Context, userID uuid.UUID) (Code, error) {
-	var c Code
-	err := s.pool.QueryRow(ctx, `
-		SELECT code, max_uses, used_count FROM invite_codes
-		WHERE created_by = $1 AND disabled_at IS NULL
-		ORDER BY created_at LIMIT 1`, userID).Scan(&c.Code, &c.MaxUses, &c.UsedCount)
-	if err == nil {
-		return c, nil
+	c, _, err := s.ensure(ctx, userID, true)
+	return c, err
+}
+
+// ensure reads a member's code, making one when they have none, or when all
+// they have is withdrawn and reissue is set.
+//
+// Under a lock per member, held to the end of the transaction. A fresh route
+// link posted to several chats is fetched by their preview bots at once, and
+// read-then-insert outside the lock let each of them make a code of its own.
+func (s *Service) ensure(ctx context.Context, userID uuid.UUID, reissue bool) (Code, bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Code{}, false, fmt.Errorf("invites: begin: %w", err)
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return Code{}, fmt.Errorf("invites: loading your code: %w", err)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`,
+		"invite_code:"+userID.String()); err != nil {
+		return Code{}, false, fmt.Errorf("invites: locking: %w", err)
+	}
+
+	// The oldest code still in force, and a withdrawn one only if there is
+	// nothing else.
+	var (
+		c        Code
+		disabled bool
+		usable   bool
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT code, max_uses, used_count, disabled_at IS NOT NULL,
+		       disabled_at IS NULL AND used_count < max_uses
+		       AND (expires_at IS NULL OR expires_at > $2)
+		FROM invite_codes
+		WHERE created_by = $1
+		ORDER BY disabled_at IS NOT NULL, created_at LIMIT 1`, userID, s.clock.Now()).
+		Scan(&c.Code, &c.MaxUses, &c.UsedCount, &disabled, &usable)
+	switch {
+	case err == nil && (!disabled || !reissue):
+		return c, usable, nil
+	case err != nil && !errors.Is(err, pgx.ErrNoRows):
+		return Code{}, false, fmt.Errorf("invites: loading your code: %w", err)
 	}
 
 	// Retried rather than failed on a collision: the space is large, but a
@@ -182,9 +237,9 @@ func (s *Service) Mine(ctx context.Context, userID uuid.UUID) (Code, error) {
 	for attempt := 0; attempt < 5; attempt++ {
 		candidate, err := NewCode()
 		if err != nil {
-			return Code{}, err
+			return Code{}, false, err
 		}
-		err = s.pool.QueryRow(ctx, `
+		err = tx.QueryRow(ctx, `
 			INSERT INTO invite_codes (code, created_by, max_uses)
 			VALUES ($1, $2, $3)
 			ON CONFLICT (code) DO NOTHING
@@ -194,11 +249,14 @@ func (s *Service) Mine(ctx context.Context, userID uuid.UUID) (Code, error) {
 			continue
 		}
 		if err != nil {
-			return Code{}, fmt.Errorf("invites: creating your code: %w", err)
+			return Code{}, false, fmt.Errorf("invites: creating your code: %w", err)
 		}
-		return c, nil
+		if err := tx.Commit(ctx); err != nil {
+			return Code{}, false, fmt.Errorf("invites: commit: %w", err)
+		}
+		return c, true, nil
 	}
-	return Code{}, errors.New("invites: could not find a free code")
+	return Code{}, false, errors.New("invites: could not find a free code")
 }
 
 // NewCode returns a random code from the unambiguous alphabet.

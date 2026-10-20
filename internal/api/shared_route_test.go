@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"carpool/internal/api"
+	"carpool/internal/invites"
 )
 
 type shareBody struct {
@@ -150,5 +153,91 @@ func TestThePublicRoutesAreLimitedPerAddress(t *testing.T) {
 	}
 	if last != http.StatusTooManyRequests {
 		t.Fatalf("the 61st request in a minute: %d, want 429", last)
+	}
+}
+
+// newInviteOnlyHarness is the pilot as deployed: a new account needs a code.
+// The seeded code lets the test's own people in.
+func newInviteOnlyHarness(t *testing.T) *harness {
+	t.Helper()
+	h := newHarnessDeps(t, false, nil, func(d *api.Deps) {
+		d.Invites = invites.NewService(d.Pool, d.Clock, true)
+	})
+	h.mustExec(`INSERT INTO invite_codes (code, max_uses) VALUES ('SEEDLINK', 30)`)
+	h.invite = "SEEDLINK"
+	return h
+}
+
+// When the pilot is invite-only, a stranger who opens a route link would stop
+// at signup for want of a code. The page shows the driver's own code: the
+// driver is already inside and handed the link over, which is what a code
+// stands for. A code with no uses left, or on a route that is no longer
+// offered, is not shown.
+func TestAnInviteOnlyLinkCarriesTheDriversCode(t *testing.T) {
+	h := newInviteOnlyHarness(t)
+	driver, routeID := driverWithRoute(t, h, "+306900000841")
+	link := h.shareRoute(driver, routeID)
+
+	page := h.do(http.MethodGet, "/r/"+link.Token, nil, "")
+	if page.Code != http.StatusOK {
+		t.Fatalf("page: %d %s", page.Code, page.Body.String())
+	}
+	var code string
+	h.mustQuery(`SELECT c.code FROM invite_codes c JOIN users u ON u.id = c.created_by
+	              WHERE u.phone = '+306900000841'`, &code)
+	if !strings.Contains(page.Body.String(), code) {
+		t.Fatalf("page does not show the driver's code %q:\n%s", code, page.Body.String())
+	}
+
+	// The code on the page lets a stranger in.
+	h.invite = code
+	if passenger, _ := h.signUp("+306900000842", "Επιβάτης"); passenger == "" {
+		t.Fatal("signing up with the code from the page gave no session")
+	}
+	var used int
+	h.mustQuery(`SELECT used_count FROM invite_codes WHERE code = $1`, &used, code)
+	if used != 1 {
+		t.Fatalf("used_count = %d, want 1", used)
+	}
+
+	h.mustExec(`UPDATE invite_codes SET used_count = max_uses WHERE code = $1`, code)
+	spent := h.do(http.MethodGet, "/r/"+link.Token, nil, "").Body.String()
+	if strings.Contains(spent, code) {
+		t.Errorf("a spent code is still shown")
+	}
+	if !strings.Contains(spent, "Οι προσκλήσεις του οδηγού τελείωσαν") {
+		t.Errorf("a spent code is not explained:\n%s", spent)
+	}
+
+	h.mustExec(`UPDATE invite_codes SET used_count = 0, expires_at = $2 WHERE code = $1`,
+		code, h.clock.Now().Add(-time.Minute))
+	if expired := h.do(http.MethodGet, "/r/"+link.Token, nil, "").Body.String(); strings.Contains(expired, code) {
+		t.Errorf("an expired code is still shown")
+	}
+
+	h.mustExec(`UPDATE invite_codes SET expires_at = NULL WHERE code = $1`, code)
+	h.mustExec(`UPDATE route_templates SET active = false WHERE id = $1::uuid`, routeID)
+	retired := h.do(http.MethodGet, "/r/"+link.Token, nil, "")
+	if retired.Code != http.StatusGone || strings.Contains(retired.Body.String(), code) {
+		t.Errorf("a retired route's page: %d, shows the code: %v",
+			retired.Code, strings.Contains(retired.Body.String(), code))
+	}
+}
+
+// Without the invite gate there is nothing to hand over, and opening a link
+// makes no code for the driver.
+func TestAnOpenLinkCarriesNoCode(t *testing.T) {
+	h := newHarness(t)
+	driver, routeID := driverWithRoute(t, h, "+306900000851")
+	link := h.shareRoute(driver, routeID)
+
+	html := h.do(http.MethodGet, "/r/"+link.Token, nil, "").Body.String()
+	if strings.Contains(html, "πρόσκληση") || strings.Contains(html, "προσκλήσεις") {
+		t.Errorf("an open pilot's page talks about invites:\n%s", html)
+	}
+	var n int
+	h.mustQuery(`SELECT count(*) FROM invite_codes`, &n)
+	if n != 0 {
+		t.Errorf("opening the link made %d invite codes", n)
 	}
 }

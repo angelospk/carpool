@@ -43,6 +43,8 @@ type harness struct {
 	sms      *auth.FakeSMS
 	regionID uuid.UUID
 	devMode  bool
+	// invite is the code signUp hands over, for an invite-only harness.
+	invite string
 }
 
 func newHarness(t *testing.T) *harness { return newHarnessWith(t, false) }
@@ -226,6 +228,7 @@ func (h *harness) signUp(phone, name string) (accessToken, refreshToken string) 
 			// about age wants an ordinary adult, and a date derived from the
 			// clock would make the age gate untestable from here.
 			"date_of_birth": "1990-01-01",
+			"invite_code":   h.invite,
 		}, "")
 		if rec.Code != http.StatusOK {
 			h.t.Fatalf("signup/complete: status %d, body %s", rec.Code, rec.Body.String())

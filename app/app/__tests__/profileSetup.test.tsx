@@ -167,3 +167,68 @@ describe('the age gate on the profile screen', () => {
     expect(screen.getByTestId('profile-submit').props.accessibilityState?.disabled).toBe(true);
   });
 });
+
+// The pilot is invite-only, and the code arrives on the page of a route link,
+// typed by hand. The server decides whether one is needed; this screen only
+// carries it and says what a refusal means.
+describe('the invite code on the profile screen', () => {
+  async function fillTheRest() {
+    fireEvent.changeText(screen.getByTestId('name-input'), 'Χαράλαμπος');
+    fireEvent.changeText(screen.getByTestId('dob-input'), '01/01/1990');
+    await pickHomeTown();
+  }
+
+  it('sends the code as the page printed it, whatever the case and spaces', async () => {
+    render(<ProfileSetupScreen />);
+    await fillTheRest();
+    fireEvent.changeText(screen.getByTestId('invite-input'), ' seedlink ');
+    fireEvent.press(screen.getByTestId('profile-submit'));
+
+    await waitFor(() => expect(api.completeSignup).toHaveBeenCalled());
+    expect(api.completeSignup).toHaveBeenCalledWith(
+      expect.objectContaining({ invite_code: 'SEEDLINK' }),
+    );
+  });
+
+  it('sends no code when none was typed, and still lets the person submit', async () => {
+    render(<ProfileSetupScreen />);
+    await fillTheRest();
+    expect(screen.getByTestId('profile-submit').props.accessibilityState?.disabled).toBe(false);
+    fireEvent.press(screen.getByTestId('profile-submit'));
+
+    await waitFor(() => expect(api.completeSignup).toHaveBeenCalled());
+    expect((api.completeSignup as jest.Mock).mock.calls[0][0].invite_code).toBeUndefined();
+  });
+
+  it('says a code is needed, and where to find one, when the server asks for one', async () => {
+    const { ApiError } = jest.requireActual('../../src/api/client');
+    (api.completeSignup as jest.Mock).mockRejectedValue(
+      new ApiError(403, 'invite_required', 'invite-only'),
+    );
+
+    render(<ProfileSetupScreen />);
+    await fillTheRest();
+    fireEvent.press(screen.getByTestId('profile-submit'));
+
+    const error = await screen.findByTestId('profile-error');
+    expect(error.props.children).toBe(
+      'Χρειάζεται κωδικός πρόσκλησης. Θα τον βρεις στη σελίδα της διαδρομής που σου έστειλαν.',
+    );
+    expect(mockSignIn).not.toHaveBeenCalled();
+  });
+
+  it('says the code does not work when the server refuses it', async () => {
+    const { ApiError } = jest.requireActual('../../src/api/client');
+    (api.completeSignup as jest.Mock).mockRejectedValue(
+      new ApiError(403, 'invite_invalid', 'cannot be used'),
+    );
+
+    render(<ProfileSetupScreen />);
+    await fillTheRest();
+    fireEvent.changeText(screen.getByTestId('invite-input'), 'WRONGONE');
+    fireEvent.press(screen.getByTestId('profile-submit'));
+
+    const error = await screen.findByTestId('profile-error');
+    expect(error.props.children).toBe('Αυτός ο κωδικός πρόσκλησης δεν ισχύει ή τελείωσε.');
+  });
+});

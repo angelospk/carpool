@@ -35,6 +35,9 @@ type SharedRoute struct {
 	// ForGroup is a route offered to one group only. The group is not named:
 	// that is for its members to know.
 	ForGroup bool
+	// DriverID is the route's owner, so the page can offer their invite code.
+	// It stays out of sharedRouteJSON: the link must not name the driver.
+	DriverID uuid.UUID
 }
 
 // ShareToken returns the route's link token, creating one the first time.
@@ -88,7 +91,7 @@ func SharedRouteByToken(ctx context.Context, pool *pgxpool.Pool, token string, n
 		SELECT t.origin_label, t.destination_label, s.kind,
 		       coalesce(s.weekdays, '{}'), to_char(s.oneoff_date, 'YYYY-MM-DD'),
 		       to_char(s.depart_earliest, 'HH24:MI'), to_char(s.depart_latest, 'HH24:MI'),
-		       t.seats, t.group_id IS NOT NULL, t.active, u.status,
+		       t.seats, t.driver_id, t.group_id IS NOT NULL, t.active, u.status,
 		       (s.kind = 'oneoff' AND s.oneoff_date < ($2 AT TIME ZONE 'Europe/Athens')::date)
 		    OR (s.effective_until IS NOT NULL AND s.effective_until < ($2 AT TIME ZONE 'Europe/Athens')::date)
 		FROM route_templates t
@@ -97,7 +100,7 @@ func SharedRouteByToken(ctx context.Context, pool *pgxpool.Pool, token string, n
 		WHERE t.share_token = $1
 		ORDER BY s.created_at DESC LIMIT 1`, token, now).
 		Scan(&r.OriginLabel, &r.DestinationLabel, &r.Kind, &r.Weekdays, &r.OneOffDate,
-			&r.DepartEarliest, &r.DepartLatest, &r.Seats, &r.ForGroup, &active, &status, &ended)
+			&r.DepartEarliest, &r.DepartLatest, &r.Seats, &r.DriverID, &r.ForGroup, &active, &status, &ended)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SharedRoute{}, ErrNoSuchRoute
 	}
