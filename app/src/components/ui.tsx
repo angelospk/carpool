@@ -490,6 +490,7 @@ export function Field({
   testID,
   keyboardType,
   autoCapitalize,
+  autoCorrect,
   valid,
   compact,
   multiline,
@@ -502,7 +503,9 @@ export function Field({
   placeholder?: string;
   testID?: string;
   keyboardType?: 'default' | 'number-pad' | 'phone-pad';
-  autoCapitalize?: 'none' | 'sentences';
+  autoCapitalize?: 'none' | 'sentences' | 'characters';
+  /** Off for codes: a keyboard's suggestion would turn one into a word. */
+  autoCorrect?: boolean;
   /** Draws the border in ink once the value parses. */
   valid?: boolean;
   compact?: boolean;
@@ -538,6 +541,7 @@ export function Field({
         placeholderTextColor={colors.muted}
         keyboardType={keyboardType}
         autoCapitalize={autoCapitalize}
+        autoCorrect={autoCorrect}
         multiline={multiline}
         textAlignVertical={multiline ? 'top' : undefined}
       />

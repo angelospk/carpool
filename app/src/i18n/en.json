@@ -51,7 +51,11 @@
     "otpSentTo": "Sent to {{phone}}.",
     "changeNumber": "Different number",
     "resend": "Send a new code",
-    "resent": "We sent you a new code."
+    "resent": "We sent you a new code.",
+    "inviteCode": "Invite code",
+    "inviteHint": "If somebody sent you a route, the code is on its page.",
+    "inviteRequired": "An invite code is needed. You will find it on the page of the route you were sent.",
+    "inviteInvalid": "That invite code is not valid or has run out."
   },
   "common": {
     "back": "Back",

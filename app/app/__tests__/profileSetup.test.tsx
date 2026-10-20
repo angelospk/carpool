@@ -181,6 +181,8 @@ describe('the invite code on the profile screen', () => {
   it('sends the code as the page printed it, whatever the case and spaces', async () => {
     render(<ProfileSetupScreen />);
     await fillTheRest();
+    // Typed from a page by hand: no keyboard may turn it into a word.
+    expect(screen.getByTestId('invite-input').props.autoCorrect).toBe(false);
     fireEvent.changeText(screen.getByTestId('invite-input'), ' seedlink ');
     fireEvent.press(screen.getByTestId('profile-submit'));
 

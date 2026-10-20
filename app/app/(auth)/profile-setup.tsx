@@ -29,6 +29,7 @@ export default function ProfileSetupScreen() {
   const [name, setName] = useState('');
   const [dob, setDob] = useState('');
   const [home, setHome] = useState<Pin | null>(null);
+  const [invite, setInvite] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -47,11 +48,13 @@ export default function ProfileSetupScreen() {
     setBusy(true);
     setError(null);
     try {
+      const code = invite.trim().toUpperCase();
       const tokens = await api.completeSignup({
         signup_token: signupToken,
         name: name.trim(),
         home_place_id: placeID,
         date_of_birth: isoDOB,
+        invite_code: code || undefined,
       });
       await signIn({ accessToken: tokens.access_token, refreshToken: tokens.refresh_token });
       // The root layout redirects once the session flips to signedIn.
@@ -66,6 +69,10 @@ export default function ProfileSetupScreen() {
         setError(t('auth.underage'));
       } else if (e instanceof ApiError && e.code === 'invalid_name') {
         setError(t('profile.nameInvalid'));
+      } else if (e instanceof ApiError && e.code === 'invite_required') {
+        setError(t('auth.inviteRequired'));
+      } else if (e instanceof ApiError && e.code === 'invite_invalid') {
+        setError(t('auth.inviteInvalid'));
       } else {
         setError(refusalText(e) ?? t('common.error'));
       }
@@ -113,6 +120,22 @@ export default function ProfileSetupScreen() {
           />
         </Card>
         <Hint>{t('auth.homeTownHint')}</Hint>
+
+        {/* The pilot is invite-only, and the code arrives on the page of a route
+            link rather than in a message. Optional here: the server decides
+            whether this signup needs one. */}
+        <Card>
+          <Field
+            testID="invite-input"
+            label={t('auth.inviteCode')}
+            placeholder={t('auth.inviteCode')}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            value={invite}
+            onChangeText={setInvite}
+          />
+        </Card>
+        <Hint>{t('auth.inviteHint')}</Hint>
 
         {error ? (
           <Text testID="profile-error" style={styles.error}>
