@@ -6,6 +6,7 @@ import '../data/api.dart';
 import '../data/models.dart';
 import 'map/carpool_map.dart';
 import 'map/map_spec.dart';
+import 'messages.dart';
 import 'theme.dart';
 
 /// One passenger asking for a seat: the detour first, then yes or no.
@@ -62,7 +63,7 @@ class _AskScreenState extends State<AskScreen> {
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.message;
+        _error = failureText(e);
         _loading = false;
       });
     } catch (_) {
@@ -100,7 +101,7 @@ class _AskScreenState extends State<AskScreen> {
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
     }
   }
 
@@ -115,7 +116,7 @@ class _AskScreenState extends State<AskScreen> {
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
     } catch (_) {
       if (!mounted) return;
       setState(() => _busy = false);

@@ -8,6 +8,7 @@ import '../data/models.dart';
 import 'driver_setup_screen.dart';
 import 'map/carpool_map.dart';
 import 'map/map_spec.dart';
+import 'messages.dart';
 import 'theme.dart';
 
 /// Offer seats: two places, the road to pick, and when.
@@ -61,10 +62,15 @@ class _PublishScreenState extends State<PublishScreen> {
     }
   }
 
+  /// Which preview is current. An answer for ends the driver has since
+  /// changed would show, and publish, a road between the old ends.
+  int _previewGeneration = 0;
+
   Future<void> _preview() async {
     final origin = _origin;
     final destination = _destination;
     if (origin == null || destination == null) return;
+    final generation = ++_previewGeneration;
     setState(() {
       _previewing = true;
       _routes = const [];
@@ -72,17 +78,17 @@ class _PublishScreenState extends State<PublishScreen> {
     });
     try {
       final routes = await widget.api.routePreview(origin.point, destination.point);
-      if (!mounted) return;
+      if (!mounted || generation != _previewGeneration) return;
       setState(() {
         _routes = routes;
         _previewing = false;
       });
     } on ApiException catch (e) {
-      if (!mounted) return;
+      if (!mounted || generation != _previewGeneration) return;
       setState(() => _previewing = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || generation != _previewGeneration) return;
       setState(() => _previewing = false);
     }
   }
@@ -191,7 +197,7 @@ class _PublishScreenState extends State<PublishScreen> {
       if (e.code == 'no_driver_profile' || e.code == 'no_vehicle') {
         await _askForCar();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
       }
     } catch (_) {
       if (!mounted) return;
@@ -582,7 +588,7 @@ class _PlaceDialogState extends State<_PlaceDialog> {
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.message;
+        _error = failureText(e);
         _searching = false;
       });
     } catch (_) {

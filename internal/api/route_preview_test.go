@@ -136,6 +136,13 @@ func TestPublishingThroughAViaRoutesThroughIt(t *testing.T) {
 	if u := spy.last(); !strings.Contains(u, "25.8,40.85;25.9,40.95;26,40.85") {
 		t.Fatalf("OSRM was asked %s, want start;via;end", u)
 	}
+	// The matcher measures detours from the driver's own journey, so it needs
+	// the via too; without it the fastest road is the yardstick.
+	var lon, lat float64
+	h.mustQuery(`SELECT ST_X(via), ST_Y(via) FROM route_templates`, &lon, &lat)
+	if lon != 25.90 || lat != 40.95 {
+		t.Fatalf("stored via = (%v, %v), want (25.90, 40.95)", lon, lat)
+	}
 }
 
 // A via has to be a place in the country, like either end.

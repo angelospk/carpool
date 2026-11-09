@@ -363,3 +363,24 @@ func TestAnOffRoadLimitDoesNotCountPullingOver(t *testing.T) {
 		t.Errorf("two minutes off the road were allowed under 'my road only'")
 	}
 }
+
+// A driver who picked the longer road through (25.90, 40.95) costs a passenger
+// standing on that road nothing. Judged against the straight road they never
+// chose, the same passenger would look like a long detour.
+func TestBestInsertionMeasuresFromTheRoadTheDriverPicked(t *testing.T) {
+	router := &straightLineRouter{}
+	via := geo.Point{Lon: 25.90, Lat: 40.95}
+	itin := match.Itinerary{Origin: routeStart, Destination: routeEnd, Via: &via}
+
+	got, err := match.BestInsertion(context.Background(), router, itin,
+		geo.Point{Lon: 25.85, Lat: 40.90}, via)
+	if err != nil {
+		t.Fatalf("BestInsertion: %v", err)
+	}
+	if got.DetourMin > 0.01 || got.DetourKm > 0.01 {
+		t.Fatalf("detour = %v min / %v km, want ~0 for stops on the picked road", got.DetourMin, got.DetourKm)
+	}
+	if got.TotalDetourKm > 0.01 {
+		t.Fatalf("total detour = %v km, want ~0", got.TotalDetourKm)
+	}
+}

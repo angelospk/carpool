@@ -37,6 +37,8 @@ class DriveTracker {
   /// Whether this phone is sharing a position for that trip right now.
   static String? _tripId;
 
+  static bool isSharing(String tripId) => _tripId == tripId && _subscription != null;
+
   static Future<void> start(Api api, String tripId) async {
     await stop(api, null);
 

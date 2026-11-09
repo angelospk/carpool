@@ -49,6 +49,53 @@ void main() {
     expect(await tokens.read(), isNull);
   });
 
+  test('a refresh that lands after sign-out does not sign the person back in', () async {
+    final tokens = MemoryTokenStore(access: 'old', refresh: 'r1');
+    final api = Api(
+      baseUrl: 'http://api',
+      tokens: tokens,
+      client: MockClient((req) async {
+        if (req.url.path == '/v1/auth/refresh') {
+          // Signed out while the refresh was on the wire.
+          await tokens.clear();
+          return json({'access_token': 'new', 'refresh_token': 'r2'});
+        }
+        if (req.headers['authorization'] == 'Bearer new') {
+          return json({'id': 'u1', 'phone': '+30690', 'name': 'Ελένη'});
+        }
+        return json({}, 401);
+      }),
+    );
+    await expectLater(api.me(), throwsA(isA<ApiException>()));
+    expect(await tokens.read(), isNull);
+  });
+
+  test('a refresh whose answer was lost is retried with the same attempt id', () async {
+    final attempts = <String>[];
+    var fail = true;
+    final tokens = MemoryTokenStore(access: 'old', refresh: 'r1');
+    final api = Api(
+      baseUrl: 'http://api',
+      tokens: tokens,
+      client: MockClient((req) async {
+        if (req.url.path == '/v1/auth/refresh') {
+          attempts.add(jsonDecode(req.body)['attempt_id'] as String);
+          if (fail) {
+            fail = false;
+            throw http.ClientException('connection reset');
+          }
+          return json({'access_token': 'new', 'refresh_token': 'r2'});
+        }
+        if (req.headers['authorization'] == 'Bearer old') return json({}, 401);
+        return json({'id': 'u1', 'phone': '+30690', 'name': 'Ελένη'});
+      }),
+    );
+    await expectLater(api.me(), throwsA(isA<ApiException>()));
+    expect((await api.me()).name, 'Ελένη');
+    expect(attempts, hasLength(2));
+    expect(attempts[1], attempts[0], reason: 'a new id for the same token reads as reuse and ends the family');
+  });
+
   test('the server error code reaches the caller', () async {
     final api = Api(
       baseUrl: 'http://api',

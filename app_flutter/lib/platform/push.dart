@@ -139,6 +139,19 @@ class Push {
     } catch (error) {
       debugPrint('the launch notification could not be read: $error');
     }
+
+    // A tap on one the app drew itself while open, after the app was closed:
+    // Firebase never saw that tap, so only this plugin can say what it was.
+    try {
+      final launch = await _notifications.getNotificationAppLaunchDetails();
+      final payload = launch?.notificationResponse?.payload;
+      if (launch?.didNotificationLaunchApp == true && payload != null && payload.isNotEmpty) {
+        final decoded = jsonDecode(payload);
+        if (decoded is Map) _openRoute(decoded.cast<String, dynamic>());
+      }
+    } catch (error) {
+      debugPrint('the launch notification could not be read: $error');
+    }
   }
 
   static void _openRoute(Map<String, dynamic> data) {

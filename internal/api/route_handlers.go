@@ -380,6 +380,7 @@ func (d Deps) routeParams(w http.ResponseWriter, r *http.Request, userID uuid.UU
 	origin := geo.Point{Lon: body.OriginLon, Lat: body.OriginLat}
 	destination := geo.Point{Lon: body.DestinationLon, Lat: body.DestinationLat}
 	waypoints := []geo.Point{origin, destination}
+	var via *geo.Point
 	ends := []struct {
 		what string
 		at   geo.Point
@@ -390,12 +391,12 @@ func (d Deps) routeParams(w http.ResponseWriter, r *http.Request, userID uuid.UU
 	switch len(body.Via) {
 	case 0:
 	case 2:
-		via := geo.Point{Lon: body.Via[0], Lat: body.Via[1]}
-		waypoints = []geo.Point{origin, via, destination}
+		via = &geo.Point{Lon: body.Via[0], Lat: body.Via[1]}
+		waypoints = []geo.Point{origin, *via, destination}
 		ends = append(ends, struct {
 			what string
 			at   geo.Point
-		}{"road you picked", via})
+		}{"road you picked", *via})
 	default:
 		return fail(http.StatusBadRequest, "invalid_request", "a via is one [lon, lat] pair")
 	}
@@ -476,6 +477,7 @@ func (d Deps) routeParams(w http.ResponseWriter, r *http.Request, userID uuid.UU
 		ContributionShare: share,
 		GroupID:           groupID,
 		Schedule:          schedule,
+		Via:               via,
 	}
 	if shaped != nil {
 		params.RouteWKT = shaped.WKT()

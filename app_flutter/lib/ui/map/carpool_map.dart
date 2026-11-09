@@ -145,6 +145,8 @@ class _CarpoolMapState extends State<CarpoolMap> {
       ...spec.pins.where((pin) => pin.kind != PinKind.car).map((pin) => pin.at),
     ];
     if (points.isEmpty) return;
+    // The sheet covers the lower half or so of every screen that has a map.
+    final bottom = mounted ? MediaQuery.sizeOf(context).height * 0.55 : 340.0;
 
     var minLat = points.first.lat;
     var maxLat = points.first.lat;
@@ -170,7 +172,7 @@ class _CarpoolMapState extends State<CarpoolMap> {
         northeast: LatLng(maxLat, maxLon),
       );
       await controller.animateCamera(
-        CameraUpdate.newLatLngBounds(bounds, left: 40, top: 80, right: 40, bottom: 340),
+        CameraUpdate.newLatLngBounds(bounds, left: 40, top: 80, right: 40, bottom: bottom),
         duration: const Duration(milliseconds: 300),
       );
     } catch (_) {

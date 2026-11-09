@@ -53,6 +53,10 @@ type Itinerary struct {
 	Origin      geo.Point
 	Destination geo.Point
 	Stops       []Stop
+	// Via is a point on the road the driver picked when it was not the fastest
+	// one, nil otherwise. The driver's own journey goes through it, so a
+	// passenger on that road is no detour.
+	Via *geo.Point
 }
 
 // Router computes a route through waypoints in order. *geo.OSRM satisfies it.
@@ -140,19 +144,25 @@ func BestInsertionWithin(ctx context.Context, router Router, itin Itinerary, pic
 		return Insertion{}, fmt.Errorf("%w: %d stops", ErrItineraryTooComplex, len(itin.Stops))
 	}
 
-	baseline, err := router.Route(ctx, itin.waypoints())
+	// The driver's own journey, with nobody aboard, on the road they picked.
+	// Every budget is judged against this rather than against the itinerary as
+	// it stands, so that passengers cannot each spend the whole allowance.
+	own := []geo.Point{itin.Origin}
+	if itin.Via != nil {
+		own = append(own, *itin.Via)
+	}
+	own = append(own, itin.Destination)
+	alone, err := router.Route(ctx, own)
 	if err != nil {
-		return Insertion{}, fmt.Errorf("match: routing the current itinerary: %w", err)
+		return Insertion{}, fmt.Errorf("match: routing the driver's own journey: %w", err)
 	}
 
-	// The driver's own journey, with nobody aboard. Every budget is judged
-	// against this rather than against the itinerary as it stands, so that
-	// passengers cannot each spend the whole allowance.
-	alone := baseline
+	// With passengers aboard their stops already hold the car to its road.
+	baseline := alone
 	if len(itin.Stops) > 0 {
-		alone, err = router.Route(ctx, []geo.Point{itin.Origin, itin.Destination})
+		baseline, err = router.Route(ctx, itin.waypoints())
 		if err != nil {
-			return Insertion{}, fmt.Errorf("match: routing the driver's own journey: %w", err)
+			return Insertion{}, fmt.Errorf("match: routing the current itinerary: %w", err)
 		}
 	}
 

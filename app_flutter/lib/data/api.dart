@@ -101,6 +101,12 @@ class Api {
   /// The single refresh in flight, shared by every request that gets a 401.
   Future<bool>? _refreshing;
 
+  /// The attempt id sent with a refresh token whose answer never arrived. The
+  /// server rotates on the first use; a retry under a new id reads as a stolen
+  /// token being replayed and ends every session of the family.
+  String? _attemptToken;
+  String? _attemptId;
+
   // ---------------------------------------------------------------- plumbing
 
   Future<http.Response> _send(
@@ -202,7 +208,11 @@ class Api {
   Future<bool> _refreshTokens() async {
     final stored = await tokens.read();
     if (stored == null || stored.refresh.isEmpty) return false;
-    final attemptId = _newAttemptId();
+    if (_attemptToken != stored.refresh) {
+      _attemptToken = stored.refresh;
+      _attemptId = _newAttemptId();
+    }
+    final attemptId = _attemptId!;
     http.Response response;
     try {
       response = await _client.post(
@@ -213,6 +223,9 @@ class Api {
     } catch (_) {
       return false;
     }
+    // Signed out, or into another account, while this was on the wire: the
+    // answer is about a session that no longer exists here.
+    if ((await tokens.read())?.refresh != stored.refresh) return false;
     if (response.statusCode == 401 || response.statusCode == 403) {
       await tokens.clear();
       onSessionEnded?.call();
@@ -223,6 +236,8 @@ class Api {
     final access = body['access_token'];
     final refresh = body['refresh_token'];
     if (access is! String || refresh is! String) return false;
+    _attemptToken = null;
+    _attemptId = null;
     await tokens.write(access, refresh);
     return true;
   }

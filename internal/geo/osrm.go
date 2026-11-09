@@ -562,14 +562,20 @@ func (c *OSRM) Alternatives(ctx context.Context, origin, destination Point) ([]A
 // Both lines are thinned to about 500 vertices first, so a long road costs a
 // quarter of a million comparisons rather than a hundred million.
 func FarthestFrom(shape, other []Point) Point {
-	shape, other = thin(shape, 500), thin(other, 500)
+	// Distances run to the other road's segments, not its vertices: a long
+	// straight stretch has vertices kilometres apart, and a point on it would
+	// otherwise look far from it. Only the candidates are thinned.
+	shape = thin(shape, 500)
 	best, bestD := shape[len(shape)/2], -1.0
 	for _, p := range shape {
 		k := math.Cos(p.Lat * math.Pi / 180)
 		nearest := math.Inf(1)
-		for _, q := range other {
-			dx, dy := (p.Lon-q.Lon)*k, p.Lat-q.Lat
-			if d := dx*dx + dy*dy; d < nearest {
+		for i := range other {
+			j := i + 1
+			if j == len(other) {
+				j = i
+			}
+			if d := segmentDist2(p, other[i], other[j], k); d < nearest {
 				nearest = d
 			}
 		}
@@ -578,6 +584,21 @@ func FarthestFrom(shape, other []Point) Point {
 		}
 	}
 	return best
+}
+
+// segmentDist2 is the squared planar distance from p to the segment a-b, with
+// longitudes scaled by k so a degree east weighs what it does on the ground.
+func segmentDist2(p, a, b Point, k float64) float64 {
+	px, py := p.Lon*k, p.Lat
+	ax, ay := a.Lon*k, a.Lat
+	bx, by := b.Lon*k, b.Lat
+	dx, dy := bx-ax, by-ay
+	t := 0.0
+	if l := dx*dx + dy*dy; l > 0 {
+		t = math.Max(0, math.Min(1, ((px-ax)*dx+(py-ay)*dy)/l))
+	}
+	ex, ey := px-(ax+t*dx), py-(ay+t*dy)
+	return ex*ex + ey*ey
 }
 
 // thin keeps every k-th vertex so at most about n remain, and always the last.

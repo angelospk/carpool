@@ -303,13 +303,18 @@ func (s *Service) evaluate(ctx context.Context, c match.Candidate, req request) 
 // everyone already booked.
 func (s *Service) itinerary(ctx context.Context, occurrenceID uuid.UUID) (match.Itinerary, error) {
 	var it match.Itinerary
+	var viaLon, viaLat *float64
 	err := s.pool.QueryRow(ctx, `
-		SELECT ST_X(t.origin), ST_Y(t.origin), ST_X(t.destination), ST_Y(t.destination)
+		SELECT ST_X(t.origin), ST_Y(t.origin), ST_X(t.destination), ST_Y(t.destination),
+		       ST_X(t.via), ST_Y(t.via)
 		FROM trip_occurrences o JOIN route_templates t ON t.id = o.template_id
 		WHERE o.id = $1`, occurrenceID).Scan(
-		&it.Origin.Lon, &it.Origin.Lat, &it.Destination.Lon, &it.Destination.Lat)
+		&it.Origin.Lon, &it.Origin.Lat, &it.Destination.Lon, &it.Destination.Lat, &viaLon, &viaLat)
 	if err != nil {
 		return match.Itinerary{}, fmt.Errorf("asks: loading itinerary endpoints: %w", err)
+	}
+	if viaLon != nil && viaLat != nil {
+		it.Via = &geo.Point{Lon: *viaLon, Lat: *viaLat}
 	}
 
 	rows, err := s.pool.Query(ctx, `

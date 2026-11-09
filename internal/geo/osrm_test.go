@@ -331,3 +331,14 @@ func TestAPointOutsideTheExtractIsRefusedRatherThanSnapped(t *testing.T) {
 		t.Fatalf("error = %v, want ErrNoSegment", err)
 	}
 }
+
+// The main road is one long straight segment. The alternative shares it to
+// halfway, then bends off. Halfway is far from either end of the segment yet on
+// the road itself, so it must not win over the bend.
+func TestFarthestFromMeasuresToTheRoadNotItsVertices(t *testing.T) {
+	main := []Point{{Lon: 0, Lat: 0}, {Lon: 2, Lat: 0}}
+	alt := []Point{{Lon: 0, Lat: 0}, {Lon: 1, Lat: 0}, {Lon: 1.5, Lat: 0.3}, {Lon: 2, Lat: 0}}
+	if got := FarthestFrom(alt, main); got != (Point{Lon: 1.5, Lat: 0.3}) {
+		t.Fatalf("via = %v, want the bend at (1.5, 0.3)", got)
+	}
+}

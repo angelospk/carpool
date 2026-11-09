@@ -12,6 +12,7 @@ import '../data/api.dart';
 import '../data/models.dart';
 import 'map/carpool_map.dart';
 import 'map/map_spec.dart';
+import 'messages.dart';
 import 'theme.dart';
 
 /// A trip as the person on it sees it: the map, then who, when, and what to do.
@@ -25,6 +26,7 @@ class TripScreen extends StatefulWidget {
     this.share,
     this.livePoll = const Duration(seconds: 10),
     this.onStartDrive,
+    this.onEndDrive,
   });
 
   final Api api;
@@ -39,7 +41,13 @@ class TripScreen extends StatefulWidget {
 
   final Duration livePoll;
 
+  /// Starts sharing the car's position: after «Φεύγω», and again when the
+  /// screen opens on a drive the server still has running (the app was killed
+  /// mid-drive and the tracker with it).
   final Future<void> Function(TripDetail trip)? onStartDrive;
+
+  /// Stops sharing it, after «Τέλος διαδρομής».
+  final Future<void> Function(TripDetail trip)? onEndDrive;
 
   @override
   State<TripScreen> createState() => _TripScreenState();
@@ -101,6 +109,9 @@ class _TripScreenState extends State<TripScreen> {
         _loading = false;
       });
       _startPolling();
+      if (trip.role == TripRole.driver && trip.driveSetAt != null && trip.driveEndedAt == null) {
+        await widget.onStartDrive?.call(trip);
+      }
       await _pollLive();
       final me = await _findMe();
       if (!mounted) return;
@@ -108,7 +119,7 @@ class _TripScreenState extends State<TripScreen> {
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.message;
+        _error = failureText(e);
         _loading = false;
       });
     } catch (_) {
@@ -210,7 +221,7 @@ class _TripScreenState extends State<TripScreen> {
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
     }
   }
 
@@ -228,7 +239,7 @@ class _TripScreenState extends State<TripScreen> {
           'Δες πού είμαστε: ${link.url}';
       await _shareText(text);
     } on ApiException catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      messenger.showSnackBar(SnackBar(content: Text(failureText(e))));
     } catch (_) {
       messenger.showSnackBar(const SnackBar(content: Text('Δεν μπόρεσα να μοιραστώ τη διαδρομή')));
     }
@@ -261,7 +272,7 @@ class _TripScreenState extends State<TripScreen> {
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
     }
   }
 
@@ -281,13 +292,14 @@ class _TripScreenState extends State<TripScreen> {
     setState(() => _busy = true);
     try {
       await widget.api.endDrive(trip.id);
+      await widget.onEndDrive?.call(trip);
       if (!mounted) return;
       setState(() => _busy = false);
       await _refreshTrip();
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
     }
   }
 

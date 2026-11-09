@@ -76,6 +76,8 @@ class _CarpoolAppState extends State<CarpoolApp> {
   /// The server refused the session. The tokens are already gone, so the only
   /// work left is to forget the pushed screens and ask for a number.
   void _onSessionEnded() {
+    // No session, so no position goes anywhere; the service must not run on.
+    DriveTracker.stop(_api, null);
     carpoolNavigatorKey.currentState?.popUntil((route) => route.isFirst);
     if (!mounted) return;
     setState(() => _signedIn = false);
@@ -95,6 +97,9 @@ class _CarpoolAppState extends State<CarpoolApp> {
   Future<void> _onSignedOut() async {
     final navigator = carpoolNavigatorKey.currentState;
     navigator?.popUntil((route) => route.isFirst);
+    // A drive in progress stops sharing the car's position with the person who
+    // started it, and says so while the session can still say anything.
+    await DriveTracker.stop(_api, null);
     await _api.tokens.clear();
     if (!mounted) return;
     setState(() => _signedIn = false);
@@ -137,6 +142,7 @@ class _CarpoolAppState extends State<CarpoolApp> {
         api: _api,
         tripId: id,
         onStartDrive: _startDrive,
+        onEndDrive: (trip) => DriveTracker.stop(_api, trip.id),
       ),
     ));
   }
@@ -178,7 +184,11 @@ class _CarpoolAppState extends State<CarpoolApp> {
   }
 
   /// «Φεύγω» is what starts sharing a position, with the screen off.
-  Future<void> _startDrive(TripDetail trip) => DriveTracker.start(_api, trip.id);
+  /// Reopening the trip of a drive already being shared changes nothing.
+  Future<void> _startDrive(TripDetail trip) async {
+    if (DriveTracker.isSharing(trip.id)) return;
+    await DriveTracker.start(_api, trip.id);
+  }
 
   @override
   Widget build(BuildContext context) {

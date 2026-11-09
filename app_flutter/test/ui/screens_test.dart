@@ -75,6 +75,40 @@ void main() {
     expect(f.calls, contains('POST /v1/trips/occ1/confirm'));
   });
 
+  testWidgets('a driver mid-drive keeps sharing after a restart, and Τέλος stops it', (tester) async {
+    await bigPhone(tester);
+    final started = <String>[];
+    final ended = <String>[];
+    final f = fakeApi({
+      'GET /v1/trips/occ1': {
+        ...tripJson,
+        'role': 'driver',
+        'drive_set_at': '2026-07-30T04:30:00Z',
+        'drive_ended_at': null,
+      },
+      'GET /v1/trips/occ1/live': liveJson,
+      'POST /v1/trips/occ1/drive/end': <String, Object>{},
+    });
+    await tester.pumpWidget(app(TripScreen(
+      api: f.api,
+      tripId: 'occ1',
+      mapBuilder: fakeMap,
+      locate: () async => null,
+      livePoll: const Duration(minutes: 5),
+      onStartDrive: (trip) async => started.add(trip.id),
+      onEndDrive: (trip) async => ended.add(trip.id),
+    )));
+    await tester.pumpAndSettle();
+    expect(started, ['occ1'], reason: 'the server says the drive is on, so this phone shares again');
+
+    await tester.scrollUntilVisible(find.text('Τέλος διαδρομής'), 200,
+        scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text('Τέλος διαδρομής'));
+    await tester.pumpAndSettle();
+    expect(f.calls, contains('POST /v1/trips/occ1/drive/end'));
+    expect(ended, ['occ1']);
+  });
+
   testWidgets('publishing shows the roads and sends the one picked', (tester) async {
     await bigPhone(tester);
     PublishResult? done;
