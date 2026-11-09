@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -504,4 +505,93 @@ func (s ShapedRoute) WKT() string {
 	}
 	b.WriteByte(')')
 	return b.String()
+}
+
+// Alternative is one road between two points, as the routing service draws it.
+type Alternative struct {
+	DistanceMeters float64
+	Duration       time.Duration
+	// Polyline is the road as an encoded polyline at precision 6, which is
+	// what the app already decodes for a trip.
+	Polyline string
+	Shape    []Point
+}
+
+// Alternatives asks for up to three roads between origin and destination,
+// the router's preferred one first. Nothing here checks for ferries: a preview
+// only shows roads, and publishing the chosen one goes through RouteWithShape,
+// which does.
+func (c *OSRM) Alternatives(ctx context.Context, origin, destination Point) ([]Alternative, error) {
+	url := fmt.Sprintf("%s/route/v1/driving/%s;%s?overview=full&geometries=polyline6&alternatives=3&radiuses=%s",
+		c.baseURL, formatPoint(origin), formatPoint(destination), radiuses(2))
+	resp, err := c.get(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Code != "Ok" {
+		return nil, codeError(resp)
+	}
+	if len(resp.Routes) == 0 {
+		return nil, fmt.Errorf("osrm: response code Ok but no routes returned")
+	}
+	out := make([]Alternative, 0, len(resp.Routes))
+	for _, r := range resp.Routes {
+		shape, err := DecodePolylinePrecision(r.Geometry, 6)
+		if err != nil || len(shape) < 2 {
+			continue
+		}
+		out = append(out, Alternative{
+			DistanceMeters: r.Distance,
+			Duration:       time.Duration(r.Duration * float64(time.Second)),
+			Polyline:       r.Geometry,
+			Shape:          shape,
+		})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("osrm: no route geometry could be read")
+	}
+	return out, nil
+}
+
+// FarthestFrom is the vertex of shape farthest from every vertex of other:
+// the place a road most clearly is not the other road. Routing start → it →
+// end gives this road back rather than the other. Distances are planar in
+// degrees with longitude scaled by latitude, which is plenty to compare two
+// roads a few kilometres apart.
+//
+// Both lines are thinned to about 500 vertices first, so a long road costs a
+// quarter of a million comparisons rather than a hundred million.
+func FarthestFrom(shape, other []Point) Point {
+	shape, other = thin(shape, 500), thin(other, 500)
+	best, bestD := shape[len(shape)/2], -1.0
+	for _, p := range shape {
+		k := math.Cos(p.Lat * math.Pi / 180)
+		nearest := math.Inf(1)
+		for _, q := range other {
+			dx, dy := (p.Lon-q.Lon)*k, p.Lat-q.Lat
+			if d := dx*dx + dy*dy; d < nearest {
+				nearest = d
+			}
+		}
+		if nearest > bestD {
+			best, bestD = p, nearest
+		}
+	}
+	return best
+}
+
+// thin keeps every k-th vertex so at most about n remain, and always the last.
+func thin(line []Point, n int) []Point {
+	if len(line) <= n {
+		return line
+	}
+	k := (len(line) + n - 1) / n
+	out := make([]Point, 0, n+1)
+	for i := 0; i < len(line); i += k {
+		out = append(out, line[i])
+	}
+	if last := line[len(line)-1]; out[len(out)-1] != last {
+		out = append(out, last)
+	}
+	return out
 }

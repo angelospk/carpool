@@ -185,6 +185,8 @@ func NewRouter(deps Deps) http.Handler {
 		// A route link, as tapped in a chat. Outside /v1 because it is a page
 		// for a person, not an API for the app.
 		r.With(public.middleware).Get("/r/{token}", deps.handleRoutePage)
+		// A passenger's trip link, opened by their family.
+		r.With(public.middleware).Get("/t/{token}", deps.handleTripPage)
 		// Some chat apps ask with HEAD before they fetch a preview.
 		r.With(public.middleware).Head("/r/{token}", deps.handleRoutePage)
 	}
@@ -217,6 +219,7 @@ func NewRouter(deps Deps) http.Handler {
 		// What a route link says, for the app to show before anybody has an
 		// account. Only what the page says; see store.SharedRoute.
 		r.With(public.middleware).Get("/shared-routes/{token}", deps.handleSharedRoute)
+		r.With(public.middleware).Get("/shared-trips/{token}", deps.handleSharedTrip)
 
 		r.Route("/auth", func(r chi.Router) {
 			// Guarded on their collaborator like every other group here: these
@@ -326,6 +329,8 @@ func NewRouter(deps Deps) http.Handler {
 				// in proxy logs, analytics and history, and a pair of
 				// coordinates is where somebody lives and where they go.
 				r.With(estimates.perUser).Post("/estimates", deps.handleEstimate)
+				// Same budget as an estimate: one OSRM call per pin move.
+				r.With(estimates.perUser).Post("/routes/preview", deps.handleRoutePreview)
 			}
 			if deps.Weekend != nil {
 				r.With(publishing.perUser).Post("/weekend-plans", deps.handleCreateWeekendPlan)
@@ -392,6 +397,8 @@ func NewRouter(deps Deps) http.Handler {
 					r.Get("/waiting", deps.handleWaiting)
 					r.Post("/offers", deps.handleOffer)
 				}
+				r.Post("/share", deps.handleShareTrip)
+				r.Delete("/share", deps.handleRevokeTripShare)
 				r.Get("/messages", deps.handleListMessages)
 				r.With(chat.perUser).Post("/messages", deps.handlePostMessage)
 				if deps.Hub != nil {

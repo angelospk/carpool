@@ -71,6 +71,12 @@ type routeBody struct {
 	// having let you in.
 	GroupID string `json:"group_id"`
 
+	// Via is one [lon, lat] the road has to pass through: the point the
+	// preview gave for the alternative the driver picked. Absent is the road
+	// the router prefers. The server still routes it; the client never sends
+	// geometry, so the stored line is always a real road.
+	Via []float64 `json:"via"`
+
 	Kind           string   `json:"kind"` // oneoff | recurring
 	OneOffDate     string   `json:"oneoff_date"`
 	Weekdays       []int    `json:"weekdays"`        // ISO 1..7
@@ -373,6 +379,26 @@ func (d Deps) routeParams(w http.ResponseWriter, r *http.Request, userID uuid.UU
 
 	origin := geo.Point{Lon: body.OriginLon, Lat: body.OriginLat}
 	destination := geo.Point{Lon: body.DestinationLon, Lat: body.DestinationLat}
+	waypoints := []geo.Point{origin, destination}
+	ends := []struct {
+		what string
+		at   geo.Point
+	}{
+		{"start", origin},
+		{"destination", destination},
+	}
+	switch len(body.Via) {
+	case 0:
+	case 2:
+		via := geo.Point{Lon: body.Via[0], Lat: body.Via[1]}
+		waypoints = []geo.Point{origin, via, destination}
+		ends = append(ends, struct {
+			what string
+			at   geo.Point
+		}{"road you picked", via})
+	default:
+		return fail(http.StatusBadRequest, "invalid_request", "a via is one [lon, lat] pair")
+	}
 
 	// Both ends have to be in the country, which the request and estimate paths
 	// have always checked and this one never did. The border runs through this
@@ -383,13 +409,7 @@ func (d Deps) routeParams(w http.ResponseWriter, r *http.Request, userID uuid.UU
 	// tolls. Measured: Αδριανούπολη → Κομοτηνή published at 184,2 km.
 	var shaped *geo.ShapedRoute
 	if snap {
-		for _, end := range []struct {
-			what string
-			at   geo.Point
-		}{
-			{"start", origin},
-			{"destination", destination},
-		} {
+		for _, end := range ends {
 			_, err := store.RegionAt(r.Context(), d.Pool, end.at.Lon, end.at.Lat)
 			if errors.Is(err, store.ErrOutsideGreece) {
 				return fail(http.StatusBadRequest, "outside_country",
@@ -406,7 +426,7 @@ func (d Deps) routeParams(w http.ResponseWriter, r *http.Request, userID uuid.UU
 		ctx, cancel := contextWithRoutingDeadline(r)
 		defer cancel()
 
-		route, err := d.Router.RouteWithShape(ctx, []geo.Point{origin, destination})
+		route, err := d.Router.RouteWithShape(ctx, waypoints)
 		if errors.Is(err, geo.ErrSeaCrossingOnly) {
 			// Somewhere you sail to from a place you sail from. There is nothing to
 			// share a car for, and quoting a trip of no kilometres would be worse
