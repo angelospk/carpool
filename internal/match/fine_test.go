@@ -363,3 +363,63 @@ func TestAnOffRoadLimitDoesNotCountPullingOver(t *testing.T) {
 		t.Errorf("two minutes off the road were allowed under 'my road only'")
 	}
 }
+
+// A driver who picked the longer road through (25.90, 40.95) costs a passenger
+// standing on that road nothing. Judged against the straight road they never
+// chose, the same passenger would look like a long detour.
+func TestBestInsertionMeasuresFromTheRoadTheDriverPicked(t *testing.T) {
+	router := &straightLineRouter{}
+	via := geo.Point{Lon: 25.90, Lat: 40.95}
+	itin := match.Itinerary{Origin: routeStart, Destination: routeEnd,
+		Stops: []match.Stop{{Point: via, Kind: match.StopVia}}}
+
+	got, err := match.BestInsertion(context.Background(), router, itin,
+		geo.Point{Lon: 25.85, Lat: 40.90}, geo.Point{Lon: 25.95, Lat: 40.90})
+	if err != nil {
+		t.Fatalf("BestInsertion: %v", err)
+	}
+	if got.DetourMin > 0.01 || got.DetourKm > 0.01 || got.TotalDetourKm > 0.01 {
+		t.Fatalf("detour = %v min / %v km (total %v km), want ~0 on the picked road",
+			got.DetourMin, got.DetourKm, got.TotalDetourKm)
+	}
+	if !contains(got.Waypoints, via) {
+		t.Fatalf("waypoints %v leave the picked road", got.Waypoints)
+	}
+}
+
+// With somebody already aboard, a new passenger is still placed on the road
+// the driver picked: the via stays in every candidate, in its place, and costs
+// no party and no stop.
+func TestBestInsertionKeepsTheViaWithPassengersAboard(t *testing.T) {
+	router := &straightLineRouter{}
+	via := geo.Point{Lon: 25.90, Lat: 40.95}
+	itin := match.Itinerary{Origin: routeStart, Destination: routeEnd, Stops: []match.Stop{
+		{Point: geo.Point{Lon: 25.82, Lat: 40.87}, Kind: match.StopPickup, PartyID: "a"},
+		{Point: via, Kind: match.StopVia},
+		{Point: geo.Point{Lon: 25.98, Lat: 40.87}, Kind: match.StopDropoff, PartyID: "a"},
+	}}
+
+	got, err := match.BestInsertion(context.Background(), router, itin,
+		geo.Point{Lon: 25.92, Lat: 40.93}, geo.Point{Lon: 25.96, Lat: 40.89})
+	if err != nil {
+		t.Fatalf("BestInsertion: %v", err)
+	}
+	if !contains(got.Waypoints, via) {
+		t.Fatalf("waypoints %v leave the picked road", got.Waypoints)
+	}
+	if got.DetourKm > 0.01 {
+		t.Fatalf("detour = %v km, want ~0 for stops on the picked road", got.DetourKm)
+	}
+	if got.NewStops != 4 {
+		t.Fatalf("stops = %d, want 4: the via is not somewhere the car stops", got.NewStops)
+	}
+}
+
+func contains(points []geo.Point, p geo.Point) bool {
+	for _, q := range points {
+		if q == p {
+			return true
+		}
+	}
+	return false
+}

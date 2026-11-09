@@ -38,6 +38,10 @@ type StopKind string
 const (
 	StopPickup  StopKind = "pickup"
 	StopDropoff StopKind = "dropoff"
+	// StopVia is a point on the road the driver picked when it was not the
+	// fastest one. The car passes it without stopping, and nobody's party
+	// owns it; it keeps every candidate route on the driver's chosen road.
+	StopVia StopKind = "via"
 )
 
 // Stop is one intermediate waypoint on a driver's itinerary.
@@ -136,23 +140,30 @@ func BestInsertionWithin(ctx context.Context, router Router, itin Itinerary, pic
 	if parties(itin) >= MaxConcurrentParties {
 		return Insertion{}, ErrPartyCapReached
 	}
-	if len(itin.Stops) > maxStops {
-		return Insertion{}, fmt.Errorf("%w: %d stops", ErrItineraryTooComplex, len(itin.Stops))
+	if n := passengerStops(itin.Stops); n > maxStops {
+		return Insertion{}, fmt.Errorf("%w: %d stops", ErrItineraryTooComplex, n)
 	}
 
-	baseline, err := router.Route(ctx, itin.waypoints())
+	// The driver's own journey, with nobody aboard, on the road they picked.
+	// Every budget is judged against this rather than against the itinerary as
+	// it stands, so that passengers cannot each spend the whole allowance.
+	own := []geo.Point{itin.Origin}
+	for _, s := range itin.Stops {
+		if s.Kind == StopVia {
+			own = append(own, s.Point)
+		}
+	}
+	own = append(own, itin.Destination)
+	alone, err := router.Route(ctx, own)
 	if err != nil {
-		return Insertion{}, fmt.Errorf("match: routing the current itinerary: %w", err)
+		return Insertion{}, fmt.Errorf("match: routing the driver's own journey: %w", err)
 	}
 
-	// The driver's own journey, with nobody aboard. Every budget is judged
-	// against this rather than against the itinerary as it stands, so that
-	// passengers cannot each spend the whole allowance.
-	alone := baseline
-	if len(itin.Stops) > 0 {
-		alone, err = router.Route(ctx, []geo.Point{itin.Origin, itin.Destination})
+	baseline := alone
+	if passengerStops(itin.Stops) > 0 {
+		baseline, err = router.Route(ctx, itin.waypoints())
 		if err != nil {
-			return Insertion{}, fmt.Errorf("match: routing the driver's own journey: %w", err)
+			return Insertion{}, fmt.Errorf("match: routing the current itinerary: %w", err)
 		}
 	}
 
@@ -182,7 +193,7 @@ func BestInsertionWithin(ctx context.Context, router Router, itin Itinerary, pic
 				return Insertion{}, fmt.Errorf("match: routing a candidate itinerary: %w", err)
 			}
 
-			newStops := len(candidate)
+			newStops := passengerStops(candidate)
 			ins := Insertion{
 				DetourMin: (routed.Duration - baseline.Duration).Minutes(),
 				DetourKm:  (routed.DistanceMeters - baseline.DistanceMeters) / 1000,
@@ -265,9 +276,22 @@ func (it Itinerary) waypoints() []geo.Point {
 func parties(it Itinerary) int {
 	seen := make(map[string]struct{}, len(it.Stops))
 	for _, s := range it.Stops {
-		seen[s.PartyID] = struct{}{}
+		if s.Kind != StopVia {
+			seen[s.PartyID] = struct{}{}
+		}
 	}
 	return len(seen)
+}
+
+// passengerStops counts the stops where the car pulls over: every one but a via.
+func passengerStops(stops []Stop) int {
+	n := 0
+	for _, s := range stops {
+		if s.Kind != StopVia {
+			n++
+		}
+	}
+	return n
 }
 
 // spliceStops returns stops with pickup inserted at index i and dropoff at

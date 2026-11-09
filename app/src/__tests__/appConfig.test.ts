@@ -14,6 +14,8 @@ afterEach(() => {
 });
 
 test('without either, the config is what app.json says', () => {
+  // CI sets EAS_PROJECT_ID for the whole job.
+  delete process.env.EAS_PROJECT_ID;
   process.env.GOOGLE_SERVICES_JSON = '/nonexistent/google-services.json';
   const out = makeConfig({ config: base() });
   expect(out.extra.eas).toBeUndefined();

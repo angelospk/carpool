@@ -303,38 +303,69 @@ func (s *Service) evaluate(ctx context.Context, c match.Candidate, req request) 
 // everyone already booked.
 func (s *Service) itinerary(ctx context.Context, occurrenceID uuid.UUID) (match.Itinerary, error) {
 	var it match.Itinerary
+	var viaLon, viaLat, viaAt *float64
 	err := s.pool.QueryRow(ctx, `
-		SELECT ST_X(t.origin), ST_Y(t.origin), ST_X(t.destination), ST_Y(t.destination)
+		SELECT ST_X(t.origin), ST_Y(t.origin), ST_X(t.destination), ST_Y(t.destination),
+		       ST_X(t.via), ST_Y(t.via), ST_LineLocatePoint(t.route_geom, t.via)
 		FROM trip_occurrences o JOIN route_templates t ON t.id = o.template_id
 		WHERE o.id = $1`, occurrenceID).Scan(
-		&it.Origin.Lon, &it.Origin.Lat, &it.Destination.Lon, &it.Destination.Lat)
+		&it.Origin.Lon, &it.Origin.Lat, &it.Destination.Lon, &it.Destination.Lat,
+		&viaLon, &viaLat, &viaAt)
 	if err != nil {
 		return match.Itinerary{}, fmt.Errorf("asks: loading itinerary endpoints: %w", err)
 	}
 
+	// Each stop with how far along the stored road it lies, so the via can go
+	// in its place among them.
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, ST_X(pickup_point), ST_Y(pickup_point),
-		           ST_X(dropoff_point), ST_Y(dropoff_point)
-		FROM bookings
-		WHERE occurrence_id = $1 AND status IN ('confirmed','completed')
-		ORDER BY created_at, id`, occurrenceID)
+		SELECT b.id, ST_X(b.pickup_point), ST_Y(b.pickup_point),
+		           ST_X(b.dropoff_point), ST_Y(b.dropoff_point),
+		       ST_LineLocatePoint(t.route_geom, b.pickup_point),
+		       ST_LineLocatePoint(t.route_geom, b.dropoff_point)
+		FROM bookings b
+		JOIN trip_occurrences o ON o.id = b.occurrence_id
+		JOIN route_templates t ON t.id = o.template_id
+		WHERE b.occurrence_id = $1 AND b.status IN ('confirmed','completed')
+		ORDER BY b.created_at, b.id`, occurrenceID)
 	if err != nil {
 		return match.Itinerary{}, fmt.Errorf("asks: loading existing stops: %w", err)
 	}
 	defer rows.Close()
 
+	var along []float64
 	for rows.Next() {
 		var id uuid.UUID
 		var pickup, dropoff geo.Point
-		if err := rows.Scan(&id, &pickup.Lon, &pickup.Lat, &dropoff.Lon, &dropoff.Lat); err != nil {
+		var pickupAt, dropoffAt float64
+		if err := rows.Scan(&id, &pickup.Lon, &pickup.Lat, &dropoff.Lon, &dropoff.Lat,
+			&pickupAt, &dropoffAt); err != nil {
 			return match.Itinerary{}, fmt.Errorf("asks: scanning stop: %w", err)
 		}
 		it.Stops = append(it.Stops,
 			match.Stop{Point: pickup, Kind: match.StopPickup, PartyID: id.String()},
 			match.Stop{Point: dropoff, Kind: match.StopDropoff, PartyID: id.String()},
 		)
+		along = append(along, pickupAt, dropoffAt)
 	}
-	return it, rows.Err()
+	if err := rows.Err(); err != nil {
+		return match.Itinerary{}, err
+	}
+
+	// The road the driver picked, when it was not the fastest: the via goes
+	// before the first stop that lies beyond it, so every route the matcher
+	// tries stays on that road.
+	if viaLon != nil && viaLat != nil && viaAt != nil {
+		at := len(it.Stops)
+		for i, f := range along {
+			if f > *viaAt {
+				at = i
+				break
+			}
+		}
+		via := match.Stop{Point: geo.Point{Lon: *viaLon, Lat: *viaLat}, Kind: match.StopVia}
+		it.Stops = append(it.Stops[:at], append([]match.Stop{via}, it.Stops[at:]...)...)
+	}
+	return it, nil
 }
 
 // pricingInputs gathers the driver, car and fuel figures the formula needs.

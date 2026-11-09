@@ -20,6 +20,23 @@ create. About 10 minutes.
 4. `base64 -w0 google-services.json | gh secret set GOOGLE_SERVICES_JSON_B64 -R angelospk/carpool`
 5. For local builds, also copy it to `app/google-services.json` (git ignores it).
 
+### The Flutter app (`app_flutter/`)
+
+It installs as `gr.carpool.app.flutter`, next to the Expo app, so Firebase
+needs a second Android app in the same project:
+
+1. Firebase console → the `carpool` project → Add app → Android → package
+   name `gr.carpool.app.flutter` → Register.
+2. Download `google-services.json` again. It now lists both apps, so one file
+   and one `GOOGLE_SERVICES_JSON_B64` secret serve both builds.
+3. For local builds, also copy it to `app_flutter/android/app/google-services.json`
+   (git ignores it).
+4. In step 3 below, upload the FCM key for `gr.carpool.app.flutter` as well.
+
+The Flutter app takes its FCM token and asks Expo for an Expo push token for
+it, so the server sends to both apps the same way. Without either secret the
+`flutter-apk` workflow still builds, with push off.
+
 ## 3. Let Expo send through Firebase
 
 1. Firebase console → Project settings → Service accounts → Generate new private key.

@@ -83,6 +83,9 @@ type CreateRouteTemplateParams struct {
 	ContributionShare float64
 	OSRMDataVersion   string
 	Schedule          domain.Schedule
+	// Via is the point publishing routed through, when the driver picked a
+	// road other than the fastest. Nil for the fastest road.
+	Via *geo.Point
 }
 
 // CreateRouteTemplate stores a template and its schedule in one transaction: a
@@ -98,17 +101,23 @@ func CreateRouteTemplate(ctx context.Context, pool *pgxpool.Pool, p CreateRouteT
 		return uuid.Nil, err
 	}
 
+	var viaLon, viaLat *float64
+	if p.Via != nil {
+		viaLon, viaLat = &p.Via.Lon, &p.Via.Lat
+	}
+
 	var templateID uuid.UUID
 	err = tx.QueryRow(ctx, `
 		INSERT INTO route_templates (
 			driver_id, vehicle_id, origin, destination, origin_label, destination_label,
 			route_geom, route_km, route_min, seats, pricing_mode, osrm_data_version, ends_at_port,
-			allow_stops, detour_km, detour_min, luggage, luggage_capacity, contribution_share, group_id)
+			allow_stops, detour_km, detour_min, luggage, luggage_capacity, contribution_share, group_id, via)
 		VALUES ($1, $18,
 			ST_SetSRID(ST_MakePoint($2, $3), 4326),
 			ST_SetSRID(ST_MakePoint($4, $5), 4326),
 			$6, $7,
-			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13, $14, $15, $16, $17, $19::luggage_size, $20, $21, $22)
+			ST_GeomFromText($8, 4326), $9, $10, $11, $12, $13, $14, $15, $16, $17, $19::luggage_size, $20, $21, $22,
+			CASE WHEN $23::float8 IS NULL THEN NULL ELSE ST_SetSRID(ST_MakePoint($23, $24), 4326) END)
 		RETURNING id`,
 		p.DriverID,
 		p.Origin.Lon, p.Origin.Lat,
@@ -116,7 +125,7 @@ func CreateRouteTemplate(ctx context.Context, pool *pgxpool.Pool, p CreateRouteT
 		p.OriginLabel, p.DestinationLabel,
 		p.RouteWKT, p.RouteKm, p.RouteMin, p.Seats, string(p.PricingMode), p.OSRMDataVersion, p.EndsAtPort,
 		p.Detour.AllowStops, p.Detour.Km, p.Detour.Min, p.VehicleID, luggageOr(p.Luggage), capacityOr(p.LuggageCapacity, p.Luggage), shareOr(p.ContributionShare),
-		p.GroupID,
+		p.GroupID, viaLon, viaLat,
 	).Scan(&templateID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("store: inserting route template: %w", err)
