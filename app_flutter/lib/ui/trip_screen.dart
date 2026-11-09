@@ -14,6 +14,8 @@ import 'map/carpool_map.dart';
 import 'map/map_spec.dart';
 import 'messages.dart';
 import 'theme.dart';
+import 'trip_chat.dart';
+import 'user_profile_screen.dart';
 
 /// A trip as the person on it sees it: the map, then who, when, and what to do.
 class TripScreen extends StatefulWidget {
@@ -25,6 +27,7 @@ class TripScreen extends StatefulWidget {
     this.locate,
     this.share,
     this.livePoll = const Duration(seconds: 10),
+    this.chatPoll = const Duration(seconds: 10),
     this.onStartDrive,
     this.onEndDrive,
   });
@@ -40,6 +43,9 @@ class TripScreen extends StatefulWidget {
   final Future<void> Function(String text)? share;
 
   final Duration livePoll;
+
+  /// How often the chat looks for new messages.
+  final Duration chatPoll;
 
   /// Starts sharing the car's position: after «Φεύγω», and again when the
   /// screen opens on a drive the server still has running (the app was killed
@@ -61,6 +67,8 @@ class _TripScreenState extends State<TripScreen> {
   String? _error;
   bool _busy = false;
   bool _confirmed = false;
+  bool _ratingBusy = false;
+  final Map<String, int> _stars = {};
   Timer? _timer;
 
   @override
@@ -208,24 +216,126 @@ class _TripScreenState extends State<TripScreen> {
     return null;
   }
 
+  void _say(String text) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(text)));
+  }
+
   Future<void> _confirm(TripDetail trip) async {
     if (_busy || _confirmed) return;
     setState(() => _busy = true);
     try {
       await widget.api.confirmTrip(trip.id);
       if (!mounted) return;
-      setState(() {
-        _confirmed = true;
-        _busy = false;
-      });
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
+      setState(() => _confirmed = true);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
+      _say(failureText(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Whether the trip has not started, so leaving it is still allowed.
+  bool _before(TripDetail trip) => trip.status == 'scheduled' && trip.driveSetAt == null;
+
+  Future<void> _openPerson(Participant person) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => UserProfileScreen(api: widget.api, userId: person.id, name: person.name),
+      ),
+    );
+  }
+
+  Future<void> _rate(TripDetail trip, String rateeId) async {
+    final stars = _stars[rateeId];
+    if (stars == null || _ratingBusy) return;
+    setState(() => _ratingBusy = true);
+    try {
+      await widget.api.rate(trip.id, rateeId: rateeId, stars: stars);
+      if (!mounted) return;
+      await _refreshTrip();
+    } catch (e) {
+      if (!mounted) return;
+      _say(failureText(e));
+    } finally {
+      if (mounted) setState(() => _ratingBusy = false);
+    }
+  }
+
+  /// Leaves the seat: the server frees it and tells the driver.
+  Future<void> _leaveTrip(TripDetail trip) async {
+    final bookingId = trip.bookingId;
+    if (bookingId == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        content: Text('Η θέση σου επιστρέφει και ο/η ${trip.driver.name} θα ειδοποιηθεί.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Άκυρο'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Δεν θα έρθω'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted || _busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.api.cancelBooking(bookingId);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _say(e.code == 'not_found' ? 'Η θέση αυτή δεν είναι πια δική σου' : failureText(e));
+    } catch (e) {
+      if (!mounted) return;
+      _say(failureText(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Calls the whole departure off, and says who will hear about it.
+  Future<void> _cancelTrip(TripDetail trip) async {
+    final count = trip.passengers.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        content: Text(
+          count > 0
+              ? 'Η διαδρομή δεν θα γίνει. Θα ειδοποιηθούν $count επιβάτες.'
+              : 'Η διαδρομή αυτή δεν θα γίνει.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Άκυρο'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Ακύρωση διαδρομής'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted || _busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.api.cancelTrip(trip.id);
+      if (!mounted) return;
+      _say('Η διαδρομή ακυρώθηκε');
+      await _refreshTrip();
+    } catch (e) {
+      if (!mounted) return;
+      _say(failureText(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -425,11 +535,15 @@ class _TripScreenState extends State<TripScreen> {
     return [
       _liveRow(live, driverPosition),
       const SizedBox(height: 10),
-      Text(
-        live?.driverEtaMin != null
-            ? '${trip.driver.name} · φτάνει ${etaText(live!.driverEtaMin!)}'
-            : '${trip.driver.name} · ${athensHm(when)}',
-        style: const TextStyle(color: Ink.ink, fontSize: 22, fontWeight: FontWeight.w700),
+      InkWell(
+        key: Key('person-${trip.driver.id}'),
+        onTap: () => _openPerson(trip.driver),
+        child: Text(
+          live?.driverEtaMin != null
+              ? '${trip.driver.name} · φτάνει ${etaText(live!.driverEtaMin!)}'
+              : '${trip.driver.name} · ${athensHm(when)}',
+          style: const TextStyle(color: Ink.ink, fontSize: 22, fontWeight: FontWeight.w700),
+        ),
       ),
       if (pickup != null) ...[
         const SizedBox(height: 6),
@@ -469,6 +583,23 @@ class _TripScreenState extends State<TripScreen> {
       _timeline(trip),
       const SizedBox(height: 20),
       _confirmButton(trip),
+      ..._ratingSection(trip),
+      if (_before(trip) && trip.bookingId != null) ...[
+        const SizedBox(height: 12),
+        OutlinedButton(
+          style: OutlinedButton.styleFrom(foregroundColor: Ink.danger),
+          onPressed: _busy ? null : () => _leaveTrip(trip),
+          child: const Text('Δεν θα έρθω'),
+        ),
+      ],
+      const SizedBox(height: 20),
+      TripChat(
+        key: ValueKey(trip.id),
+        api: widget.api,
+        tripId: trip.id,
+        myId: trip.myId,
+        poll: widget.chatPoll,
+      ),
     ];
   }
 
@@ -614,6 +745,88 @@ class _TripScreenState extends State<TripScreen> {
     );
   }
 
+  /// The people the caller may still rate, after the trip.
+  Widget _ratingCard(TripDetail trip, List<Participant> toRate) {
+    return Container(
+      margin: const EdgeInsets.only(top: 20),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        border: Border.all(color: Ink.line),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Βαθμολόγησε',
+              style: TextStyle(color: Ink.ink, fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+          ),
+          const SizedBox(height: 10),
+          for (final person in toRate) _ratingRow(trip, person),
+        ],
+      ),
+    );
+  }
+
+  Widget _ratingRow(TripDetail trip, Participant person) {
+    if (person.rated) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                person.name,
+                style: const TextStyle(color: Ink.ink, fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const Text('Βαθμολογήθηκε', style: TextStyle(color: Ink.muted, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+    final chosen = _stars[person.id] ?? 0;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            person.name,
+            style: const TextStyle(color: Ink.ink, fontSize: 15, fontWeight: FontWeight.w600),
+          ),
+          Row(
+            children: [
+              for (var n = 1; n <= 5; n++)
+                IconButton(
+                  key: Key('star-${person.id}-$n'),
+                  tooltip: n == 1 ? '1 αστέρι' : '$n αστέρια',
+                  icon: Icon(n <= chosen ? Icons.star : Icons.star_border),
+                  color: n <= chosen ? Ink.accent : Ink.muted,
+                  onPressed: _ratingBusy ? null : () => setState(() => _stars[person.id] = n),
+                ),
+            ],
+          ),
+          FilledButton(
+            onPressed: chosen == 0 || _ratingBusy ? null : () => _rate(trip, person.id),
+            child: const Text('Στείλε βαθμολογία'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The rating card, when there is somebody to rate.
+  List<Widget> _ratingSection(TripDetail trip) {
+    final people = trip.role == TripRole.passenger ? [trip.driver] : trip.passengers;
+    final toRate = [for (final p in people) if (p.canRate || p.rated) p];
+    if (toRate.isEmpty) return const [];
+    return [_ratingCard(trip, toRate)];
+  }
+
   // ------------------------------------------------------------------- driver
 
   List<Widget> _driverBody(TripDetail trip) {
@@ -635,25 +848,29 @@ class _TripScreenState extends State<TripScreen> {
       rows.add(
         Padding(
           padding: const EdgeInsets.only(bottom: 14),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  passenger.name,
-                  style: const TextStyle(color: Ink.ink, fontSize: 16, fontWeight: FontWeight.w600),
+          child: InkWell(
+            key: Key('person-${passenger.id}'),
+            onTap: () => _openPerson(passenger),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    passenger.name,
+                    style: const TextStyle(color: Ink.ink, fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
                 ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  if (stop?.label != null)
-                    Text(stop!.label!, style: const TextStyle(color: Ink.muted, fontSize: 14)),
-                  if (stop?.at != null)
-                    Text(athensHm(stop!.at!), style: const TextStyle(color: Ink.muted, fontSize: 13)),
-                ],
-              ),
-            ],
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (stop?.label != null)
+                      Text(stop!.label!, style: const TextStyle(color: Ink.muted, fontSize: 14)),
+                    if (stop?.at != null)
+                      Text(athensHm(stop!.at!), style: const TextStyle(color: Ink.muted, fontSize: 13)),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -672,6 +889,16 @@ class _TripScreenState extends State<TripScreen> {
         ),
       );
       rows.add(const SizedBox(height: 10));
+      if (_before(trip)) {
+        rows.add(
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(foregroundColor: Ink.danger),
+            onPressed: _busy ? null : () => _cancelTrip(trip),
+            child: const Text('Ακύρωση διαδρομής'),
+          ),
+        );
+        rows.add(const SizedBox(height: 10));
+      }
     } else if (trip.driveEndedAt == null) {
       rows.add(
         OutlinedButton(
@@ -682,6 +909,17 @@ class _TripScreenState extends State<TripScreen> {
       rows.add(const SizedBox(height: 10));
     }
     rows.add(_confirmButton(trip));
+    rows.addAll(_ratingSection(trip));
+    rows.add(const SizedBox(height: 20));
+    rows.add(
+      TripChat(
+        key: ValueKey(trip.id),
+        api: widget.api,
+        tripId: trip.id,
+        myId: trip.myId,
+        poll: widget.chatPoll,
+      ),
+    );
     return rows;
   }
 }

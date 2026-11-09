@@ -11,10 +11,14 @@ String failureText(Object error) {
     switch (error.code) {
       case 'invalid_code':
         return 'Λάθος ή ληγμένος κωδικός';
+      case 'bad_code':
+        return 'Λάθος ή ληγμένος κωδικός.';
       case 'account_suspended':
         return 'Ο λογαριασμός σου δεν μπορεί να χρησιμοποιηθεί. Γράψε μας αν νομίζεις ότι είναι λάθος.';
       case 'rate_limited':
         return 'Πολλές προσπάθειες. Δοκίμασε σε λίγο.';
+      case 'report_rate_limited':
+        return 'Έχεις στείλει πολλές αναφορές σήμερα. Αυτές που έστειλες εξετάζονται.';
       case 'invalid_token':
         return 'Πέρασε η ώρα. Ζήτα νέο κωδικό και ξεκίνα ξανά.';
       case 'unknown_place':
@@ -41,11 +45,11 @@ String failureText(Object error) {
         return 'Η αναχώρηση πρέπει να είναι μέσα στο επόμενο τέταρτο.';
       case 'drive_departed':
       case 'departed':
-        return 'Η διαδρομή έχει ήδη ξεκινήσει.';
+        return 'Η διαδρομή έχει ήδη ξεκινήσει';
       case 'trip_not_running':
         return 'Αυτή η διαδρομή ακυρώθηκε.';
       case 'not_departed':
-        return 'Η διαδρομή δεν έχει ξεκινήσει ακόμα.';
+        return 'Θα μπορείς μόλις ξεκινήσει η διαδρομή';
       case 'ask_expired':
         return 'Η ερώτηση έληξε.';
       case 'ask_closed':

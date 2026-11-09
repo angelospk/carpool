@@ -1,6 +1,8 @@
 // Screens the Expo app has and the Flutter app gained for parity: account
 // deletion, blocking and reports, chat, ratings, cancelling, the driver's routes.
 
+import 'dart:convert';
+
 import 'package:carpool/core/athens_time.dart';
 import 'package:carpool/data/api.dart';
 import 'package:carpool/ui/blocked_screen.dart';
@@ -13,6 +15,8 @@ import 'package:carpool/ui/trip_screen.dart';
 import 'package:carpool/ui/user_profile_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import '../data/fixtures.dart';
 import 'harness.dart';
@@ -55,6 +59,7 @@ const me = {'id': 'p1', 'phone': '+306900000031', 'name': 'Ελένη'};
 
 void main() {
   setUpAll(initAthensTime);
+  chatPagingTests();
 
   // ------------------------------------------------------------ delete account
 
@@ -111,6 +116,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Λάθος ή ληγμένος κωδικός.'), findsOneWidget);
     expect(deleted, 0);
+  });
+
+  testWidgets('a refused delete code says why instead of «sent»', (tester) async {
+    await bigPhone(tester);
+    final f = fakeApi({'POST /v1/me/delete-code': const Fail(429, 'rate_limited')});
+    await tester.pumpWidget(app(DeleteAccountScreen(api: f.api, onDeleted: () async {})));
+    await tester.pumpAndSettle();
+    expect(find.text('Πολλές προσπάθειες. Δοκίμασε σε λίγο.'), findsOneWidget);
+    expect(find.text('Σου στείλαμε κωδικό με SMS'), findsNothing);
   });
 
   // ------------------------------------------------------- block and report
@@ -552,5 +566,93 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('1 προγραμματισμένο δρομολόγιο'), findsOneWidget);
     expect(find.text('Ο σύνδεσμος άνοιξε 1 φορά'), findsOneWidget);
+  });
+}
+
+void chatPagingTests() {
+  testWidgets('chat reads past the first 50 messages and polls only for newer ones', (tester) async {
+    await bigPhone(tester);
+    final queries = <String>[];
+    Map<String, Object?> msg(int i) => {
+          'id': 'm$i',
+          'sender_id': 'd1',
+          'sender_name': 'Νίκος',
+          'body': 'μήνυμα $i',
+          'created_at': DateTime.utc(2026, 7, 30, 4, 0, i).toIso8601String(),
+        };
+    var total = 55;
+    final api = Api(
+      baseUrl: 'http://api',
+      tokens: MemoryTokenStore(access: 'a', refresh: 'r'),
+      client: MockClient((req) async {
+        queries.add(req.url.query);
+        final after = req.url.queryParameters['after_id'];
+        final start = after == null ? 0 : int.parse(after.substring(1)) + 1;
+        final page = [for (var i = start; i < total && i < start + 50; i++) msg(i)];
+        return http.Response(jsonEncode({'messages': page}), 200,
+            headers: {'content-type': 'application/json; charset=utf-8'});
+      }),
+    );
+    await tester.pumpWidget(app(Scaffold(
+      body: SingleChildScrollView(
+        child: TripChat(api: api, tripId: 'occ1', myId: 'p1', poll: const Duration(seconds: 10)),
+      ),
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('μήνυμα 54', skipOffstage: false), findsOneWidget);
+    expect(queries, [
+      '',
+      'after_time=${Uri.encodeQueryComponent(DateTime.utc(2026, 7, 30, 4, 0, 49).toIso8601String())}&after_id=m49',
+    ]);
+
+    total = 56;
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pumpAndSettle();
+    expect(queries.last, contains('after_id=m54'));
+    expect(find.text('μήνυμα 55', skipOffstage: false), findsOneWidget);
+    expect(find.text('μήνυμα 0', skipOffstage: false), findsOneWidget, reason: 'old messages stay');
+  });
+  testWidgets('a message sent here does not hide one somebody sent just before it', (tester) async {
+    await bigPhone(tester);
+    final server = <Map<String, Object?>>[messageJson('m1', 'd1', 'Νίκος', 'πρώτο')];
+    final afters = <String?>[];
+    final api = Api(
+      baseUrl: 'http://api',
+      tokens: MemoryTokenStore(access: 'a', refresh: 'r'),
+      client: MockClient((req) async {
+        if (req.method == 'POST') {
+          final mine = {
+            ...messageJson('m3', 'p1', 'Ελένη', 'δικό μου'),
+            'created_at': '2026-07-30T04:02:00Z',
+          };
+          // Somebody else's message reached the server a moment earlier.
+          server.add({...messageJson('m2', 'd1', 'Νίκος', 'δεύτερο'), 'created_at': '2026-07-30T04:01:00Z'});
+          server.add(mine);
+          return http.Response(jsonEncode(mine), 201, headers: {'content-type': 'application/json; charset=utf-8'});
+        }
+        final afterId = req.url.queryParameters['after_id'];
+        afters.add(afterId);
+        final start = afterId == null ? 0 : server.indexWhere((m) => m['id'] == afterId) + 1;
+        return http.Response(jsonEncode({'messages': server.sublist(start)}), 200,
+            headers: {'content-type': 'application/json; charset=utf-8'});
+      }),
+    );
+    await tester.pumpWidget(app(Scaffold(
+      body: SingleChildScrollView(
+        child: TripChat(api: api, tripId: 'occ1', myId: 'p1', poll: const Duration(seconds: 10)),
+      ),
+    )));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'δικό μου');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Στείλε'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pumpAndSettle();
+
+    expect(afters.last, 'm1', reason: 'the cursor is the last message read, not the one sent');
+    expect(find.text('δεύτερο'), findsOneWidget);
+    double y(String t) => tester.getTopLeft(find.text(t)).dy;
+    expect(y('πρώτο') < y('δεύτερο') && y('δεύτερο') < y('δικό μου'), isTrue, reason: 'in the order they were sent');
   });
 }

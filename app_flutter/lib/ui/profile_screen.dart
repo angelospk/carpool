@@ -1,9 +1,13 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Ink;
 
 import '../data/api.dart';
 import '../data/models.dart';
 import 'app_scope.dart';
+import 'blocked_screen.dart';
+import 'delete_account_screen.dart';
 import 'driver_setup_screen.dart';
+import 'my_routes_screen.dart';
+import 'theme.dart';
 
 /// Somebody signed in: who they are, and the two things they can do from here.
 class ProfileScreen extends StatefulWidget {
@@ -51,6 +55,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _openMyRoutes() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute<void>(
+      builder: (_) => MyRoutesScreen(api: widget.api),
+    ));
+  }
+
+  Future<void> _openBlocked() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute<void>(
+      builder: (_) => BlockedScreen(api: widget.api),
+    ));
+  }
+
+  /// What signing out does, once somebody has said yes or deleted the account.
+  Future<void> _leave() async {
+    final onSignOut = widget.onSignOut;
+    if (onSignOut != null) {
+      await onSignOut();
+      return;
+    }
+    final scope = AppScope.maybeOf(context);
+    await widget.api.signOut();
+    if (!mounted) return;
+    if (scope != null) {
+      scope.onSignedOut();
+    } else {
+      Navigator.of(context).pop();
+    }
+  }
+
   Future<void> _signOut() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -70,19 +103,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    final onSignOut = widget.onSignOut;
-    if (onSignOut != null) {
-      await onSignOut();
-      return;
-    }
-    final scope = AppScope.maybeOf(context);
-    await widget.api.signOut();
-    if (!mounted) return;
-    if (scope != null) {
-      scope.onSignedOut();
-    } else {
-      Navigator.of(context).pop();
-    }
+    await _leave();
+  }
+
+  Future<void> _deleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Διαγραφή λογαριασμού;'),
+        content: const Text(
+          'Ο λογαριασμός σου θα διαγραφεί για πάντα και δεν γίνεται επαναφορά. '
+          'Θα σου στείλουμε κωδικό με SMS για να το επιβεβαιώσεις.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Άκυρο'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Διαγραφή λογαριασμού'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await Navigator.of(context).push<void>(MaterialPageRoute<void>(
+      builder: (_) => DeleteAccountScreen(api: widget.api, onDeleted: _leave),
+    ));
   }
 
   @override
@@ -100,7 +148,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             else if (me == null)
               const Padding(
                 padding: EdgeInsets.all(24),
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: Text('Φόρτωση…')),
               )
             else ...[
               ListTile(
@@ -118,10 +166,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 trailing: const Icon(Icons.chevron_right),
                 onTap: _openDriverSetup,
               ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.route),
+                title: const Text('Οι διαδρομές μου'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _openMyRoutes,
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.block),
+                title: const Text('Αποκλεισμένοι'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _openBlocked,
+              ),
               const Divider(height: 32),
               OutlinedButton(
                 onPressed: _signOut,
                 child: const Text('Αποσύνδεση'),
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: _deleteAccount,
+                style: TextButton.styleFrom(foregroundColor: Ink.danger),
+                child: const Text('Διαγραφή λογαριασμού'),
               ),
             ],
           ],

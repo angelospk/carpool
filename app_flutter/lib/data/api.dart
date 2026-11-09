@@ -84,6 +84,9 @@ class ApiException implements Exception {
 }
 
 /// The JSON API, with the one refresh shared by every call that needs it.
+/// How many messages one chat read returns at most.
+const messagePage = 50;
+
 class Api {
   Api({
     required String baseUrl,
@@ -323,6 +326,87 @@ class Api {
   }
 
   Future<Me> me() async => Me.fromJson(_map(await _call('GET', '/v1/me')));
+
+  /// The SMS code that deletes the account, when the server is in dev mode.
+  Future<String?> requestDeleteCode() async {
+    final body = _map(await _call('POST', '/v1/me/delete-code'));
+    return body['dev_code'] as String?;
+  }
+
+  Future<void> deleteAccount(String code) async {
+    await _call('DELETE', '/v1/me', body: {'code': code});
+  }
+
+  // --------------------------------------------------------------- blocking
+
+  Future<void> block(String id) async {
+    await _call('POST', '/v1/users/$id/block');
+  }
+
+  Future<void> unblock(String id) async {
+    await _call('DELETE', '/v1/users/$id/block');
+  }
+
+  Future<List<BlockedUser>> blocks() async {
+    final body = await _call('GET', '/v1/me/blocks');
+    return [for (final u in _list(body, 'blocked')) BlockedUser.fromJson(u)];
+  }
+
+  Future<void> report(String id, String reason) async {
+    await _call('POST', '/v1/users/$id/report', body: {'reason': reason});
+  }
+
+  // ------------------------------------------------------------------- chat
+
+  /// The server sends at most [messagePage] messages, oldest first; [after]
+  /// asks for the ones that came after it.
+  Future<List<ChatMessage>> messages(String tripId, {ChatMessage? after}) async {
+    final cursor = after == null
+        ? ''
+        : '?after_time=${Uri.encodeQueryComponent(after.createdAt.toIso8601String())}'
+            '&after_id=${Uri.encodeQueryComponent(after.id)}';
+    final body = await _call('GET', '/v1/trips/$tripId/messages$cursor');
+    return [for (final m in _list(body, 'messages')) ChatMessage.fromJson(m)];
+  }
+
+  Future<ChatMessage> sendMessage(String tripId, String body) async =>
+      ChatMessage.fromJson(_map(await _call(
+        'POST',
+        '/v1/trips/$tripId/messages',
+        body: {'body': body},
+      )));
+
+  // --------------------------------------------------------- rate, cancel
+
+  Future<void> rate(String tripId, {required String rateeId, required int stars}) async {
+    await _call('POST', '/v1/trips/$tripId/rate', body: {
+      'stars': stars,
+      'ratee_id': rateeId,
+    });
+  }
+
+  Future<void> cancelBooking(String bookingId) async {
+    await _call('DELETE', '/v1/bookings/$bookingId');
+  }
+
+  Future<void> cancelTrip(String tripId) async {
+    await _call('DELETE', '/v1/trips/$tripId');
+  }
+
+  // -------------------------------------------------------- the driver's routes
+
+  Future<List<MyRoute>> myRoutes() async {
+    final body = await _call('GET', '/v1/me/routes');
+    return [for (final r in _list(body, 'routes')) MyRoute.fromJson(r)];
+  }
+
+  Future<void> setNudge(String id, bool on) async {
+    await _call('PUT', '/v1/me/routes/$id/nudge', body: {'on': on});
+  }
+
+  Future<void> retireRoute(String id) async {
+    await _call('DELETE', '/v1/me/routes/$id');
+  }
 
   // ------------------------------------------------------------------ trips
 

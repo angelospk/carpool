@@ -17,6 +17,10 @@ LatLon? _point(Object? value) {
 
 String? _s(Object? value) => value as String?;
 
+/// One JSON object, with string keys, however the literal that built it was
+/// typed.
+Map<String, dynamic> _m(Object? value) => Map<String, dynamic>.from(value as Map);
+
 /// The person signed in.
 class Me {
   const Me({
@@ -91,6 +95,8 @@ class Participant {
     this.carPlate,
     this.pickup,
     this.dropoff,
+    this.canRate = false,
+    this.rated = false,
   });
 
   factory Participant.fromJson(Map<String, dynamic> json) => Participant(
@@ -104,6 +110,8 @@ class Participant {
         carPlate: _s(json['car_plate']),
         pickup: _point(json['pickup']),
         dropoff: _point(json['dropoff']),
+        canRate: json['can_rate'] as bool? ?? false,
+        rated: json['rated'] as bool? ?? false,
       );
 
   final String id;
@@ -116,6 +124,12 @@ class Participant {
   final String? carPlate;
   final LatLon? pickup;
   final LatLon? dropoff;
+
+  /// Whether the caller may still rate this person after the trip.
+  final bool canRate;
+
+  /// Whether the caller has already rated them.
+  final bool rated;
 }
 
 /// One pick-up or drop-off on the road, in road order.
@@ -218,14 +232,14 @@ class TripDetail {
       routePolyline: polyline,
       route: decodePolyline6(polyline),
       routeMin: (json['route_min'] as num?)?.toInt(),
-      driver: Participant.fromJson(json['driver'] as Map<String, dynamic>),
+      driver: Participant.fromJson(_m(json['driver'])),
       passengers: [
         for (final p in (json['passengers'] as List? ?? const []))
-          Participant.fromJson(p as Map<String, dynamic>),
+          Participant.fromJson(_m(p)),
       ],
       stops: [
         for (final s in (json['stops'] as List? ?? const []))
-          TripStop.fromJson(s as Map<String, dynamic>),
+          TripStop.fromJson(_m(s)),
       ],
       bookingId: _s(json['booking_id']),
       confirmedByMe: json['confirmed_by_me'] as bool? ?? false,
@@ -263,6 +277,16 @@ class TripDetail {
   TripStop? get myPickup {
     for (final stop in stops) {
       if (stop.kind == 'pickup' && stop.mine) return stop;
+    }
+    return null;
+  }
+
+  /// Who the caller is on this trip: the driver's id, or the passenger the
+  /// pick-up marked as theirs.
+  String? get myId {
+    if (role == TripRole.driver) return driver.id;
+    for (final stop in stops) {
+      if (stop.mine && stop.passengerId != null) return stop.passengerId;
     }
     return null;
   }
@@ -312,7 +336,7 @@ class LiveState {
         closes: _t(json['closes']),
         positions: [
           for (final p in (json['positions'] as List? ?? const []))
-            LivePosition.fromJson(p as Map<String, dynamic>),
+            LivePosition.fromJson(_m(p)),
         ],
         driverEtaMin: (json['driver_eta_min'] as num?)?.toInt(),
         etaAt: _tn(json['eta_at']),
@@ -542,4 +566,124 @@ class VerifyResult {
   final String? accessToken;
   final String? refreshToken;
   final String? signupToken;
+}
+
+/// Somebody the caller has blocked.
+class BlockedUser {
+  const BlockedUser({required this.id, required this.name, this.photoUrl});
+
+  factory BlockedUser.fromJson(Map<String, dynamic> json) => BlockedUser(
+        id: json['id'] as String,
+        name: json['name'] as String? ?? '',
+        photoUrl: _s(json['photo_url']),
+      );
+
+  final String id;
+  final String name;
+  final String? photoUrl;
+}
+
+/// One line of a trip's chat.
+class ChatMessage {
+  const ChatMessage({
+    required this.id,
+    required this.senderId,
+    required this.senderName,
+    required this.body,
+    required this.createdAt,
+  });
+
+  factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
+        id: json['id'] as String,
+        senderId: json['sender_id'] as String? ?? '',
+        senderName: json['sender_name'] as String? ?? '',
+        body: json['body'] as String? ?? '',
+        createdAt: _t(json['created_at']),
+      );
+
+  final String id;
+  final String senderId;
+  final String senderName;
+  final String body;
+  final DateTime createdAt;
+}
+
+/// A route the caller published, as their own list shows it.
+class MyRoute {
+  const MyRoute({
+    required this.id,
+    required this.originLabel,
+    required this.destinationLabel,
+    required this.routeKm,
+    required this.seats,
+    required this.kind,
+    required this.weekdays,
+    required this.departEarliest,
+    required this.departLatest,
+    required this.upcomingTrips,
+    required this.keptTrips,
+    required this.linkOpens,
+    required this.nudgeWhenLeaving,
+    this.oneoffDate,
+  });
+
+  factory MyRoute.fromJson(Map<String, dynamic> json) => MyRoute(
+        id: json['id'] as String,
+        originLabel: json['origin_label'] as String? ?? '',
+        destinationLabel: json['destination_label'] as String? ?? '',
+        routeKm: _d(json['route_km'] ?? 0),
+        seats: (json['seats'] as num?)?.toInt() ?? 1,
+        kind: json['kind'] as String? ?? '',
+        weekdays: [
+          for (final day in (json['weekdays'] as List? ?? const []))
+            if (day is num) day.toInt(),
+        ],
+        oneoffDate: _s(json['oneoff_date']),
+        departEarliest: json['depart_earliest'] as String? ?? '',
+        departLatest: json['depart_latest'] as String? ?? '',
+        upcomingTrips: (json['upcoming_trips'] as num?)?.toInt() ?? 0,
+        keptTrips: (json['kept_trips'] as num?)?.toInt() ?? 0,
+        linkOpens: (json['link_opens'] as num?)?.toInt() ?? 0,
+        nudgeWhenLeaving: json['nudge_when_leaving'] as bool? ?? false,
+      );
+
+  final String id;
+  final String originLabel;
+  final String destinationLabel;
+  final double routeKm;
+  final int seats;
+  final String kind;
+
+  /// ISO weekdays: 1 is Monday, 7 is Sunday.
+  final List<int> weekdays;
+
+  /// The one day of a one-off, as 'YYYY-MM-DD'.
+  final String? oneoffDate;
+  final String departEarliest;
+  final String departLatest;
+  final int upcomingTrips;
+
+  /// Trips with passengers already in them; retiring leaves them alone.
+  final int keptTrips;
+  final int linkOpens;
+  final bool nudgeWhenLeaving;
+
+  /// The same route with the nudge switched on or off, for the local echo of
+  /// the call that just went out.
+  MyRoute withNudge(bool on) => MyRoute(
+        id: id,
+        originLabel: originLabel,
+        destinationLabel: destinationLabel,
+        routeKm: routeKm,
+        seats: seats,
+        kind: kind,
+        weekdays: weekdays,
+        oneoffDate: oneoffDate,
+        departEarliest: departEarliest,
+        departLatest: departLatest,
+        upcomingTrips: upcomingTrips,
+        keptTrips: keptTrips,
+        linkOpens: linkOpens,
+        nudgeWhenLeaving: on,
+      );
 }
