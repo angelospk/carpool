@@ -14,6 +14,18 @@ Widget fakeMap(BuildContext context, MapSpec spec) => Text(
       key: const Key('map'),
     );
 
+/// A server answer that is an error with this status and code.
+class Fail {
+  const Fail(this.status, this.code);
+  final int status;
+  final String code;
+}
+
+/// A server answer with no body (204).
+class NoContent {
+  const NoContent();
+}
+
 /// An Api whose server is a table of "METHOD /path" → JSON, recording calls.
 ({Api api, List<String> calls, Map<String, Object?> bodies}) fakeApi(Map<String, Object> routes) {
   final calls = <String>[];
@@ -27,6 +39,11 @@ Widget fakeMap(BuildContext context, MapSpec spec) => Text(
       bodies[key] = req.body.isEmpty ? null : jsonDecode(req.body);
       final body = routes[key];
       if (body == null) return http.Response('{"error":{"code":"not_found","message":"x"}}', 404);
+      if (body is Fail) {
+        return http.Response('{"error":{"code":"${body.code}","message":"x"}}', body.status,
+            headers: {'content-type': 'application/json; charset=utf-8'});
+      }
+      if (body is NoContent) return http.Response('', 204);
       return http.Response(jsonEncode(body), key.startsWith('POST /v1/routes') && key == 'POST /v1/routes' ? 201 : 200,
           headers: {'content-type': 'application/json; charset=utf-8'});
     }),

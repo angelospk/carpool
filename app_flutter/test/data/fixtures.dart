@@ -123,3 +123,39 @@ const previewJson = {
     },
   ],
 };
+
+Map<String, Object?> messageJson(String id, String senderId, String senderName, String body) => {
+      'id': id,
+      'sender_id': senderId,
+      'sender_name': senderName,
+      'body': body,
+      'created_at': '2026-07-30T04:00:00Z',
+    };
+
+const routeJson = {
+  'id': 'r1',
+  'origin_label': 'Αλεξανδρούπολη',
+  'destination_label': 'Φέρες',
+  'route_km': 17.0,
+  'seats': 3,
+  'pricing_mode': 'auto',
+  'kind': 'weekly',
+  'weekdays': [1, 2, 3, 4, 5],
+  'depart_earliest': '07:30',
+  'depart_latest': '08:00',
+  'upcoming_trips': 2,
+  'kept_trips': 1,
+  'origin_lon': 25.87,
+  'origin_lat': 40.85,
+  'destination_lon': 26.17,
+  'destination_lat': 40.89,
+  'group_id': null,
+  'vehicle_id': null,
+  'luggage': 'small',
+  'luggage_capacity': 2,
+  'contribution_share': 1.0,
+  'allow_stops': true,
+  'detour_km': 3.0,
+  'link_opens': 5,
+  'nudge_when_leaving': false,
+};
