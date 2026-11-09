@@ -2,6 +2,7 @@
 // Requests still out, a cancelled trip, a home screen that goes stale.
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:carpool/core/athens_time.dart';
 import 'package:carpool/data/api.dart';
@@ -13,6 +14,8 @@ import 'package:carpool/ui/trip_screen.dart';
 import 'package:carpool/ui/user_profile_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import '../data/fixtures.dart';
 import 'harness.dart';
@@ -273,5 +276,61 @@ void main() {
     expect(find.textContaining('Νίκος'), findsOneWidget);
     await tester.tap(find.text('Αλεξανδρούπολη → Φέρες'));
     expect(opened, 'occ9');
+  });
+  testWidgets('an older home answer landing late does not replace a newer one', (tester) async {
+    await bigPhone(tester);
+    final observer = RouteObserver<ModalRoute<void>>();
+    final navigator = GlobalKey<NavigatorState>();
+    final first = Completer<void>();
+    var upcoming = 0;
+    Map<String, Object?> trip(String to) => {
+          'id': 'occ1', 'role': 'passenger', 'depart_earliest': '2026-07-30T04:30:00Z',
+          'depart_latest': '2026-07-30T05:00:00Z', 'status': 'scheduled', 'route_km': 17.0,
+          'origin_label': 'Αλεξανδρούπολη', 'destination_label': to, 'price_eur': 3.5, 'seats_free': 2,
+        };
+    final api = Api(
+      baseUrl: 'http://api',
+      tokens: MemoryTokenStore(access: 'a', refresh: 'r'),
+      client: MockClient((req) async {
+        Object body = {'trips': <Object>[], 'asks': <Object>[], 'requests': <Object>[]};
+        if (req.url.path == '/v1/me') body = {'id': 'u1', 'phone': '+30690', 'name': 'Ελένη'};
+        if (req.url.path == '/v1/trips/upcoming') {
+          upcoming++;
+          if (upcoming == 2) {
+            await first.future;
+            body = {'trips': [trip('Παλιό')]};
+          } else {
+            body = {'trips': [trip(upcoming == 1 ? 'Πρώτο' : 'Νέο')]};
+          }
+        }
+        return http.Response(jsonEncode(body), 200, headers: {'content-type': 'application/json; charset=utf-8'});
+      }),
+    );
+    await tester.pumpWidget(MaterialApp(
+      theme: carpoolTheme(),
+      navigatorKey: navigator,
+      navigatorObservers: [observer],
+      home: HomeScreen(
+        api: api,
+        mapBuilder: fakeMap,
+        routeObserver: observer,
+        onOpenTrip: (_) => navigator.currentState!.push(MaterialPageRoute<void>(
+          builder: (_) => Scaffold(appBar: AppBar(title: const Text('trip'))),
+        )),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // Two returns: the first reload hangs, the second answers at once.
+    for (var i = 0; i < 2; i++) {
+      await tester.tap(find.textContaining('Αλεξανδρούπολη →'));
+      await tester.pumpAndSettle();
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+    }
+    expect(find.textContaining('Νέο'), findsOneWidget);
+    first.complete();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Νέο'), findsOneWidget);
+    expect(find.textContaining('Παλιό'), findsNothing);
   });
 }

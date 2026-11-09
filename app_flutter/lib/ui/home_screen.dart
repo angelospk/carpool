@@ -80,7 +80,11 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     _load();
   }
 
+  /// Counts reloads, so an answer to an older one is dropped.
+  int _generation = 0;
+
   Future<void> _load() async {
+    final generation = ++_generation;
     try {
       final results = await Future.wait<Object?>([
         _soft(widget.api.me()),
@@ -90,7 +94,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
         _soft(widget.api.liveMap()),
         _soft(widget.api.pastTrips()),
       ]);
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       setState(() {
         _me = results[0] as Me?;
         _trips = (results[1] as List<TripSummary>?) ?? const [];
@@ -101,7 +105,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
         _loading = false;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       setState(() => _loading = false);
     }
   }

@@ -204,6 +204,7 @@ void main() {
     await tester.tap(find.text('Κάτι άλλο'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'Άργησε μία ώρα');
+    await tester.pump();
     await tester.tap(find.text('Στείλε την αναφορά'));
     await tester.pumpAndSettle();
 

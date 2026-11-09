@@ -188,7 +188,7 @@ class _ReportDialogState extends State<_ReportDialog> {
     super.dispose();
   }
 
-  bool get _ready => _reason != null;
+  bool get _ready => _reason != null && (_reason != 'other' || _detail.text.trim().isNotEmpty);
 
   void _send() {
     final reason = _reason;
@@ -225,8 +225,9 @@ class _ReportDialogState extends State<_ReportDialog> {
               controller: _detail,
               maxLines: 3,
               minLines: 1,
-              decoration: const InputDecoration(
-                labelText: 'Πες μας λίγα παραπάνω (προαιρετικό)',
+              decoration: InputDecoration(
+                // «Κάτι άλλο» says nothing without the words.
+                labelText: _reason == 'other' ? 'Πες μας τι έγινε' : 'Πες μας λίγα παραπάνω (προαιρετικό)',
                 hintText: 'Τι έγινε, με δικά σου λόγια',
               ),
               onChanged: (_) => setState(() {}),
