@@ -39,8 +39,13 @@ class DriveTracker {
 
   static bool isSharing(String tripId) => _tripId == tripId && _subscription != null;
 
+  /// Bumped by every stop, so a start still waiting on the permission dialog
+  /// knows it was overtaken (a sign-out meanwhile) and does not switch on.
+  static int _generation = 0;
+
   static Future<void> start(Api api, String tripId) async {
     await stop(api, null);
+    final generation = _generation;
 
     LocationPermission permission;
     try {
@@ -57,6 +62,7 @@ class DriveTracker {
       debugPrint('the drive cannot start: location permission was refused');
       return;
     }
+    if (generation != _generation) return;
 
     _tripId = tripId;
     _lastSent = null;
@@ -75,7 +81,9 @@ class DriveTracker {
         : AndroidSettings(
             accuracy: LocationAccuracy.high,
             distanceFilter: 0,
-            intervalDuration: const Duration(seconds: 30),
+            // Faster than _minGap: a fix arriving a moment early would
+            // otherwise be dropped and the next one sent a minute late.
+            intervalDuration: const Duration(seconds: 10),
             foregroundNotificationConfig: const ForegroundNotificationConfig(
               notificationTitle: 'Μοιράζεσαι τη θέση σου',
               notificationText: 'Οι επιβάτες σου βλέπουν πού είσαι μέχρι το τέλος της διαδρομής.',
@@ -94,6 +102,7 @@ class DriveTracker {
   /// Stops sampling and tells the server, which lets the passengers see the
   /// car stop sharing rather than wait on a stale fix.
   static Future<void> stop(Api api, String? tripId) async {
+    _generation++;
     final current = _tripId;
     _tripId = null;
     _lastSent = null;
@@ -103,7 +112,9 @@ class DriveTracker {
     final id = tripId ?? current;
     if (id == null) return;
     try {
-      await api.stopPosition(id);
+      // Bounded: a sign-out must not hang on a dead connection, and the
+      // server stops showing a position that stops arriving anyway.
+      await api.stopPosition(id).timeout(const Duration(seconds: 5));
     } catch (error) {
       // The trip may already be over, from another phone. There is nobody
       // left to tell.

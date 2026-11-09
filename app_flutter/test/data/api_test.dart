@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:carpool/core/geo.dart';
@@ -67,6 +68,29 @@ void main() {
       }),
     );
     await expectLater(api.me(), throwsA(isA<ApiException>()));
+    expect(await tokens.read(), isNull);
+  });
+
+  test('signing out while a refresh is on the wire leaves nobody signed in', () async {
+    final answer = Completer<http.Response>();
+    final tokens = MemoryTokenStore(access: 'old', refresh: 'r1');
+    final api = Api(
+      baseUrl: 'http://api',
+      tokens: tokens,
+      client: MockClient((req) async {
+        if (req.url.path == '/v1/auth/refresh') return answer.future;
+        if (req.headers['authorization'] == 'Bearer new') {
+          return json({'id': 'u1', 'phone': '+30690', 'name': 'Ελένη'});
+        }
+        return json({}, 401);
+      }),
+    );
+    final call = api.me().then((_) {}, onError: (_) {});
+    await Future<void>.delayed(Duration.zero);
+    final out = api.signOut();
+    answer.complete(json({'access_token': 'new', 'refresh_token': 'r2'}));
+    await out;
+    await call;
     expect(await tokens.read(), isNull);
   });
 

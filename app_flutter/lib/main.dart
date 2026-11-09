@@ -100,7 +100,7 @@ class _CarpoolAppState extends State<CarpoolApp> {
     // A drive in progress stops sharing the car's position with the person who
     // started it, and says so while the session can still say anything.
     await DriveTracker.stop(_api, null);
-    await _api.tokens.clear();
+    await _api.signOut();
     if (!mounted) return;
     setState(() => _signedIn = false);
   }

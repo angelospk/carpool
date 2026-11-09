@@ -110,7 +110,9 @@ class _SearchScreenState extends State<SearchScreen> {
     if (from == null || to == null || _busy) return;
 
     final start = _athensOn(_day, _start);
-    final end = _athensOn(_day, _end);
+    var end = _athensOn(_day, _end);
+    // 23:30 to 00:30 is an hour that ends the next day, not a backwards one.
+    if (end.isBefore(start)) end = _athensOn(_day.add(const Duration(days: 1)), _end);
     if (!end.isAfter(start)) {
       setState(() => _error = 'Η τελευταία ώρα πρέπει να είναι μετά την πρώτη.');
       return;

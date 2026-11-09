@@ -193,6 +193,22 @@ class Api {
     ];
   }
 
+  /// Waits out a refresh on the wire, so that its answer cannot land on a
+  /// session that changed meanwhile.
+  Future<void> _settled() async {
+    try {
+      await _refreshing;
+    } catch (_) {
+      // A failed refresh changed nothing worth waiting for.
+    }
+  }
+
+  /// Forgets the session on this phone.
+  Future<void> signOut() async {
+    await _settled();
+    await tokens.clear();
+  }
+
   Future<bool> _refreshOnce() {
     final running = _refreshing;
     if (running != null) return running;
@@ -273,6 +289,7 @@ class Api {
     ));
     final result = VerifyResult.fromJson(body);
     if (result.accessToken != null && result.refreshToken != null) {
+      await _settled();
       await tokens.write(result.accessToken!, result.refreshToken!);
     }
     return result;
@@ -300,6 +317,7 @@ class Api {
     final access = body['access_token'];
     final refresh = body['refresh_token'];
     if (access is String && refresh is String) {
+      await _settled();
       await tokens.write(access, refresh);
     }
   }

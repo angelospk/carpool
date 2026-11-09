@@ -222,6 +222,10 @@ class _TripScreenState extends State<TripScreen> {
       if (!mounted) return;
       setState(() => _busy = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
     }
   }
 
@@ -273,6 +277,10 @@ class _TripScreenState extends State<TripScreen> {
       if (!mounted) return;
       setState(() => _busy = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
     }
   }
 
@@ -297,6 +305,10 @@ class _TripScreenState extends State<TripScreen> {
       setState(() => _busy = false);
       await _refreshTrip();
     } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));
+    } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(e))));

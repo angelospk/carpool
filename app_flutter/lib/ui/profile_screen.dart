@@ -76,7 +76,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
     final scope = AppScope.maybeOf(context);
-    await widget.api.tokens.clear();
+    await widget.api.signOut();
     if (!mounted) return;
     if (scope != null) {
       scope.onSignedOut();

@@ -28,6 +28,9 @@ class Push {
   Push._();
 
   static bool _ready = false;
+
+  /// One token-refresh listener per process: register runs on every sign-in.
+  static bool _refreshListened = false;
   static void Function(String route)? _open;
 
   static const FlutterSecureStorage _storage = FlutterSecureStorage();
@@ -77,6 +80,8 @@ class Push {
 
       // A rotation is not a rare event over a phone's life, and the server
       // retires the old token when it notices.
+      if (_refreshListened) return;
+      _refreshListened = true;
       // ignore: deprecated_member_use
       FirebaseMessaging.instance.onTokenRefresh.listen((fresh) {
         _sendToServer(api, fresh).catchError((Object error) {
