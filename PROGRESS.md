@@ -48,6 +48,35 @@ failing at step 3 since vehicles landed. It declares the car through the real
 endpoint instead, which is also what makes the suggested contribution real
 rather than a fixed consumption figure.
 
+## The Flutter port (2026-11-09, branch `feat/flutter-app`)
+
+`app_flutter/` is a Flutter rewrite of the Expo app. The Expo app in `app/`
+stays until the Flutter one passes the two-phone test.
+
+| What | Where |
+| --- | --- |
+| Pilot flow: publish, request, ask, accept, trip, both confirm | `app_flutter/lib/ui/` |
+| Live car position + ETA, kept going with the screen off (foreground service) | `lib/platform/drive_tracker.dart` |
+| Meeting point with a walking line | trip screen |
+| «παράκαμψη +N'» before the driver says yes | ask screen |
+| Live share link for a passenger's family | `POST /v1/trips/{id}/share`, page `/t/{token}` |
+| Route preview with alternatives; publishing stores the road picked | `POST /v1/routes/preview`, `via` on `POST /v1/routes` |
+| Signed release APK, CI artifact `carpool-flutter-apk` | `.github/workflows/flutter-apk.yml` |
+
+Backend changes: migrations 00046 (`trip_shares`) and 00047
+(`route_templates.via`). The matcher measures detours from the road the driver
+picked, not from the fastest one.
+
+Checked on an emulator against the dev API on 2026-11-09: the whole pilot flow,
+with the driver's side on the device and the passenger's request through the
+API, then the passenger's side on the device and the driver's position through
+the API (one usable emulator on this machine).
+
+Follow-up for `human`: the two-phone test. Install the `carpool-flutter-apk`
+artifact on two phones, run the pilot flow once as driver and once as
+passenger, with one phone locked during the drive. Only after it passes:
+remove `app/`. Push stays off until the secrets in docs/PUSH.md exist.
+
 ## How to run things
 
 ```bash
