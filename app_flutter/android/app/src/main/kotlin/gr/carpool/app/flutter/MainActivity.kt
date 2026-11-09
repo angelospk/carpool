@@ -1,4 +1,4 @@
-package gr.carpool.carpool
+package gr.carpool.app.flutter
 
 import io.flutter.embedding.android.FlutterActivity
 

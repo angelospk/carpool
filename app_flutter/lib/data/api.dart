@@ -436,6 +436,7 @@ class Api {
     required String fuel,
     required String plate,
     required String colour,
+    int? engineCc,
   }) async {
     await _call('PUT', '/v1/me/driver', body: {
       'make': make,
@@ -443,6 +444,7 @@ class Api {
       'fuel': fuel,
       'plate': plate,
       'colour': colour,
+      'engine_cc': ?engineCc,
     });
   }
 }

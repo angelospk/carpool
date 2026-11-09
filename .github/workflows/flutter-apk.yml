@@ -1,0 +1,94 @@
+# Builds the Flutter app (app_flutter/) on every push that touches it: analyze,
+# test, then a signed release APK against the public API, kept as a workflow
+# artifact for 14 days. It installs next to the Expo app (gr.carpool.app.flutter),
+# so both can sit on one phone during the two-phone test.
+name: flutter-apk
+
+on:
+  push:
+    branches: [master, feat/flutter-app]
+    paths:
+      - "app_flutter/**"
+      - ".github/workflows/flutter-apk.yml"
+  pull_request:
+    paths:
+      - "app_flutter/**"
+      - ".github/workflows/flutter-apk.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: flutter-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: app_flutter
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.8'
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+      # Push needs both; without them the APK still builds with push off.
+      - name: Firebase config for push
+        env:
+          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_B64" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_B64" | base64 -d > android/app/google-services.json
+          else
+            echo "no GOOGLE_SERVICES_JSON_B64 secret: this APK has push notifications off"
+          fi
+
+      # The same key as the Expo app. A pull request from a fork has no
+      # secrets and gets a debug-signed APK instead.
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then echo "no signing key: debug-signed"; exit 0; fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=carpool\nkeyPassword=%s\n' \
+            "$RUNNER_TEMP/release.keystore" "$KEYSTORE_PASSWORD" "$KEYSTORE_PASSWORD" > "$RUNNER_TEMP/key.properties"
+          echo "CARPOOL_KEY_PROPERTIES=$RUNNER_TEMP/key.properties" >> "$GITHUB_ENV"
+
+      - name: Build
+        env:
+          EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
+        run: |
+          flutter build apk --release \
+            --build-number=$((100000 + GITHUB_RUN_NUMBER)) \
+            --dart-define=API_URL=https://carpool.haroldpoi.dev \
+            --dart-define=EAS_PROJECT_ID="$EAS_PROJECT_ID"
+          mkdir -p out
+          cp build/app/outputs/flutter-apk/app-release.apk "out/carpool-flutter-${GITHUB_RUN_NUMBER}.apk"
+
+      - name: Check the signature
+        if: env.CARPOOL_KEY_PROPERTIES != ''
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs out/*.apk |
+            grep -qi "SHA-256 digest: 293b78ee2f240204e436851cceaa734e836ad34147de041c7ce62c803e0817ec"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: carpool-flutter-apk
+          path: app_flutter/out/*.apk
+          retention-days: 14

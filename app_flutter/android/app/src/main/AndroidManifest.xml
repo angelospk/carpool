@@ -1,6 +1,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The app talks to the API and draws tiles over the network. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- A driver's position while they are driving: precise for the road, coarse
+         so a refusal of the precise one still says roughly where the car is. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+
+    <!-- The foreground service that keeps positions coming with the screen off.
+         geolocator declares the service; the app must declare what it is for. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
+    <!-- A driver saying yes, seen on a locked phone. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
-        android:label="carpool"
+        android:label="Carpool"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -30,7 +48,14 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- A notification tapped while the app is closed must not be dropped:
+             Firebase's messaging service is declared by its own manifest and
+             the tap is read at launch by getInitialMessage. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="asks" />
     </application>
+
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
          https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
@@ -40,6 +65,21 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- url_launcher: a driver's number becomes a call, and a maps app
+             becomes the way to the meeting point. Without these the package
+             manager answers "nothing opens tel:" and the button does nothing. -->
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="geo"/>
         </intent>
     </queries>
 </manifest>

@@ -1,122 +1,230 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+
+import 'config.dart';
+import 'core/athens_time.dart';
+import 'data/api.dart';
+import 'data/models.dart';
+import 'platform/drive_tracker.dart';
+import 'platform/push.dart';
+import 'ui/app_scope.dart';
+import 'ui/ask_screen.dart';
+import 'ui/auth_screens.dart';
+import 'ui/home_screen.dart';
+import 'ui/profile_screen.dart';
+import 'ui/publish_screen.dart';
+import 'ui/request_screen.dart';
+import 'ui/search_screen.dart';
+import 'ui/theme.dart';
+import 'ui/trip_screen.dart';
+
+/// The one navigator that pushes and pops go through, including the ones a
+/// tapped notification starts.
+final GlobalKey<NavigatorState> carpoolNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() {
-  runApp(const MyApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  initAthensTime();
+  runApp(const CarpoolApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+/// The app's shell: one Api, one session, one navigator.
+///
+/// Screens are pushed on top of the home screen rather than switched between,
+/// so nobody loses their place in the map when a driver is answered.
+class CarpoolApp extends StatefulWidget {
+  const CarpoolApp({super.key});
 
-  // This widget is the root of your application.
+  @override
+  State<CarpoolApp> createState() => _CarpoolAppState();
+}
+
+class _CarpoolAppState extends State<CarpoolApp> {
+  late final Api _api;
+
+  /// Null until the stored tokens have been read; then whether a session is on.
+  bool? _signedIn;
+
+  /// A notification tapped before sign-in finished. It opens once the home
+  /// screen is up, not while the phone screen is still asking for a number.
+  String? _pendingRoute;
+
+  @override
+  void initState() {
+    super.initState();
+    _api = Api(
+      baseUrl: apiUrl,
+      tokens: SecureTokenStore(),
+      onSessionEnded: _onSessionEnded,
+    );
+    // Registered before the session is read: the callback is what a tap needs,
+    // and the tap may have launched the app.
+    Push.listen(_openRoute);
+    _restoreSession();
+  }
+
+  Future<void> _restoreSession() async {
+    final tokens = await _api.tokens.read();
+    if (!mounted) return;
+    setState(() => _signedIn = tokens != null);
+    if (_signedIn == true) {
+      Push.register(_api);
+      _openPendingRoute();
+    }
+  }
+
+  /// The server refused the session. The tokens are already gone, so the only
+  /// work left is to forget the pushed screens and ask for a number.
+  void _onSessionEnded() {
+    carpoolNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+    if (!mounted) return;
+    setState(() => _signedIn = false);
+  }
+
+  /// Somebody just signed in, from the phone, OTP or sign-up screen.
+  void _onSignedIn() {
+    carpoolNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+    if (!mounted) return;
+    setState(() => _signedIn = true);
+    // Not awaited: nothing on any screen waits for a push token, and a launch
+    // that cannot get one must still open.
+    Push.register(_api);
+    _openPendingRoute();
+  }
+
+  Future<void> _onSignedOut() async {
+    final navigator = carpoolNavigatorKey.currentState;
+    navigator?.popUntil((route) => route.isFirst);
+    await _api.tokens.clear();
+    if (!mounted) return;
+    setState(() => _signedIn = false);
+  }
+
+  void _openPendingRoute() {
+    final route = _pendingRoute;
+    if (route == null || _signedIn != true) return;
+    _pendingRoute = null;
+    _openRoute(route);
+  }
+
+  /// Opens `'/ask/<id>'`, `'/trip/<id>'`, or the home screen for anything else.
+  void _openRoute(String route) {
+    if (_signedIn != true) {
+      _pendingRoute = route;
+      return;
+    }
+    final navigator = carpoolNavigatorKey.currentState;
+    if (navigator == null) {
+      _pendingRoute = route;
+      return;
+    }
+    final ask = RegExp(r'^/ask/([0-9a-fA-F-]{1,64})$').firstMatch(route);
+    if (ask != null) {
+      _openAsk(ask.group(1)!);
+      return;
+    }
+    final trip = RegExp(r'^/trip/([0-9a-fA-F-]{1,64})$').firstMatch(route);
+    if (trip != null) {
+      _openTrip(trip.group(1)!);
+      return;
+    }
+    navigator.popUntil((r) => r.isFirst);
+  }
+
+  void _openTrip(String id) {
+    carpoolNavigatorKey.currentState?.push(MaterialPageRoute<void>(
+      builder: (_) => TripScreen(
+        api: _api,
+        tripId: id,
+        onStartDrive: _startDrive,
+      ),
+    ));
+  }
+
+  void _openAsk(String id) {
+    carpoolNavigatorKey.currentState?.push(MaterialPageRoute<void>(
+      builder: (_) => AskScreen(api: _api, askId: id),
+    ));
+  }
+
+  void _openRequest(String id) {
+    carpoolNavigatorKey.currentState?.push(MaterialPageRoute<void>(
+      builder: (_) => RequestScreen(api: _api, requestId: id),
+    ));
+  }
+
+  void _openSearch() {
+    carpoolNavigatorKey.currentState?.push(MaterialPageRoute<void>(
+      builder: (_) => SearchScreen(api: _api, onRequested: _openRequest),
+    ));
+  }
+
+  void _openPublish() {
+    carpoolNavigatorKey.currentState?.push(MaterialPageRoute<void>(
+      builder: (_) => PublishScreen(
+        api: _api,
+        onPublished: (result) {
+          final id = result.firstOccurrenceId;
+          if (id != null) _openTrip(id);
+        },
+      ),
+    ));
+  }
+
+  void _openProfile() {
+    carpoolNavigatorKey.currentState?.push(MaterialPageRoute<void>(
+      builder: (_) => ProfileScreen(api: _api, onSignOut: _onSignedOut),
+    ));
+  }
+
+  /// «Φεύγω» is what starts sharing a position, with the screen off.
+  Future<void> _startDrive(TripDetail trip) => DriveTracker.start(_api, trip.id);
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+    final signedIn = _signedIn;
+    return AppScope(
+      api: _api,
+      signedIn: signedIn,
+      onSignedIn: _onSignedIn,
+      onSignedOut: _onSignedOut,
+      openRoute: _openRoute,
+      child: MaterialApp(
+        title: 'Carpool',
+        theme: carpoolTheme(),
+        navigatorKey: carpoolNavigatorKey,
+        locale: const Locale('el', 'GR'),
+        supportedLocales: const [Locale('el', 'GR'), Locale('en', 'US')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        home: signedIn == null
+            ? const _Starting()
+            : signedIn
+                ? HomeScreen(
+                    api: _api,
+                    onOpenTrip: _openTrip,
+                    onOpenAsk: _openAsk,
+                    onOpenRequest: _openRequest,
+                    onSearch: _openSearch,
+                    onPublish: _openPublish,
+                    onProfile: _openProfile,
+                  )
+                : PhoneScreen(api: _api),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
-  }
+/// The moment between opening the app and knowing whether somebody is signed
+/// in. Short, and never presented as a question.
+class _Starting extends StatelessWidget {
+  const _Starting();
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ),
-    );
+    return const Scaffold(body: Center(child: CircularProgressIndicator()));
   }
 }
