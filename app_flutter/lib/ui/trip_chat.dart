@@ -141,6 +141,7 @@ class _TripChatState extends State<TripChat> {
             Expanded(
               child: TextField(
                 controller: _draft,
+                enabled: !_sending,
                 textInputAction: TextInputAction.send,
                 decoration: const InputDecoration(hintText: 'Γράψε μήνυμα…'),
                 onChanged: (_) => setState(() {}),

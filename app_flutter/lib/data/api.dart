@@ -415,6 +415,15 @@ class Api {
     return [for (final t in _list(body, 'trips')) TripSummary.fromJson(t)];
   }
 
+  /// Rides the caller took as a passenger, newest first, with the driver's name.
+  Future<List<({TripSummary trip, String driverName})>> pastTrips() async {
+    final body = await _call('GET', '/v1/trips/past');
+    return [
+      for (final t in _list(body, 'trips'))
+        (trip: TripSummary.fromJson(t), driverName: t['driver_name'] as String? ?? ''),
+    ];
+  }
+
   Future<TripDetail> trip(String id) async =>
       TripDetail.fromJson(_map(await _call('GET', '/v1/trips/$id')));
 

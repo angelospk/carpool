@@ -35,6 +35,8 @@ class UserProfileScreen extends StatefulWidget {
 class _UserProfileScreenState extends State<UserProfileScreen> {
   bool _loading = true;
   bool _blocked = false;
+  bool _known = false;
+  String? _loadError;
   bool _busy = false;
 
   @override
@@ -45,16 +47,24 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   /// Reads the blocked list once, to know which of the two buttons to show.
   Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
     try {
       final blocked = await widget.api.blocks();
       if (!mounted) return;
       setState(() {
         _blocked = blocked.any((user) => user.id == widget.userId);
+        _known = true;
         _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() {
+        _loadError = 'Δεν φόρτωσε το προφίλ.';
+        _loading = false;
+      });
     }
   }
 
@@ -86,11 +96,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 
   Future<void> _report() async {
+    if (_busy) return;
     final reason = await showDialog<({String id, String detail})>(
       context: context,
       builder: (_) => const _ReportDialog(),
     );
     if (reason == null || !mounted) return;
+    setState(() => _busy = true);
     try {
       final body = reason.detail.isEmpty ? reason.id : '${reason.id}: ${reason.detail}';
       await widget.api.report(widget.userId, body);
@@ -99,6 +111,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     } catch (error) {
       if (!mounted) return;
       _say(failureText(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -119,19 +133,31 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 children: [
                   Text(name, style: theme.textTheme.titleLarge),
                   const Divider(height: 32),
-                  FilledButton(
-                    onPressed: _busy ? null : _toggleBlock,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _blocked ? Ink.muted : Ink.danger,
+                  if (!_known) ...[
+                    Text(
+                      _loadError ?? 'Δεν φόρτωσε το προφίλ.',
+                      style: TextStyle(color: theme.colorScheme.error),
                     ),
-                    child: Text(_blocked ? 'Άρση αποκλεισμού' : 'Αποκλεισμός'),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Δεν θα σας φέρουμε ξανά σε ίδιο ταξίδι. Ταξίδι που έχετε ήδη '
-                    'κλείσει δεν ακυρώνεται: αυτό γίνεται από το ίδιο το ταξίδι.',
-                    style: TextStyle(color: Ink.muted),
-                  ),
+                    const SizedBox(height: 12),
+                    OutlinedButton(
+                      onPressed: _loading ? null : _load,
+                      child: const Text('Δοκίμασε ξανά'),
+                    ),
+                  ] else ...[
+                    FilledButton(
+                      onPressed: _busy ? null : _toggleBlock,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _blocked ? Ink.muted : Ink.danger,
+                      ),
+                      child: Text(_blocked ? 'Άρση αποκλεισμού' : 'Αποκλεισμός'),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Δεν θα σας φέρουμε ξανά σε ίδιο ταξίδι. Ταξίδι που έχετε ήδη '
+                      'κλείσει δεν ακυρώνεται: αυτό γίνεται από το ίδιο το ταξίδι.',
+                      style: TextStyle(color: Ink.muted),
+                    ),
+                  ],
                   const Divider(height: 32),
                   OutlinedButton(
                     onPressed: _busy ? null : _report,

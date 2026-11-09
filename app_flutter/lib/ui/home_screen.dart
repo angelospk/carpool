@@ -21,6 +21,7 @@ class HomeScreen extends StatefulWidget {
     this.onSearch,
     this.onPublish,
     this.onProfile,
+    this.routeObserver,
   });
 
   final Api api;
@@ -32,21 +33,50 @@ class HomeScreen extends StatefulWidget {
   final VoidCallback? onPublish;
   final VoidCallback? onProfile;
 
+  /// Tells the screen when a pushed screen closes, so the lists read again.
+  final RouteObserver<ModalRoute<void>>? routeObserver;
+
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with RouteAware {
   Me? _me;
   List<TripSummary> _trips = const [];
   List<PendingAsk> _asks = const [];
   List<OpenRequest> _requests = const [];
+  List<({TripSummary trip, String driverName})> _past = const [];
   List<List<LatLon>> _live = const [];
   bool _loading = true;
+  bool _subscribed = false;
 
   @override
   void initState() {
     super.initState();
+    _load();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_subscribed) return;
+    final observer = widget.routeObserver;
+    if (observer == null) return;
+    final route = ModalRoute.of<void>(context);
+    if (route == null) return;
+    observer.subscribe(this, route);
+    _subscribed = true;
+  }
+
+  @override
+  void dispose() {
+    if (_subscribed) widget.routeObserver?.unsubscribe(this);
+    super.dispose();
+  }
+
+  /// A screen on top of this one closed: what it changed may be here too.
+  @override
+  void didPopNext() {
     _load();
   }
 
@@ -58,6 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _soft(widget.api.pendingAsks()),
         _soft(widget.api.myRequests()),
         _soft(widget.api.liveMap()),
+        _soft(widget.api.pastTrips()),
       ]);
       if (!mounted) return;
       setState(() {
@@ -66,6 +97,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _asks = (results[2] as List<PendingAsk>?) ?? const [];
         _requests = (results[3] as List<OpenRequest>?) ?? const [];
         _live = (results[4] as List<List<LatLon>>?) ?? const [];
+        _past = (results[5] as List<({TripSummary trip, String driverName})>?) ?? const [];
         _loading = false;
       });
     } catch (_) {
@@ -239,7 +271,50 @@ class _HomeScreenState extends State<HomeScreen> {
       onPressed: widget.onPublish,
       child: const Text('Προσφέρω θέσεις'),
     ));
+
+    if (_past.isNotEmpty) {
+      rows.add(const SizedBox(height: 24));
+      rows.add(_sectionTitle('Παλιότερες διαδρομές'));
+      for (final past in _past) {
+        rows.add(_pastRow(past.trip, past.driverName));
+      }
+    }
     return rows;
+  }
+
+  /// A ride already taken: opening it is where the rating is.
+  Widget _pastRow(TripSummary trip, String driverName) {
+    final status = switch (trip.status) {
+      'completed' => ' · Ολοκληρώθηκε',
+      'cancelled' => ' · Ακυρώθηκε',
+      _ => '',
+    };
+    return InkWell(
+      onTap: widget.onOpenTrip == null ? null : () => widget.onOpenTrip!(trip.id),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          border: Border.all(color: Ink.line),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${trip.originLabel} → ${trip.destinationLabel}',
+              style: const TextStyle(color: Ink.ink, fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${athensDay(trip.departEarliest)} · $driverName$status',
+              style: const TextStyle(color: Ink.muted, fontSize: 14),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _sectionTitle(String text) {

@@ -229,6 +229,7 @@ class _TripScreenState extends State<TripScreen> {
       await widget.api.confirmTrip(trip.id);
       if (!mounted) return;
       setState(() => _confirmed = true);
+      await _refreshTrip();
     } catch (e) {
       if (!mounted) return;
       _say(failureText(e));
@@ -308,9 +309,11 @@ class _TripScreenState extends State<TripScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         content: Text(
-          count > 0
-              ? 'Η διαδρομή δεν θα γίνει. Θα ειδοποιηθούν $count επιβάτες.'
-              : 'Η διαδρομή αυτή δεν θα γίνει.',
+          count == 0
+              ? 'Η διαδρομή αυτή δεν θα γίνει.'
+              : count == 1
+                  ? 'Η διαδρομή δεν θα γίνει. Θα ειδοποιηθεί 1 επιβάτης.'
+                  : 'Η διαδρομή δεν θα γίνει. Θα ειδοποιηθούν $count επιβάτες.',
         ),
         actions: [
           TextButton(
@@ -514,11 +517,19 @@ class _TripScreenState extends State<TripScreen> {
               ),
             ),
           ),
+          if (_cancelled(trip)) ...[
+            const SizedBox(height: 4),
+            const Text('Ακυρώθηκε', style: TextStyle(color: Ink.muted, fontSize: 15)),
+            const SizedBox(height: 5),
+          ],
           if (trip.role == TripRole.passenger) ..._passengerBody(trip) else ..._driverBody(trip),
         ],
       ),
     );
   }
+
+  /// Whether the whole departure was called off: then there is nothing to do on it.
+  bool _cancelled(TripDetail trip) => trip.status == 'cancelled';
 
   // ---------------------------------------------------------------- passenger
 
@@ -582,15 +593,17 @@ class _TripScreenState extends State<TripScreen> {
       const SizedBox(height: 20),
       _timeline(trip),
       const SizedBox(height: 20),
-      _confirmButton(trip),
-      ..._ratingSection(trip),
-      if (_before(trip) && trip.bookingId != null) ...[
-        const SizedBox(height: 12),
-        OutlinedButton(
-          style: OutlinedButton.styleFrom(foregroundColor: Ink.danger),
-          onPressed: _busy ? null : () => _leaveTrip(trip),
-          child: const Text('Δεν θα έρθω'),
-        ),
+      if (!_cancelled(trip)) ...[
+        _confirmButton(trip),
+        ..._ratingSection(trip),
+        if (_before(trip) && trip.bookingId != null) ...[
+          const SizedBox(height: 12),
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(foregroundColor: Ink.danger),
+            onPressed: _busy ? null : () => _leaveTrip(trip),
+            child: const Text('Δεν θα έρθω'),
+          ),
+        ],
       ],
       const SizedBox(height: 20),
       TripChat(
@@ -881,7 +894,9 @@ class _TripScreenState extends State<TripScreen> {
     }
 
     rows.add(const SizedBox(height: 8));
-    if (trip.driveSetAt == null) {
+    if (_cancelled(trip)) {
+      // Called off: nothing left to start, end, call off or confirm.
+    } else if (trip.driveSetAt == null) {
       rows.add(
         FilledButton(
           onPressed: _busy ? null : () => _startDrive(trip),
@@ -908,7 +923,7 @@ class _TripScreenState extends State<TripScreen> {
       );
       rows.add(const SizedBox(height: 10));
     }
-    rows.add(_confirmButton(trip));
+    if (!_cancelled(trip)) rows.add(_confirmButton(trip));
     rows.addAll(_ratingSection(trip));
     rows.add(const SizedBox(height: 20));
     rows.add(

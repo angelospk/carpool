@@ -22,6 +22,9 @@ import 'ui/trip_screen.dart';
 /// tapped notification starts.
 final GlobalKey<NavigatorState> carpoolNavigatorKey = GlobalKey<NavigatorState>();
 
+/// Tells screens when a pushed screen closes, so the home lists read again.
+final RouteObserver<ModalRoute<void>> carpoolRouteObserver = RouteObserver<ModalRoute<void>>();
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   initAthensTime();
@@ -203,6 +206,7 @@ class _CarpoolAppState extends State<CarpoolApp> {
         title: 'Carpool',
         theme: carpoolTheme(),
         navigatorKey: carpoolNavigatorKey,
+        navigatorObservers: [carpoolRouteObserver],
         locale: const Locale('el', 'GR'),
         supportedLocales: const [Locale('el', 'GR'), Locale('en', 'US')],
         localizationsDelegates: const [
@@ -215,6 +219,7 @@ class _CarpoolAppState extends State<CarpoolApp> {
             : signedIn
                 ? HomeScreen(
                     api: _api,
+                    routeObserver: carpoolRouteObserver,
                     onOpenTrip: _openTrip,
                     onOpenAsk: _openAsk,
                     onOpenRequest: _openRequest,

@@ -244,4 +244,34 @@ void main() {
     await tester.pumpAndSettle();
     expect(count(f.calls, 'GET /v1/trips/upcoming'), 2);
   });
+  testWidgets('home lists past rides, and one opens its trip to rate it', (tester) async {
+    await bigPhone(tester);
+    String? opened;
+    final f = fakeApi({
+      'GET /v1/me': {'id': 'p1', 'phone': '+30690', 'name': 'Ελένη'},
+      'GET /v1/trips/upcoming': {'trips': <Object>[]},
+      'GET /v1/trips/past': {
+        'trips': [
+          {
+            'id': 'occ9', 'booking_id': 'b9', 'role': 'passenger',
+            'depart_earliest': '2026-07-28T04:30:00Z', 'depart_latest': '2026-07-28T05:00:00Z',
+            'status': 'completed', 'route_km': 17.0, 'origin_label': 'Αλεξανδρούπολη',
+            'destination_label': 'Φέρες', 'price_eur': 3.5, 'seats_free': 2, 'seats': 1,
+            'driver_name': 'Νίκος',
+          }
+        ]
+      },
+      'GET /v1/asks/pending': {'asks': <Object>[]},
+      'GET /v1/requests/mine': {'requests': <Object>[]},
+      'GET /v1/live/map': {'trips': <Object>[]},
+    });
+    await tester.pumpWidget(app(HomeScreen(api: f.api, mapBuilder: fakeMap, onOpenTrip: (id) => opened = id)));
+    await tester.pumpAndSettle();
+    await scrollTo(tester, find.text('Παλιότερες διαδρομές'));
+    expect(find.text('Αλεξανδρούπολη → Φέρες'), findsOneWidget);
+    expect(find.textContaining('Ολοκληρώθηκε'), findsOneWidget);
+    expect(find.textContaining('Νίκος'), findsOneWidget);
+    await tester.tap(find.text('Αλεξανδρούπολη → Φέρες'));
+    expect(opened, 'occ9');
+  });
 }

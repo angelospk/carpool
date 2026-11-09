@@ -22,6 +22,7 @@ class MyRoutesScreen extends StatefulWidget {
 
 class _MyRoutesScreenState extends State<MyRoutesScreen> {
   List<MyRoute> _routes = const [];
+  final Set<String> _nudging = {};
   bool _loading = true;
   String? _error;
 
@@ -54,9 +55,10 @@ class _MyRoutesScreenState extends State<MyRoutesScreen> {
 
   Future<void> _setNudge(MyRoute route, bool on) async {
     final index = _routes.indexWhere((r) => r.id == route.id);
-    if (index < 0) return;
+    if (index < 0 || _nudging.contains(route.id)) return;
     final before = route.nudgeWhenLeaving;
     setState(() {
+      _nudging.add(route.id);
       _routes = [
         for (final r in _routes)
           r.id == route.id ? r.withNudge(on) : r,
@@ -73,6 +75,8 @@ class _MyRoutesScreenState extends State<MyRoutesScreen> {
         ];
       });
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failureText(error))));
+    } finally {
+      if (mounted) setState(() => _nudging.remove(route.id));
     }
   }
 
@@ -120,7 +124,19 @@ class _MyRoutesScreenState extends State<MyRoutesScreen> {
     ];
     if (days.isNotEmpty) return days.join(', ');
     final date = route.oneoffDate;
-    if (date != null) return date;
+    if (date != null) {
+      final parts = date.split('-');
+      if (parts.length == 3) {
+        final year = int.tryParse(parts[0]);
+        final month = int.tryParse(parts[1]);
+        final day = int.tryParse(parts[2]);
+        if (year != null && month != null && day != null) {
+          final when = DateTime.utc(year, month, day);
+          return '${_dayNames[when.weekday - 1]} $day/$month';
+        }
+      }
+      return date;
+    }
     return '';
   }
 
@@ -218,7 +234,7 @@ class _MyRoutesScreenState extends State<MyRoutesScreen> {
               title: const Text('Πες μου όταν κάποιος στον δρόμο μου περιμένει'),
               subtitle: const Text('Λίγο πριν φύγεις, αν έχεις ελεύθερη θέση.'),
               value: route.nudgeWhenLeaving,
-              onChanged: (on) => _setNudge(route, on),
+              onChanged: _nudging.contains(route.id) ? null : (on) => _setNudge(route, on),
             ),
             TextButton(
               onPressed: () => _retire(route),
