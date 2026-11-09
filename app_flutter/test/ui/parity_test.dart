@@ -480,7 +480,7 @@ void main() {
     await scrollTo(tester, find.text('Ακύρωση διαδρομής'));
     await tester.tap(find.text('Ακύρωση διαδρομής'));
     await tester.pumpAndSettle();
-    expect(find.text('Η διαδρομή δεν θα γίνει. Θα ειδοποιηθούν 1 επιβάτες.'), findsOneWidget);
+    expect(find.text('Η διαδρομή δεν θα γίνει. Θα ειδοποιηθεί 1 επιβάτης.'), findsOneWidget);
     await tester.tap(inDialog('Ακύρωση διαδρομής'));
     await tester.pumpAndSettle();
     expect(f.calls, contains('DELETE /v1/trips/occ1'));

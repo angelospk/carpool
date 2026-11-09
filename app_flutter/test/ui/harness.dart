@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:carpool/data/api.dart';
@@ -27,7 +28,13 @@ class NoContent {
 }
 
 /// An Api whose server is a table of "METHOD /path" → JSON, recording calls.
-({Api api, List<String> calls, Map<String, Object?> bodies}) fakeApi(Map<String, Object> routes) {
+///
+/// A key in [holds] answers only once its completer completes, to catch what
+/// the screen does while a request is still out.
+({Api api, List<String> calls, Map<String, Object?> bodies}) fakeApi(
+  Map<String, Object> routes, {
+  Map<String, Completer<void>> holds = const {},
+}) {
   final calls = <String>[];
   final bodies = <String, Object?>{};
   final api = Api(
@@ -37,6 +44,7 @@ class NoContent {
       final key = '${req.method} ${req.url.path}';
       calls.add(key);
       bodies[key] = req.body.isEmpty ? null : jsonDecode(req.body);
+      await holds[key]?.future;
       final body = routes[key];
       if (body == null) return http.Response('{"error":{"code":"not_found","message":"x"}}', 404);
       if (body is Fail) {
